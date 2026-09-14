@@ -203,7 +203,8 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .qcols{flex:0 0 196px;overflow:auto;border-right:1px solid var(--line2);background:var(--bg)}
 .qhead{position:sticky;top:0;background:var(--bg);padding:5px 10px;font:10px var(--mono);font-weight:700;
   letter-spacing:.08em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--line2);
-  display:flex;justify-content:space-between;align-items:center;z-index:1}
+  display:flex;justify-content:space-between;align-items:center;z-index:1;
+  white-space:nowrap;gap:6px}
 .qcol{display:flex;align-items:center;gap:6px;padding:3px 10px;cursor:grab;font:11px var(--mono);
   border-bottom:1px solid var(--line2);user-select:none}
 .qcol:hover{background:var(--accent-soft)}
@@ -245,13 +246,20 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
   white-space:pre;min-height:60px;width:100%}
 #qsql:focus{background:var(--panel);border-top-color:var(--accent)}
 #qsql.bad{color:var(--err)}
-#qsqlstate{font-size:10px;font-weight:400}
+#qsqlstate{font-size:10px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  min-width:0;flex:0 1 auto}
 #qsqlstate.ok{color:var(--num)} #qsqlstate.bad{color:var(--err)} #qsqlstate.warn{color:var(--warn)}
 #qsqlmsg{flex:none;max-height:38%;overflow:auto;border-top:1px solid var(--line2);padding:5px 8px;
   font:10.5px/1.5 var(--mono)}
 #qsqlmsg .e{color:var(--err)} #qsqlmsg .w{color:var(--warn)}
 #qsqlmsg div{margin-bottom:2px}
 .qsqlwrap .qhead button{font:10px var(--mono);padding:0 6px;border-radius:3px}
+
+#qplan{flex:none;padding:4px 12px;border-bottom:1px solid var(--line2);font:11px/1.5 var(--mono);
+  color:var(--dim);background:var(--accent-soft)}
+#qplan b{color:var(--accent);font-weight:600}
+#qplan em{font-style:normal;color:var(--warn)}
+#qscan.on{border-color:var(--accent);color:var(--accent)}
 
 /* ---------- diff ---------- */
 #diffwrap{flex:1;overflow:auto;min-height:0;background:var(--panel)}
@@ -392,11 +400,14 @@ details[open]>summary::before{content:"▾ "}
     <span class="qtitle">QUERY</span>
     <span class="seg" id="qmode"><button data-mode="rows" class="on">Rows</button><button data-mode="agg">Aggregate</button></span>
     <button id="qrun" title="Run the query (Enter)">Run</button>
+    <button id="qscan" disabled
+      title="Read only the row groups whose own statistics allow a match, then run">Scan file</button>
     <button id="qclear" disabled>Reset</button>
     <span id="qstat"></span>
     <span class="grow"></span>
     <span class="muted">drag a column into a zone, or double-click it</span>
   </div>
+  <div id="qplan" hidden></div>
   <div class="qbody">
     <div class="qcols" id="qcols"></div>
     <div class="qzones" id="qzones"></div>
@@ -476,7 +487,10 @@ function thriftValue(c, type) {
       let n = head >> 4;
       if (n === 15) n = c.uvarint();
       const arr = new Array(n);
-      for (let i = 0; i < n; i++) arr[i] = thriftValue(c, et);
+      /* compact writes list booleans as one byte each, unlike a struct field
+         where the value lives in the type tag */
+      const bools = et === TTRUE || et === TFALSE;
+      for (let i = 0; i < n; i++) arr[i] = bools ? c.byte() === 1 : thriftValue(c, et);
       return arr;
     }
     case TMAP: {
@@ -653,7 +667,9 @@ function parseColumnChunk(c) {
     filePath: str(c[1]),
     fileOffset: c[2] ?? 0,
     columnIndexOffset: c[6] ?? null,
+    columnIndexLength: c[7] ?? null,
     offsetIndexOffset: c[4] ?? null,
+    offsetIndexLength: c[5] ?? null,
     cryptoMetadata: c[8] ? true : false,
     encryptedMetadata: c[9] ? true : false,
     meta: md ? {
@@ -671,6 +687,7 @@ function parseColumnChunk(c) {
       encodingStats: (md[13] || []).map((s) => ({
         pageType: PAGE_TYPE[s[1]] || "?", encoding: ENC[s[2]] || "?", count: s[3] || 0 })),
       bloomFilterOffset: md[14] ?? null,
+      bloomFilterLength: md[15] ?? null,
     } : null,
   };
 }
@@ -1335,6 +1352,8 @@ function decodePlain(b, pos, end, type, count, typeLength, out) {
   }
 }
 
+const same = (v) => v;
+
 /** DELTA_BINARY_PACKED. Returns {values, pos}; int64 accumulates in BigInt. */
 function deltaBinaryPacked(b, pos, end, count, big) {
   const rv = () => { let shift = 1, v = 0, by; do { by = b[pos++]; v += (by & 0x7f) * shift; shift *= 128; } while (by & 0x80); return v; };
@@ -1415,15 +1434,24 @@ function byteStreamSplit(b, pos, count, width, type, out) {
 }
 
 /** Decodes one page's value section into physical values. */
-function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out) {
+/**
+ * `convert` turns a physical value into the one the rest of the page uses.
+ * It is applied here rather than after assembly so that a dictionary-encoded
+ * column converts its dictionary once instead of once per row: a column of
+ * a million rows over a thousand distinct strings then decodes a thousand
+ * strings, not a million.
+ */
+function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out, convert) {
+  /* the dictionary arrives converted already, so only the rest goes through */
+  const sink = convert ? { push: (v) => out.push(convert(v)) } : out;
   switch (enc) {
     case "PLAIN":
-      decodePlain(b, pos, end, type, count, typeLength, out);
+      decodePlain(b, pos, end, type, count, typeLength, sink);
       return;
     case "RLE": {                       // boolean data pages
       const len = u32le(b, pos);
       const idx = rleHybrid(b, pos + 4, pos + 4 + len, 1, count);
-      for (let i = 0; i < count; i++) out.push(idx[i] === 1);
+      for (let i = 0; i < count; i++) sink.push(idx[i] === 1);
       return;
     }
     case "PLAIN_DICTIONARY":
@@ -1436,13 +1464,13 @@ function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out) {
     }
     case "DELTA_BINARY_PACKED": {
       const r = deltaBinaryPacked(b, pos, end, count, type === "INT64");
-      for (let i = 0; i < count; i++) out.push(r.values[i]);
+      for (let i = 0; i < count; i++) sink.push(r.values[i]);
       return;
     }
     case "DELTA_LENGTH_BYTE_ARRAY": {
       const r = deltaBinaryPacked(b, pos, end, count, false);
       let p = r.pos;
-      for (let i = 0; i < count; i++) { const n = r.values[i]; out.push(b.subarray(p, p + n)); p += n; }
+      for (let i = 0; i < count; i++) { const n = r.values[i]; sink.push(b.subarray(p, p + n)); p += n; }
       return;
     }
     case "DELTA_BYTE_ARRAY": {
@@ -1456,7 +1484,7 @@ function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out) {
         v.set(prev.subarray(0, pl));
         v.set(b.subarray(p, p + sl), pl);
         p += sl;
-        out.push(v);
+        sink.push(v);
         prev = v;
       }
       return;
@@ -1465,7 +1493,7 @@ function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out) {
       const w = type === "FLOAT" || type === "INT32" ? 4 : type === "DOUBLE" || type === "INT64" ? 8
         : type === "FIXED_LEN_BYTE_ARRAY" ? typeLength : 0;
       if (!w) throw new Error("BYTE_STREAM_SPLIT: unsupported type " + type);
-      byteStreamSplit(b, pos, count, w, type, out);
+      byteStreamSplit(b, pos, count, w, type, sink);
       return;
     }
     default:
@@ -1476,7 +1504,83 @@ function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out) {
 /* ======================================================================
    Column chunk reader
    ====================================================================== */
-async function readColumnChunk(src, chunk, leaf) {
+/**
+ * Decodes the one page starting at `pos` into `out`, which collects values,
+ * definition and repetition levels and carries the dictionary between pages.
+ * Returns where the next page starts and how many values this one held.
+ */
+async function readPage(buf, pos, m, leaf, out) {
+  const maxDef = leaf.maxDef, maxRep = leaf.maxRep;
+  const defW = bitWidth(maxDef), repW = bitWidth(maxRep);
+  const c = new Cursor(buf, pos);
+  const h = thriftStruct(c);
+  const dataStart = c.p;
+  const compSize = h[3] | 0, uncompSize = h[2] | 0;
+  const ptype = PAGE_TYPE[h[1]];
+  const raw = buf.subarray(dataStart, dataStart + compSize);
+  const next = dataStart + compSize;
+
+  if (ptype === "DICTIONARY_PAGE") {
+    const dh = h[7] || {};
+    const page = await decompress(m.codec, raw, uncompSize);
+    const entries = [];
+    decodePlain(page, 0, page.length, m.type, dh[1] | 0, leaf.typeLength, entries);
+    out.dict = out.convert ? entries.map(out.convert) : entries;
+    return { pos: next, n: 0 };
+  }
+  if (ptype === "INDEX_PAGE") return { pos: next, n: 0 };
+
+  if (ptype === "DATA_PAGE") {
+    const dh = h[5];
+    if (!dh) throw new Error("data page without a v1 header");
+    const n = dh[1] | 0;
+    const page = await decompress(m.codec, raw, uncompSize);
+    let p = 0;
+    if (maxRep > 0) {
+      const len = u32le(page, p); p += 4;
+      pushLevels(out.reps, page, p, p + len, repW, n, ENC[dh[4]]);
+      p += len;
+    }
+    let nonNull = n;
+    if (maxDef > 0) {
+      const len = u32le(page, p); p += 4;
+      const lv = pushLevels(out.defs, page, p, p + len, defW, n, ENC[dh[3]]);
+      p += len;
+      nonNull = 0;
+      for (let i = 0; i < n; i++) if (lv[i] === maxDef) nonNull++;
+    }
+    if (nonNull > 0) {
+      decodeValues(ENC[dh[2]], page, p, page.length, m.type, nonNull, leaf.typeLength,
+        out.dict, out.values, out.convert);
+    }
+    return { pos: next, n };
+  }
+  if (ptype === "DATA_PAGE_V2") {
+    const dh = h[8];
+    if (!dh) throw new Error("v2 data page without a v2 header");
+    const n = dh[1] | 0, nulls = dh[2] | 0;
+    const defLen = dh[5] | 0, repLen = dh[6] | 0;
+    const compressed = dh[7] !== false;
+    if (maxRep > 0) pushLevels(out.reps, raw, 0, repLen, repW, n, "RLE");
+    if (maxDef > 0) pushLevels(out.defs, raw, repLen, repLen + defLen, defW, n, "RLE");
+    const body = raw.subarray(repLen + defLen);
+    const page = compressed ? await decompress(m.codec, body, uncompSize - repLen - defLen) : body;
+    if (n - nulls > 0) {
+      decodeValues(ENC[dh[4]], page, 0, page.length, m.type, n - nulls, leaf.typeLength,
+        out.dict, out.values, out.convert);
+    }
+    return { pos: next, n };
+  }
+  throw new Error("unknown page type " + h[1]);
+}
+
+function newSink(leaf, dict, convert) {
+  return { values: [], defs: leaf.maxDef > 0 ? [] : null, reps: leaf.maxRep > 0 ? [] : null,
+    dict: dict === undefined ? null : dict, convert: convert || null };
+}
+
+/** With a `convert`, the values come back converted; without one, physical. */
+async function readColumnChunk(src, chunk, leaf, convert) {
   const m = chunk.meta;
   if (!m) throw new Error("column chunk has no metadata (encrypted?)");
   let start = m.dataPageOffset;
@@ -1486,72 +1590,138 @@ async function readColumnChunk(src, chunk, leaf) {
   const end = Math.min(src.size, start + m.totalCompressedSize);
   const buf = await src.read(start, end);
 
-  const maxDef = leaf.maxDef, maxRep = leaf.maxRep;
-  const defW = bitWidth(maxDef), repW = bitWidth(maxRep);
-  const values = [];
-  const defs = maxDef > 0 ? [] : null;
-  const reps = maxRep > 0 ? [] : null;
-  let dict = null;
+  const out = newSink(leaf, undefined, convert);
   let pos = 0, seen = 0;
-
   while (pos < buf.length && seen < m.numValues) {
-    const c = new Cursor(buf, pos);
-    const h = thriftStruct(c);
-    const dataStart = c.p;
-    const compSize = h[3] | 0, uncompSize = h[2] | 0;
-    const ptype = PAGE_TYPE[h[1]];
-    const raw = buf.subarray(dataStart, dataStart + compSize);
-    pos = dataStart + compSize;
-
-    if (ptype === "DICTIONARY_PAGE") {
-      const dh = h[7] || {};
-      const page = await decompress(m.codec, raw, uncompSize);
-      dict = [];
-      decodePlain(page, 0, page.length, m.type, dh[1] | 0, leaf.typeLength, dict);
-      continue;
-    }
-    if (ptype === "INDEX_PAGE") continue;
-
-    if (ptype === "DATA_PAGE") {
-      const dh = h[5];
-      if (!dh) throw new Error("data page without a v1 header");
-      const n = dh[1] | 0;
-      const page = await decompress(m.codec, raw, uncompSize);
-      let p = 0;
-      if (maxRep > 0) {
-        const len = u32le(page, p); p += 4;
-        pushLevels(reps, page, p, p + len, repW, n, ENC[dh[4]]);
-        p += len;
-      }
-      let nonNull = n;
-      if (maxDef > 0) {
-        const len = u32le(page, p); p += 4;
-        const lv = pushLevels(defs, page, p, p + len, defW, n, ENC[dh[3]]);
-        p += len;
-        nonNull = 0;
-        for (let i = 0; i < n; i++) if (lv[i] === maxDef) nonNull++;
-      }
-      if (nonNull > 0) decodeValues(ENC[dh[2]], page, p, page.length, m.type, nonNull, leaf.typeLength, dict, values);
-      seen += n;
-      continue;
-    }
-    if (ptype === "DATA_PAGE_V2") {
-      const dh = h[8];
-      if (!dh) throw new Error("v2 data page without a v2 header");
-      const n = dh[1] | 0, nulls = dh[2] | 0;
-      const defLen = dh[5] | 0, repLen = dh[6] | 0;
-      const compressed = dh[7] !== false;
-      if (maxRep > 0) pushLevels(reps, raw, 0, repLen, repW, n, "RLE");
-      if (maxDef > 0) pushLevels(defs, raw, repLen, repLen + defLen, defW, n, "RLE");
-      const body = raw.subarray(repLen + defLen);
-      const page = compressed ? await decompress(m.codec, body, uncompSize - repLen - defLen) : body;
-      if (n - nulls > 0) decodeValues(ENC[dh[4]], page, 0, page.length, m.type, n - nulls, leaf.typeLength, dict, values);
-      seen += n;
-      continue;
-    }
-    throw new Error("unknown page type " + h[1]);
+    const r = await readPage(buf, pos, m, leaf, out);
+    pos = r.pos;
+    seen += r.n;
   }
-  return { values, defs, reps, count: seen };
+  return { values: out.values, defs: out.defs, reps: out.reps, count: seen };
+}
+
+/* ------------------------------------------------------- page indexes */
+/**
+ * A parquet file may carry, beside the footer, an index per column chunk:
+ * where each page starts and which row it begins at (the offset index), and
+ * each page's own min, max and null count (the column index). Together they
+ * say which pages of a row group could hold a matching row, which is the
+ * same question the statistics answer for whole row groups, one level down.
+ * Both are read once and remembered on the chunk.
+ */
+async function readOffsetIndex(src, chunk) {
+  if (chunk.offsets !== undefined) return chunk.offsets;
+  chunk.offsets = null;
+  const off = chunk.offsetIndexOffset;
+  if (off == null || off <= 0 || off >= src.size) return null;
+  try {
+    const len = chunk.offsetIndexLength || 4096;
+    const buf = await src.read(off, Math.min(src.size, off + len));
+    const st = thriftStruct(new Cursor(buf, 0));
+    const list = st[1];
+    if (!list || !list.length) return null;
+    const out = list.map((p) => ({ offset: p[1], size: p[2] | 0, row: p[3] }));
+    for (const p of out) if (!(p.offset >= 0) || !(p.size > 0) || !(p.row >= 0)) return null;
+    chunk.offsets = out;
+  } catch (e) { chunk.offsets = null; }
+  return chunk.offsets;
+}
+async function readColumnIndex(src, chunk) {
+  if (chunk.pageStats !== undefined) return chunk.pageStats;
+  chunk.pageStats = null;
+  const off = chunk.columnIndexOffset;
+  if (off == null || off <= 0 || off >= src.size) return null;
+  try {
+    const len = chunk.columnIndexLength || 65536;
+    const buf = await src.read(off, Math.min(src.size, off + len));
+    const st = thriftStruct(new Cursor(buf, 0));
+    const nullPages = st[1], mins = st[2], maxes = st[3];
+    if (!nullPages || !mins || !maxes) return null;
+    if (mins.length !== nullPages.length || maxes.length !== nullPages.length) return null;
+    chunk.pageStats = { nullPages, mins, maxes, nullCounts: st[5] || null };
+  } catch (e) { chunk.pageStats = null; }
+  return chunk.pageStats;
+}
+
+/* Ranges are [from, to) row numbers within a row group, sorted and disjoint. */
+function mergeRanges(list) {
+  if (list.length < 2) return list;
+  const out = [list[0]];
+  for (let i = 1; i < list.length; i++) {
+    const last = out[out.length - 1];
+    if (list[i][0] <= last[1]) last[1] = Math.max(last[1], list[i][1]);
+    else out.push(list[i]);
+  }
+  return out;
+}
+function intersectRanges(a, b) {
+  const out = [];
+  let i = 0, j = 0;
+  while (i < a.length && j < b.length) {
+    const lo = Math.max(a[i][0], b[j][0]), hi = Math.min(a[i][1], b[j][1]);
+    if (lo < hi) out.push([lo, hi]);
+    if (a[i][1] < b[j][1]) i++; else j++;
+  }
+  return out;
+}
+function unionRanges(a, b) {
+  return mergeRanges(a.concat(b).sort((x, y) => x[0] - y[0]).map((r) => [r[0], r[1]]));
+}
+function rangeCount(ranges) {
+  let n = 0;
+  for (const r of ranges) n += r[1] - r[0];
+  return n;
+}
+const rangesTouch = (ranges, from, to) => ranges.some((r) => r[0] < to && from < r[1]);
+
+/**
+ * Reads exactly the rows in `ranges`, reading only the pages that hold them
+ * where a page index says where those are. Without one, or for a repeated
+ * column whose pages the index cannot be trusted to split on rows, the whole
+ * chunk is read and the rows are taken out of it — the same rows either way,
+ * which is what keeps every column of a row group lined up.
+ */
+async function readRowsRanges(src, chunk, leaf, ranges, numRows, convert) {
+  const locs = leaf.maxRep === 0 ? await readOffsetIndex(src, chunk) : null;
+  if (locs && locs.length) {
+    try { return await readPagesRanges(src, chunk, leaf, locs, ranges, numRows, convert); }
+    catch (e) { chunk.offsets = null; }   /* an index we cannot follow: read it all */
+  }
+  const raw = await readColumnChunk(src, chunk, leaf, convert);
+  const all = assemble(leaf, raw.values, raw.defs, raw.reps, null);
+  const out = [];
+  for (const r of ranges) for (let i = r[0]; i < r[1]; i++) out.push(all[i]);
+  return out;
+}
+async function readPagesRanges(src, chunk, leaf, locs, ranges, numRows, convert) {
+  const m = chunk.meta;
+  let dict = null;
+  if (m.dictionaryPageOffset != null && m.dictionaryPageOffset > 0 &&
+      m.dictionaryPageOffset < locs[0].offset) {
+    const buf = await src.read(m.dictionaryPageOffset, locs[0].offset);
+    const sink = newSink(leaf, undefined, convert);
+    await readPage(buf, 0, m, leaf, sink);
+    dict = sink.dict;                         /* converted once, for every page */
+  }
+  const out = [];
+  for (let i = 0; i < locs.length; i++) {
+    const from = locs[i].row;
+    const to = i + 1 < locs.length ? locs[i + 1].row : numRows;
+    if (!rangesTouch(ranges, from, to)) continue;
+    const buf = await src.read(locs[i].offset, Math.min(src.size, locs[i].offset + locs[i].size));
+    const sink = newSink(leaf, dict, convert);
+    await readPage(buf, 0, m, leaf, sink);
+    const rows = assemble(leaf, sink.values, sink.defs, sink.reps, null);
+    if (rows.length !== to - from) {
+      throw new Error("the page index says page " + i + " holds rows " + from + " to " + to +
+        ", but it decodes to " + rows.length);
+    }
+    for (const r of ranges) {
+      const lo = Math.max(r[0], from), hi = Math.min(r[1], to);
+      for (let x = lo; x < hi; x++) out.push(rows[x - from]);
+    }
+  }
+  return out;
 }
 
 function pushLevels(sink, b, pos, end, width, count, enc) {
@@ -1568,10 +1738,12 @@ function pushLevels(sink, b, pos, end, width, count, enc) {
  * Turns (values, definition levels, repetition levels) back into one value
  * per row, nesting arrays wherever the path repeats.
  */
+/** `convert` is optional: values that arrived converted pass straight through. */
 function assemble(leaf, values, defs, reps, convert) {
   const maxDef = leaf.maxDef, maxRep = leaf.maxRep;
+  if (!convert) convert = same;
   if (maxRep === 0) {
-    if (maxDef === 0) return values.map(convert);
+    if (maxDef === 0) return convert === same ? values : values.map(convert);
     const rows = new Array(defs.length);
     let vi = 0;
     for (let i = 0; i < defs.length; i++) rows[i] = defs[i] === maxDef ? convert(values[vi++]) : null;
@@ -1936,6 +2108,7 @@ function fileSource(file) {
   return {
     size: file.size,
     name: file.name,
+    file,                              /* a worker opens it again for itself */
     async read(start, end) { return new Uint8Array(await file.slice(start, end).arrayBuffer()); },
   };
 }
@@ -2067,78 +2240,507 @@ async function readDataset(entries, onProgress) {
 
 function newTable(dataset) {
   const cols = dataset.partitionCols.map((pc) => ({
-    leaf: null, partKey: pc.partKey, key: pc.key, name: pc.name, spec: pc.spec, rows: [], sniffed: true,
+    leaf: null, partKey: pc.partKey, key: pc.key, name: pc.name, spec: pc.spec, rows: [],
+    sniffed: true, filled: 0,
   })).concat(dataset.columns.map((c) => ({
-    leaf: c.leaf, key: c.key, name: c.name, spec: typeSpec(c.leaf), rows: [], sniffed: false,
+    leaf: c.leaf, key: c.key, name: c.name, spec: typeSpec(c.leaf), rows: [], sniffed: false, filled: 0,
   })));
   return {
     dataset, meta: dataset.reference, cols,
     nextPart: 0, nextGroup: 0, rowsLoaded: 0, groupsLoaded: 0,
+    reads: [], need: null,
     truncated: dataset.numGroups > 0,
   };
 }
 
-/** Reads row groups, part by part, until `maxRows` more rows have been added. */
+/** An untyped BYTE_ARRAY column that turned out to hold text after all. */
+function becomesText(col) {
+  if (col.spec.nested) col.spec.elementKind = "string"; else col.spec.kind = "string";
+  col.spec.label = col.spec.label + " (utf-8)";
+  col.spec.convert = (v) => utf8.decode(v);
+}
+
+/**
+ * A BYTE_ARRAY with no logical type is either text or it is bytes, and which
+ * one must not depend on which row groups a query happened to read. The
+ * answer comes from the first row group of the first file, once, and is
+ * remembered on the dataset so every table over it agrees.
+ */
+async function sniffUtf8(dataset, col, atHand, isFirstGroup) {
+  if (!dataset.utf8) dataset.utf8 = new Map();
+  if (dataset.utf8.has(col.key)) return dataset.utf8.get(col.key);
+  let values = atHand;
+  if (!isFirstGroup) {
+    try {
+      const part = dataset.parts[0];
+      const rg = part.meta.rowGroups[0];
+      const leaf = part.leafByPath ? part.leafByPath.get(col.key) : null;
+      const chunk = rg && leaf ? rg.columns.find((c) => c.meta && c.meta.path.join("\u0001") === col.key) : null;
+      if (chunk && !chunk.filePath) {
+        const raw = await readColumnChunk(part.src, chunk, leaf);
+        if (raw.values.length) values = raw.values;
+      }
+    } catch (e) { /* unreadable there; what is at hand will have to do */ }
+  }
+  const yes = looksUtf8(values);
+  dataset.utf8.set(col.key, yes);
+  return yes;
+}
+
+/* ======================================================================
+   Workers — decoding column chunks on the other cores.
+
+   The decoders in this file are the only ones there are, so the workers
+   run this same file: the page hands its own <script> text to a Blob URL
+   and starts workers on that. Nothing is duplicated, nothing is fetched,
+   and a worker knows every codec and encoding the page does.
+
+   This thread reads the bytes — waiting on a disk is not work it minds —
+   and hands them over rather than copying them. What comes back is the
+   assembled rows: as one Float64Array where the column is numbers with no
+   nulls in it, as one buffer and its offsets where it is byte strings,
+   and otherwise copied value by value, which is why the columns that
+   would be copied that way are decoded here instead.
+   ====================================================================== */
+const OWN_SCRIPT = (typeof document !== "undefined" && document.currentScript) || null;
+const pool = { workers: [], free: [], waiting: [], jobs: new Map(), id: 0, url: null,
+  off: false, force: false, started: false, used: 0, workMs: 0 };
+
+function poolStart() {
+  if (pool.started) return;
+  pool.started = true;
+  const cores = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 1;
+  const n = Math.max(0, Math.min(4, cores - 1));
+  if (!n || typeof Worker === "undefined" || typeof Blob === "undefined" ||
+      typeof URL === "undefined" || !URL.createObjectURL || !OWN_SCRIPT || !OWN_SCRIPT.textContent) {
+    pool.off = true;
+    return;
+  }
+  try {
+    pool.url = URL.createObjectURL(new Blob([OWN_SCRIPT.textContent], { type: "text/javascript" }));
+    for (let i = 0; i < n; i++) {
+      const w = new Worker(pool.url);
+      w.onmessage = (e) => poolDone(w, e.data);
+      w.onerror = () => poolStop();
+      pool.workers.push(w);
+      pool.free.push(w);
+    }
+  } catch (e) { poolStop(); }
+}
+/** Anything unexpected and the main thread takes the work back. */
+function poolStop() {
+  pool.off = true;
+  for (const job of pool.jobs.values()) job.reject(new Error("the decoding worker stopped"));
+  pool.jobs.clear();
+  for (const job of pool.waiting.splice(0)) job.reject(new Error("the decoding worker stopped"));
+  for (const w of pool.workers.splice(0)) { try { w.terminate(); } catch (e) { /* going anyway */ } }
+  pool.free.length = 0;
+}
+function poolDone(w, msg) {
+  const job = pool.jobs.get(msg.id);
+  pool.jobs.delete(msg.id);
+  pool.free.push(w);
+  const next = pool.waiting.shift();
+  if (next) poolSend(next);
+  if (!job) return;
+  if (msg.error) job.reject(new Error(msg.error)); else job.resolve(msg);
+}
+function poolSend(job) {
+  const w = pool.free.pop();
+  if (!w) { pool.waiting.push(job); return; }
+  pool.jobs.set(job.msg.id, job);
+  w.postMessage(job.msg, job.transfer || []);
+}
+function poolRun(msg, transfer) {
+  return new Promise((resolve, reject) => poolSend({ msg, transfer, resolve, reject }));
+}
+
+/**
+ * Which columns are worth sending away. Decoding in parallel only pays if
+ * the answer can come back without being copied value by value, and what
+ * crosses that way is a run of numbers or a run of bytes: both leave as one
+ * buffer, handed over rather than cloned. Text, booleans, decimals and
+ * anything nested would cost more to clone than they cost to decode, so they
+ * are decoded here — which is no loss, because that happens while the
+ * workers are busy with the rest.
+ */
+/* A round trip costs this thread about as much as a small chunk costs to
+   decode, so a row group is only worth sending away when there is enough in
+   it to more than pay that back. */
+const WORKER_MIN_BYTES = 384 * 1024;
+/** The column chunk of one column in one row group. */
+function chunkFor(rg, key) {
+  for (const c of rg.columns) if (c.meta && c.meta.path.join("\u0001") === key) return c;
+  return null;
+}
+/** Is there enough work in this row group to be worth the round trips? */
+function poolWorthIt(part, rg, cols, indexes, sel) {
+  if (sel || pool.off || !pool.workers.length) return false;
+  if (pool.force) return true;          /* for checking that both paths agree */
+  let bytes = 0;
+  for (const ci of indexes) {
+    const col = cols[ci];
+    if (col.partKey !== undefined) continue;
+    const chunk = chunkFor(rg, col.key);
+    if (!chunk || !workerCan(part, col, sel, chunk)) continue;
+    bytes += chunk.meta.totalCompressedSize;
+    if (bytes >= WORKER_MIN_BYTES) return true;
+  }
+  return false;
+}
+
+function workerCan(part, col, sel, chunk) {
+  if (pool.off || !pool.workers.length || sel || !part.src) return false;
+  if (chunk && !(chunk.meta && chunk.meta.totalCompressedSize > 0)) return false;
+  const spec = col.spec;
+  if (spec.nested || spec.decimal) return false;
+  if (spec.maybeUtf8 && !col.sniffed) return false;
+  if (spec.kind === "binary") return true;                    /* packs into one buffer */
+  if (spec.kind !== "number" && spec.kind !== "temporal") return false;
+  return spec.physical === "INT32" || spec.physical === "INT64" || spec.physical === "INT96" ||
+    spec.physical === "FLOAT" || spec.physical === "DOUBLE";
+}
+/** Everything a worker needs to decode one column chunk, as plain data. */
+function workerJob(part, chunk, leaf, col, sel, numRows, bytes, bufStart) {
+  const m = chunk.meta;
+  return {
+    paris: "col", id: ++pool.id, sel, numRows,
+    bytes, bufStart, srcSize: part.src.size,
+    utf8: / \(utf-8\)$/.test(col.spec.label || ""),
+    chunk: {
+      filePath: null,
+      offsetIndexOffset: chunk.offsetIndexOffset, offsetIndexLength: chunk.offsetIndexLength,
+      meta: { codec: m.codec, type: m.type, numValues: m.numValues, encodings: m.encodings,
+        dataPageOffset: m.dataPageOffset, dictionaryPageOffset: m.dictionaryPageOffset,
+        totalCompressedSize: m.totalCompressedSize },
+    },
+    leaf: { type: leaf.type, typeLength: leaf.typeLength, logical: leaf.logical, converted: leaf.converted,
+      scale: leaf.scale, precision: leaf.precision, maxDef: leaf.maxDef, maxRep: leaf.maxRep,
+      chain: (leaf.chain || []).map((c) => ({ rep: c.rep })) },
+  };
+}
+/* A row group's column chunks lie together in the file, so when most of one
+   is wanted it is a single read rather than a read apiece — and the decoders
+   can then all start at once instead of waiting their turn at the disk. */
+const GROUP_READ_MAX = 32 * 1024 * 1024;
+async function readGroupBytes(src, rg, wanted) {
+  let lo = Infinity, hi = 0, want = 0;
+  for (const c of rg.columns) {
+    if (!c.meta) continue;
+    const [a, b] = chunkRange(src, c.meta);
+    if (a < lo) lo = a;
+    if (b > hi) hi = b;
+    if (wanted.has(c.meta.path.join("\u0001"))) want += b - a;
+  }
+  const span = hi - lo;
+  if (!(span > 0) || span > GROUP_READ_MAX) return null;
+  if (want < span * 0.6) return null;        /* most of it is not wanted */
+  return { lo, hi, bytes: await src.read(lo, hi) };
+}
+/** A source that answers out of the bytes already in hand where it can. */
+function groupSource(src, group) {
+  if (!group) return src;
+  return {
+    size: src.size, file: src.file,
+    async read(a, b) {
+      if (a >= group.lo && b <= group.hi) return group.bytes.subarray(a - group.lo, b - group.lo);
+      return src.read(a, b);
+    },
+  };
+}
+
+/** The bytes of a whole column chunk, dictionary page included. */
+function chunkRange(src, m) {
+  let start = m.dataPageOffset;
+  if (m.dictionaryPageOffset != null && m.dictionaryPageOffset > 0 && m.dictionaryPageOffset < start) {
+    start = m.dictionaryPageOffset;
+  }
+  return [start, Math.min(src.size, start + m.totalCompressedSize)];
+}
+/**
+ * Reading the file is not work the main thread minds doing — it waits on the
+ * disk rather than the processor — and handing the bytes over costs nothing,
+ * where letting three workers open the same file at once costs plenty.
+ */
+async function workerColumn(part, chunk, leaf, col, sel, numRows, group) {
+  const [start, end] = chunkRange(part.src, chunk.meta);
+  const raw = await groupSource(part.src, group).read(start, end);
+  /* handing a buffer over detaches it, so it has to be this job's alone: a
+     window onto the row group's bytes, or onto anything else, is copied */
+  const own = !group && raw.byteOffset === 0 && raw.byteLength === raw.buffer.byteLength;
+  const buf = own ? raw.buffer : raw.slice().buffer;
+  const res = await poolRun(workerJob(part, chunk, leaf, col, sel, numRows, buf, start), [buf]);
+  pool.used++;
+  pool.workMs += res.ms || 0;
+  if (res.nums) return res.nums;
+  if (!res.packed) return res.rows;
+  const { bytes, offsets, nulls } = res;
+  const rows = new Array(offsets.length - 1);
+  for (let i = 0; i < rows.length; i++) {
+    rows[i] = nulls[i] ? null : bytes.subarray(offsets[i], offsets[i + 1]);
+  }
+  return rows;
+}
+
+/* This is the other end of it: the same file, running as a worker. */
+function workerMain(scope) {
+  scope.onmessage = async (e) => {
+    const m = e.data;
+    if (!m || m.paris !== "col") return;
+    const t0 = Date.now();
+    try {
+      const chunkBytes = new Uint8Array(m.bytes);
+      const src = {
+        size: m.srcSize,
+        async read(a, b) { return chunkBytes.subarray(a - m.bufStart, b - m.bufStart); },
+      };
+      const spec = typeSpec(m.leaf);
+      if (m.utf8) becomesText({ spec });
+      let rows;
+      if (m.sel) {
+        rows = await readRowsRanges(src, m.chunk, m.leaf, m.sel, m.numRows, spec.convert);
+      } else {
+        const raw = await readColumnChunk(src, m.chunk, m.leaf, spec.convert);
+        rows = assemble(m.leaf, raw.values, raw.defs, raw.reps, null);
+      }
+      /* a column of numbers with no nulls goes over as one buffer, handed
+         across rather than copied: cloning three million values one at a time
+         costs more than decoding them did */
+      let numeric = rows.length > 0;
+      for (let i = 0; i < rows.length; i++) {
+        if (typeof rows[i] !== "number") { numeric = false; break; }
+      }
+      if (numeric) {
+        const nums = new Float64Array(rows.length);
+        for (let i = 0; i < rows.length; i++) nums[i] = rows[i];
+        scope.postMessage({ id: m.id, nums, ms: Date.now() - t0 }, [nums.buffer]);
+        return;
+      }
+      /* every value a window onto the page buffer: send the bytes once */
+      let packable = rows.length > 0;
+      for (let i = 0; i < rows.length; i++) {
+        const v = rows[i];
+        if (v === null || v === undefined) continue;
+        if (!(v instanceof Uint8Array)) { packable = false; break; }
+      }
+      if (packable) {
+        let total = 0;
+        for (let i = 0; i < rows.length; i++) if (rows[i]) total += rows[i].length;
+        const bytes = new Uint8Array(total);
+        const offsets = new Int32Array(rows.length + 1);
+        const nulls = new Uint8Array(rows.length);
+        let at = 0;
+        for (let i = 0; i < rows.length; i++) {
+          offsets[i] = at;
+          const v = rows[i];
+          if (v === null || v === undefined) { nulls[i] = 1; continue; }
+          bytes.set(v, at);
+          at += v.length;
+        }
+        offsets[rows.length] = at;
+        scope.postMessage({ id: m.id, packed: true, bytes, offsets, nulls, ms: Date.now() - t0 },
+          [bytes.buffer, offsets.buffer, nulls.buffer]);
+        return;
+      }
+      scope.postMessage({ id: m.id, rows, ms: Date.now() - t0 });
+    } catch (err) {
+      scope.postMessage({ id: m.id, error: (err && err.message) || String(err) });
+    }
+  };
+}
+
+/**
+ * Decodes one column for one row group, or for the selection of rows a plan
+ * narrowed it to. The row group is read the same way whether this happens
+ * while the group is first read or long afterwards, which is what lets a
+ * column be filled in later without re-reading anything else.
+ */
+async function readColumnRows(dataset, part, rg, col, sel, took, firstGroup, ctx) {
+  if (col.partKey !== undefined) {
+    const v = part.partValues ? part.partValues[col.partKey] : null;
+    const rows = new Array(took);
+    rows.fill(v === undefined ? null : v);
+    return rows;
+  }
+  const leaf = part.leafByPath.get(col.key);
+  const chunk = chunkFor(rg, col.key);
+  if (!leaf || !chunk) {                          /* this file does not have it */
+    const rows = new Array(took);
+    rows.fill(null);
+    return rows;
+  }
+  if (chunk.filePath) {
+    throw new Error("Column " + col.name + " lives in a separate file (" + chunk.filePath +
+      "), which parquet allows but nothing writes.");
+  }
+  if (chunk.encryptedMetadata || chunk.cryptoMetadata) throw new Error("Column " + col.name + " is encrypted.");
+  const group = ctx ? ctx.group : null;
+  if (ctx && ctx.workers && workerCan(part, col, sel, chunk)) {
+    try { return await workerColumn(part, chunk, leaf, col, sel, rg.numRows, group); }
+    catch (e) {
+      if (!pool.off) {
+        throw new Error('Could not read column "' + col.name + '" in ' + part.path + ": " + e.message);
+      }
+      /* the pool gave up; this thread does it instead */
+    }
+  }
+  const src = groupSource(part.src, group);
+  try {
+    if (sel) {
+      /* page by page, so the text-or-bytes question has to be settled before
+         the first of them rather than from the values at hand */
+      if (!col.sniffed) {
+        col.sniffed = true;
+        if (col.spec.maybeUtf8 && await sniffUtf8(dataset, col, [], false)) becomesText(col);
+      }
+      return await readRowsRanges(src, chunk, leaf, sel, rg.numRows, col.spec.convert);
+    }
+    if (col.spec.maybeUtf8 && !col.sniffed) {
+      /* the values are what decides whether this column is text, so they have
+         to arrive physical and be converted after the answer is in */
+      const raw = await readColumnChunk(src, chunk, leaf);
+      col.sniffed = true;
+      if (await sniffUtf8(dataset, col, raw.values, firstGroup)) becomesText(col);
+      return assemble(leaf, raw.values, raw.defs, raw.reps, col.spec.convert);
+    }
+    col.sniffed = true;
+    const raw = await readColumnChunk(src, chunk, leaf, col.spec.convert);
+    return assemble(leaf, raw.values, raw.defs, raw.reps, null);
+  } catch (e) {
+    throw new Error('Could not read column "' + col.name + '" in ' + part.path +
+      " (" + chunk.meta.codec + ", " + chunk.meta.encodings.join("/") + "): " + e.message);
+  }
+}
+
+/**
+ * Reads row groups, part by part, until `maxRows` more rows have been added.
+ *
+ * Only the columns in `table.need` are decoded — what the grid is showing and
+ * what the query names. Every group read is written down in `table.reads`, so
+ * a column nobody wanted yet can be filled in later over exactly the same
+ * groups and rows. With no `need` set, everything is decoded, which is what
+ * the tests and the diff want.
+ */
 async function loadMore(dataset, table, maxRows, onProgress) {
   let added = 0;
   while (table.nextPart < dataset.parts.length && added < maxRows) {
     const part = dataset.parts[table.nextPart];
     const meta = part.meta;
     if (table.nextGroup >= meta.rowGroups.length) { table.nextPart++; table.nextGroup = 0; continue; }
-    const rg = meta.rowGroups[table.nextGroup];
-    if (!part.byPath) {
-      part.byPath = new Map();
-      rg.columns.forEach((c, i) => { if (c.meta) part.byPath.set(c.meta.path.join("\u0001"), i); });
+    const planKey = table.nextPart + ":" + table.nextGroup;
+    if (table.plan && !table.plan.has(planKey)) {
+      table.nextGroup++;                   /* the plan proved it cannot match */
+      continue;
     }
-    const byPath = new Map();
-    rg.columns.forEach((c, i) => { if (c.meta) byPath.set(c.meta.path.join("\u0001"), i); });
+    /* null means the whole group; a list of ranges means only those rows */
+    const sel = table.plan ? table.plan.get(planKey) : null;
+    const rg = meta.rowGroups[table.nextGroup];
+    const took = sel ? rangeCount(sel) : rg.numRows;
+    const firstGroup = table.nextPart === 0 && table.nextGroup === 0;
+    table.reads.push({ pi: table.nextPart, gi: table.nextGroup, sel, rows: took, firstGroup });
+    /* every column of the group is asked for at once: with a pool they
+       decode side by side, and without one they queue up as before */
+    const wanted = [];
     for (let ci = 0; ci < table.cols.length; ci++) {
       const col = table.cols[ci];
-      if (col.partKey !== undefined) {
-        const v = part.partValues ? part.partValues[col.partKey] : null;
-        for (let i = 0; i < rg.numRows; i++) col.rows.push(v === undefined ? null : v);
-        continue;
-      }
-      const leaf = part.leafByPath.get(col.key);
-      const idx = byPath.has(col.key) ? byPath.get(col.key) : -1;
-      if (!leaf || idx < 0) {                       /* this file does not have it */
-        for (let i = 0; i < rg.numRows; i++) col.rows.push(null);
-        continue;
-      }
-      const chunk = rg.columns[idx];
-      if (chunk.filePath) {
-        throw new Error("Column " + col.name + " lives in a separate file (" + chunk.filePath +
-          "), which parquet allows but nothing writes.");
-      }
-      if (chunk.encryptedMetadata || chunk.cryptoMetadata) throw new Error("Column " + col.name + " is encrypted.");
-      let raw;
-      try {
-        raw = await readColumnChunk(part.src, chunk, leaf);
-      } catch (e) {
-        throw new Error('Could not read column "' + col.name + '" in row group ' + table.nextGroup +
-          " of " + part.path + " (" + chunk.meta.codec + ", " + chunk.meta.encodings.join("/") + "): " + e.message);
-      }
-      if (!col.sniffed && raw.values.length) {
-        col.sniffed = true;
-        if (col.spec.maybeUtf8 && looksUtf8(raw.values)) {
-          if (col.spec.nested) col.spec.elementKind = "string"; else col.spec.kind = "string";
-          col.spec.label = col.spec.label + " (utf-8)";
-          col.spec.convert = (v) => utf8.decode(v);
-        }
-      }
-      const rows = assemble(leaf, raw.values, raw.defs, raw.reps, col.spec.convert);
-      for (let i = 0; i < rows.length; i++) col.rows.push(rows[i]);
-      if (onProgress) onProgress(table.nextPart, table.nextGroup, ci, table.cols.length);
+      if (table.need && !table.need.has(ci) && col.partKey === undefined) continue;
+      wanted.push(ci);
     }
-    added += rg.numRows;
-    table.rowsLoaded += rg.numRows;
+    const keys = new Set();
+    for (const ci of wanted) if (table.cols[ci].partKey === undefined) keys.add(table.cols[ci].key);
+    const ctx = {
+      group: sel || keys.size < 2 ? null : await readGroupBytes(part.src, rg, keys),
+      workers: poolWorthIt(part, rg, table.cols, wanted, sel),
+    };
+    const decoded = await Promise.all(wanted.map((ci) =>
+      readColumnRows(dataset, part, rg, table.cols[ci], sel, took, firstGroup, ctx)));
+    for (let k = 0; k < wanted.length; k++) {
+      const col = table.cols[wanted[k]];
+      appendRows(col, decoded[k]);
+      col.filled = table.reads.length;
+      if (onProgress) onProgress(table.nextPart, table.nextGroup, wanted[k], table.cols.length);
+    }
+    added += took;
+    table.rowsLoaded += took;
     table.nextGroup++;
     table.groupsLoaded++;
   }
-  table.truncated = table.nextPart < dataset.parts.length &&
-    (table.nextGroup < dataset.parts[table.nextPart].meta.rowGroups.length ||
-     table.nextPart < dataset.parts.length - 1);
+  table.truncated = groupsLeft(dataset, table) > 0;
   return added;
+}
+
+/**
+ * Rows arrive as a plain array or, when a worker found every value of a
+ * column to be a number with no nulls among them, as a Float64Array it could
+ * hand over without copying. Both index and measure the same; only joining
+ * two pieces has to know the difference.
+ */
+function appendRows(col, rows) {
+  const have = col.rows;
+  if (!have.length) { col.rows = rows; return; }
+  if (!rows.length) return;
+  const a = ArrayBuffer.isView(have), b = ArrayBuffer.isView(rows);
+  if (a && b) {
+    const merged = new Float64Array(have.length + rows.length);
+    merged.set(have);
+    merged.set(rows, have.length);
+    col.rows = merged;
+    return;
+  }
+  col.rows = (a ? Array.from(have) : have).concat(b ? Array.from(rows) : rows);
+}
+
+/** Which columns are behind, of those asked for. */
+function unfilled(table, indexes) {
+  const out = [];
+  if (!table || !table.reads) return out;
+  for (const ci of indexes) {
+    const col = table.cols[ci];
+    if (col && col.filled < table.reads.length && out.indexOf(ci) < 0) out.push(ci);
+  }
+  return out;
+}
+/** Decodes columns over the groups already read, so they catch up. */
+async function fillColumns(dataset, table, indexes, onProgress) {
+  const behind = unfilled(table, indexes);
+  for (let k = 0; k < behind.length; k++) {
+    const col = table.cols[behind[k]];
+    for (let r = col.filled; r < table.reads.length; r++) {
+      const read = table.reads[r];
+      const part = dataset.parts[read.pi];
+      const rg = part.meta.rowGroups[read.gi];
+      appendRows(col, await readColumnRows(dataset, part, rg, col, read.sel, read.rows, read.firstGroup,
+        { group: null, workers: poolWorthIt(part, rg, table.cols, [behind[k]], read.sel) }));
+      col.filled = r + 1;
+    }
+    if (onProgress) await onProgress(k + 1, behind.length, col.name);
+  }
+  return behind.length;
+}
+
+/** How many row groups this table has still to read, the plan included. */
+function groupsLeft(dataset, table) {
+  let n = 0;
+  for (let pi = table.nextPart; pi < dataset.parts.length; pi++) {
+    const groups = dataset.parts[pi].meta.rowGroups.length;
+    for (let gi = pi === table.nextPart ? table.nextGroup : 0; gi < groups; gi++) {
+      if (!table.plan || table.plan.has(pi + ":" + gi)) n++;
+    }
+  }
+  return n;
+}
+/** …and how many rows the next `limit` worth of them would add. */
+function rowsAhead(dataset, table, limit) {
+  let rows = 0;
+  for (let pi = table.nextPart; pi < dataset.parts.length && rows < limit; pi++) {
+    const groups = dataset.parts[pi].meta.rowGroups;
+    for (let gi = pi === table.nextPart ? table.nextGroup : 0; gi < groups.length && rows < limit; gi++) {
+      if (!table.plan) { rows += groups[gi].numRows; continue; }
+      const sel = table.plan.get(pi + ":" + gi);
+      if (sel !== undefined) rows += sel ? rangeCount(sel) : groups[gi].numRows;
+    }
+  }
+  return rows;
 }
 
 /* ======================================================================
@@ -2207,6 +2809,61 @@ function viewValue(view, ci, row) {
 function summarizeView(view) {
   for (const col of view.cols) col.summary = summarize(col, view.index, view.count);
 }
+/** Every column a query names, wherever it names it. */
+function queryColumns(q) {
+  const out = [];
+  if (!q) return out;
+  for (const f of q.filters) out.push(f.ci);
+  for (const s of q.sort) if (s.ci != null) out.push(s.ci);
+  for (const ci of q.select) out.push(ci);
+  for (const ci of q.groupBy) out.push(ci);
+  for (const m of q.metrics) out.push(m.ci);
+  return out;
+}
+/**
+ * The columns worth decoding: what the grid is showing and what the query
+ * names. Partition columns come out of the path and cost nothing, and a
+ * hidden column a filter mentions is still needed.
+ */
+function neededColumns(table, running) {
+  const need = new Set();
+  const cols = table.cols;
+  for (let i = 0; i < cols.length; i++) if (cols[i].partKey !== undefined) need.add(i);
+  const q = state.query;
+  /* an aggregate puts its own columns on screen and a SELECT list names the
+     ones it keeps, so while either is running the rest of the display is not
+     being drawn and does not need decoding */
+  const live = q && (running || q.active);
+  const shapesItself = live &&
+    ((q.mode === "agg" && (q.groupBy.length || q.metrics.length)) || (q.mode === "rows" && q.select.length));
+  if (!shapesItself) {
+    const order = displayOrder();
+    if (!order || !order.length) for (let i = 0; i < cols.length; i++) need.add(i);
+    else for (const ci of order) need.add(ci);
+  }
+  for (const ci of queryColumns(q)) need.add(ci);
+  return need;
+}
+const wantedColumns = (table) => [...neededColumns(table)];
+/**
+ * Columns are decoded when something wants them, which means something can
+ * find one behind. Rather than draw a hole, fill it in and come back.
+ * Returns true when it has taken over: the caller should stop.
+ */
+function needFilled(indexes, again) {
+  if (!state.table || !state.dataset) return false;
+  const behind = unfilled(state.table, indexes);
+  if (!behind.length) return false;
+  if (state.filling) return true;
+  state.filling = true;
+  const names = behind.map((ci) => state.table.cols[ci].name);
+  busy(true, "decoding " + (names.length === 1 ? '"' + names[0] + '"' : num(names.length) + " more columns") + "…");
+  fillColumns(state.dataset, state.table, behind)
+    .then(() => { state.filling = false; busy(false); again(); })
+    .catch((e) => { state.filling = false; busy(false); showError(e); });
+  return true;
+}
+
 function setView(view) {
   state.view = view;
   state.page = 0;
@@ -2475,6 +3132,7 @@ function summaryCard(col) {
 }
 
 function renderGrid() {
+  if (state.table && needFilled(wantedColumns(state.table), () => refreshView(true))) return;
   const view = state.view;
   if (!view) return;
   const grid = $("grid");
@@ -3457,6 +4115,8 @@ function renderMeta() {
     "<span class='tag'>rows <b>" + num(dataset ? dataset.numRows : meta.numRows) + "</b></span>",
     table.truncated && table.rowsLoaded ? "<span class='tag'>read so far <b>" + num(table.rowsLoaded) +
       "</b> rows &mdash; summaries cover these</span>" : "",
+    table.scan ? "<span class='tag'>scanned <b>" + num(table.scan.kept) + "</b> of " +
+      num(table.scan.total) + " row groups &mdash; only rows that could match this query</span>" : "",
     "<span class='tag'>columns <b>" + num(table.cols.length) + "</b></span>",
     "<span class='tag'>row groups <b>" + num(dataset ? dataset.numGroups : meta.rowGroups.length) + "</b></span>",
     "<span class='tag'>size <b>" + bytesHuman(dataset ? dataset.size : src.size) + "</b></span>",
@@ -3846,6 +4506,9 @@ function aggregate(q, cols, index, n) {
 function runQuery() {
   const q = state.query, table = state.table;
   if (!table) return;
+  /* running is what settles it: an aggregate about to replace the grid does
+     not need the columns it is replacing */
+  if (needFilled([...neededColumns(table, true)], runQuery)) return;
   const t0 = performance.now();
   const cols = table.cols, n = table.rowsLoaded;
 
@@ -3899,8 +4562,11 @@ function runQuery() {
   $("qstat").innerHTML = "<b>" + num(view.count) + "</b> " + (view.agg ? "groups" : "rows") +
     " from " + num(n) + (table.truncated ? " read" : "") + " &middot; " + ms + " ms" +
     (skipped ? " &middot; <em class='qwarn'>" + skipped + " clause" + (skipped === 1 ? "" : "s") +
-      " skipped</em>" : "");
+      " skipped</em>" : "") +
+    (table.scan ? " &middot; over " + num(table.scan.kept) + " of " + num(table.scan.total) +
+      " row groups" : "");
   $("qclear").disabled = false;
+  updateScanButton();
 }
 /** Which output column a sort clause means in aggregate mode, or -1. */
 function aggSortIndex(q, s) {
@@ -3973,11 +4639,14 @@ function sortMark(viewIdx) {
 
 function resetQuery() {
   const mode = state.query ? state.query.mode : "rows";
+  const scanned = !!(state.table && state.table.scan);
   state.query = newQuery();
   state.query.mode = mode;
   $("qstat").textContent = "";
   $("qclear").disabled = true;
-  if (state.table) setView(baseView(state.table));
+  showPlan("");
+  if (scanned) unscan();
+  else if (state.table) setView(baseView(state.table));
   renderQuery();
 }
 
@@ -4513,6 +5182,7 @@ function renderQuery() {
   state.sqlDirty = false;
   renderZones();
   renderSql(true);
+  updateScanButton();
 }
 /** The builder owns the text unless the user is in the middle of editing it. */
 function renderSql(force) {
@@ -4557,6 +5227,7 @@ function adoptSql(andRun) {
   state.query = res.query;
   state.sqlDirty = false;
   renderZones();                       /* zones follow the text, text stays put */
+  updateScanButton();
   if (andRun) { renderSql(true); runQuery(); }
   return true;
 }
@@ -4664,6 +5335,7 @@ function initQuery() {
     if (state.sqlDirty && !adoptSql(true)) return;    /* refuse to run text that does not parse */
     runQuery();
   });
+  $("qscan").addEventListener("click", () => runScan());
   $("qclear").addEventListener("click", () => resetQuery());
   $("qcopy").addEventListener("click", () => {
     const text = querySql();
@@ -4689,6 +5361,492 @@ function queryHeight(px) {
   try { localStorage.setItem("paris-parquet-queryh", String(h)); } catch (e) { /* fine */ }
   renderRows(true);
   return h;
+}
+
+/* ======================================================================
+   Predicate pushdown — working out what not to read.
+
+   A parquet file says quite a lot about itself before any of it is
+   decoded: every column chunk carries min, max and a null count, and may
+   carry a bloom filter. A WHERE clause can often be proved impossible
+   against those, and a row group that cannot match is a row group that
+   never has to be read.
+
+   The rule throughout is one-sided: "false" here has to mean provably no
+   row can match. Anything that cannot be proved reads, so a missing,
+   truncated or untrustworthy statistic costs time, never correctness.
+   ====================================================================== */
+
+/* below this a row group is a page or two, and narrowing costs more than it
+   saves — the index reads alone would outweigh the pages they rule out */
+const PAGE_NARROW_MIN = 4096;
+/* and narrowing that leaves most of the group behind is not narrowing */
+const PAGE_NARROW_KEEP = 0.8;
+
+/** Mirrors orGroups: AND binds tighter, so clauses are OR-ed groups of ANDs. */
+function clauseGroups(filters, cols) {
+  const groups = [];
+  let current = null;
+  for (const f of filters) {
+    if (!compileFilter(f, cols)) continue;      /* the engine ignores it too */
+    if (!current || f.linker === "OR") { current = []; groups.push(current); }
+    current.push(f);
+  }
+  return groups;
+}
+/** Can the whole WHERE be true for some row, given a verdict per clause? */
+function anyGroupMatches(groups, decide) {
+  for (const grp of groups) {
+    let ok = true;
+    for (let i = 0; i < grp.length; i++) if (!decide(grp[i])) { ok = false; break; }
+    if (ok) return true;
+  }
+  return !groups.length;
+}
+
+const isAscii = (s) => {
+  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) > 127) return false;
+  return true;
+};
+
+/**
+ * The range a column chunk claims, in the space the engine compares in.
+ * lo/hi come back null whenever the claim cannot be trusted:
+ *  - no statistics at all, or a type whose value we cannot rebuild;
+ *  - a repeated column, whose statistics describe leaf values while the
+ *    engine compares assembled arrays;
+ *  - a byte array with only the deprecated min/max, which some writers
+ *    wrote in signed byte order;
+ *  - text outside ASCII, where parquet's unsigned byte order and
+ *    JavaScript's UTF-16 order can disagree.
+ * Truncated statistics stay usable: the spec has them bound the real
+ * value rather than replace it.
+ */
+function chunkBounds(chunk, leaf, spec) {
+  const m = chunk.meta;
+  const st = m ? m.statistics : null;
+  if (!st) return null;
+  const out = { lo: null, hi: null, nulls: st.nullCount == null ? null : st.nullCount,
+    values: m.numValues == null ? null : m.numValues };
+  if (spec.nested) return out;
+  const deprecated = st.minValue == null && st.maxValue == null;
+  const bytesTyped = leaf.type === "BYTE_ARRAY" || leaf.type === "FIXED_LEN_BYTE_ARRAY";
+  if (deprecated && bytesTyped) return out;
+  fillBounds(out, st.minValue != null ? st.minValue : st.min,
+    st.maxValue != null ? st.maxValue : st.max, leaf, spec);
+  return out;
+}
+/** Turns a pair of statistics blobs into the range the engine compares in. */
+function fillBounds(out, loB, hiB, leaf, spec) {
+  if (!loB || !loB.length || !hiB || !hiB.length) return out;
+  let lo, hi;
+  try {
+    lo = spec.convert(rawStat(loB, leaf));
+    hi = spec.convert(rawStat(hiB, leaf));
+  } catch (e) { return out; }
+  const key = sortKey(spec);
+  if (key) {
+    lo = key(lo);
+    hi = key(hi);
+    if (lo !== lo || hi !== hi || lo > hi) return out;      /* NaN, or nonsense */
+  } else {
+    lo = lo == null ? null : String(textOf(lo, spec));
+    hi = hi == null ? null : String(textOf(hi, spec));
+    if (lo == null || hi == null || !isAscii(lo) || !isAscii(hi) || lo > hi) return out;
+  }
+  out.lo = lo;
+  out.hi = hi;
+  return out;
+}
+
+/**
+ * The rows of one row group a clause could be true in, from the page index:
+ * every page whose own min/max and null count allow a match. null means the
+ * index cannot answer, and the whole group stands.
+ */
+async function clauseRanges(part, rg, f, col, numRows) {
+  if (!col || col.partKey !== undefined || col.spec.nested) return null;
+  const leaf = part.leafByPath ? part.leafByPath.get(col.key) : null;
+  if (!leaf || leaf.maxRep > 0) return null;
+  let chunk = null;
+  for (const c of rg.columns) if (c.meta && c.meta.path.join("\u0001") === col.key) { chunk = c; break; }
+  if (!chunk || chunk.filePath) return null;
+  const ci = await readColumnIndex(part.src, chunk);
+  const locs = await readOffsetIndex(part.src, chunk);
+  if (!ci || !locs || locs.length !== ci.nullPages.length) return null;
+  const out = [];
+  for (let p = 0; p < locs.length; p++) {
+    const from = locs[p].row;
+    const to = p + 1 < locs.length ? locs[p + 1].row : numRows;
+    if (to <= from) return null;                       /* an index we misread */
+    const b = { lo: null, hi: null, nulls: ci.nullCounts ? ci.nullCounts[p] : null, values: to - from };
+    if (ci.nullPages[p]) b.nulls = to - from;
+    else fillBounds(b, ci.mins[p], ci.maxes[p], leaf, col.spec);
+    if (clauseCanMatch(f, col.spec, b)) out.push([from, to]);
+  }
+  return mergeRanges(out);
+}
+
+/** False only when no row in a chunk with these bounds could satisfy f. */
+function clauseCanMatch(f, spec, b) {
+  const p = f.pred;
+  const allNull = b.nulls != null && b.values != null && b.nulls >= b.values;
+  if (p === "null") return b.nulls !== 0;
+  if (p === "notnull") return !allNull;
+  if (p === "like") return true;              /* a substring test has no order */
+  if (f.value === "" || f.value == null) return true;
+  if (allNull) return false;                  /* every comparison is false on null */
+  if (b.lo === null || b.hi === null) return true;
+  let a, z;
+  const key = sortKey(spec);
+  if (key) {
+    a = parseOperand(f.value, spec);
+    if (!isFinite(a)) return true;
+    z = f.valueTo == null || f.valueTo === "" ? a : parseOperand(f.valueTo, spec);
+    if (!isFinite(z)) z = a;
+  } else {
+    a = String(f.value);
+    z = f.valueTo == null || f.valueTo === "" ? a : String(f.valueTo);
+    if (!isAscii(a) || !isAscii(z)) return true;
+  }
+  switch (p) {
+    case "eq": return !(a < b.lo || a > b.hi);
+    case "ne": return !(b.lo === b.hi && b.lo === a && b.nulls === 0);
+    case "lt": return b.lo < a;
+    case "le": return b.lo <= a;
+    case "gt": return b.hi > a;
+    case "ge": return b.hi >= a;
+    case "between": return !(b.hi < a || b.lo > z);
+    default: return true;
+  }
+}
+
+/** The engine's own test, run against a partition column's single value. */
+function partitionCanMatch(f, col, value) {
+  const probe = [];
+  probe[f.ci] = { rows: [value], spec: col.spec };
+  const test = compileFilter(f, probe);
+  return !test || test(0);
+}
+
+/* ------------------------------------------------------- bloom filters */
+/* xxh64, which is the only hash parquet's bloom filters use. BigInt keeps
+   the 64-bit arithmetic honest; one small value is hashed per clause per
+   row group, so its cost never shows. */
+const XXP1 = 11400714785074694791n, XXP2 = 14029467366897019727n,
+      XXP3 = 1609587929392839161n, XXP4 = 9650029242287828579n,
+      XXP5 = 2870177450012600261n;
+const U64 = (1n << 64n) - 1n;
+const xrot = (x, r) => ((x << r) | (x >> (64n - r))) & U64;
+const xround = (acc, input) => (xrot((acc + input * XXP2) & U64, 31n) * XXP1) & U64;
+function xxh64(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const len = bytes.length;
+  let h, p = 0;
+  if (len >= 32) {
+    let v1 = (XXP1 + XXP2) & U64, v2 = XXP2, v3 = 0n, v4 = (-XXP1) & U64;
+    for (; p <= len - 32; p += 32) {
+      v1 = xround(v1, dv.getBigUint64(p, true));
+      v2 = xround(v2, dv.getBigUint64(p + 8, true));
+      v3 = xround(v3, dv.getBigUint64(p + 16, true));
+      v4 = xround(v4, dv.getBigUint64(p + 24, true));
+    }
+    h = (xrot(v1, 1n) + xrot(v2, 7n) + xrot(v3, 12n) + xrot(v4, 18n)) & U64;
+    for (const v of [v1, v2, v3, v4]) {
+      h = ((h ^ xround(0n, v)) * XXP1 + XXP4) & U64;
+    }
+  } else {
+    h = XXP5;
+  }
+  h = (h + BigInt(len)) & U64;
+  for (; p <= len - 8; p += 8) {
+    h = ((xrot(h ^ xround(0n, dv.getBigUint64(p, true)), 27n) * XXP1) + XXP4) & U64;
+  }
+  if (p <= len - 4) {
+    h = ((xrot((h ^ ((BigInt(dv.getUint32(p, true)) * XXP1) & U64)), 23n) * XXP2) + XXP3) & U64;
+    p += 4;
+  }
+  for (; p < len; p++) {
+    h = (xrot(h ^ ((BigInt(bytes[p]) * XXP5) & U64), 11n) * XXP1) & U64;
+  }
+  h = (h ^ (h >> 33n)) * XXP2 & U64;
+  h = (h ^ (h >> 29n)) * XXP3 & U64;
+  return (h ^ (h >> 32n)) & U64;
+}
+
+/* the split-block filter: 32-byte blocks of eight 32-bit words, one bit
+   set per word, so a lookup is eight ANDs against one cache line */
+const BLOOM_SALT = [0x47b6137b, 0x44974d91, 0x8824ad5b, 0xa2b7289d,
+                    0x705495c7, 0x2df1424b, 0x9efc4947, 0x5c6bfb31];
+function bloomHas(data, hash) {
+  const blocks = Math.floor(data.length / 32);
+  if (!blocks) return true;
+  const block = Number(((hash >> 32n) * BigInt(blocks)) >> 32n);
+  const key = Number(BigInt.asUintN(32, hash)) >>> 0;
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const base = block * 32;
+  for (let i = 0; i < 8; i++) {
+    const bit = (Math.imul(key, BLOOM_SALT[i]) >>> 0) >>> 27;
+    if ((dv.getUint32(base + i * 4, true) & (1 << bit)) === 0) return false;
+  }
+  return true;
+}
+/** Reads a chunk's bloom filter, once, and remembers it on the chunk. */
+async function readBloom(src, chunk) {
+  if (chunk.bloom !== undefined) return chunk.bloom;
+  chunk.bloom = null;
+  const off = chunk.meta ? chunk.meta.bloomFilterOffset : null;
+  if (off == null || off <= 0 || off >= src.size) return null;
+  try {
+    const head = await src.read(off, Math.min(src.size, off + 64));
+    const c = new Cursor(head, 0);
+    const h = thriftStruct(c);
+    const numBytes = h[1] | 0;
+    /* every field is a union of one member each; anything else is a filter
+       written by a spec we do not know, and is not ours to interpret */
+    if (!numBytes || !h[2] || !h[2][1] || !h[3] || !h[3][1] || (h[4] && !h[4][1])) return null;
+    const start = off + c.p;
+    if (start + numBytes > src.size) return null;
+    chunk.bloom = await src.read(start, start + numBytes);
+  } catch (e) { chunk.bloom = null; }
+  return chunk.bloom;
+}
+/**
+ * The bytes a bloom filter would have hashed for this operand: the value
+ * as parquet stores it physically. Only the types whose text can be turned
+ * back into exactly those bytes are offered — a value we might rebuild
+ * wrongly would skip a row group that does hold it.
+ */
+function bloomBytes(f, col) {
+  if (f.pred !== "eq" || f.value === "" || f.value == null) return null;
+  const spec = col.spec, leaf = col.leaf;
+  if (!leaf || spec.nested || spec.decimal) return null;
+  const t = leaf.type;
+  if (spec.kind === "string" && t === "BYTE_ARRAY") return new TextEncoder().encode(String(f.value));
+  if (spec.kind !== "number") return null;
+  const v = parseOperand(f.value, spec);
+  if (!isFinite(v) || !Number.isSafeInteger(v)) return null;
+  const b = new Uint8Array(t === "INT32" ? 4 : 8);
+  const dv = new DataView(b.buffer);
+  if (t === "INT32") dv.setInt32(0, v, true);
+  else if (t === "INT64") dv.setBigInt64(0, BigInt.asIntN(64, BigInt(v)), true);
+  else return null;
+  return b;
+}
+
+/* ------------------------------------------------------------ the plan */
+/**
+ * Walks every row group and decides, from the footer alone plus any bloom
+ * filters, which ones could hold a matching row. Returns null when there
+ * is nothing to push down.
+ */
+async function planScan(dataset, query, table, onProgress) {
+  const cols = table.cols;
+  const groups = clauseGroups(query.filters, cols);
+  if (!groups.length) return null;
+  const t0 = performance.now();
+  const keep = new Map();          /* "part:group" -> null for all of it, or row ranges */
+  const plan = { keep, total: 0, kept: 0, bytesTotal: 0, bytesKept: 0, rows: 0, rowsTotal: 0,
+    byStats: 0, byBloom: 0, byPartition: 0, byPages: 0, narrowed: 0, rowsSkipped: 0,
+    files: 0, filesTotal: dataset.parts.length, ms: 0 };
+  const chunkOf = (rg, col) => {
+    for (const c of rg.columns) if (c.meta && c.meta.path.join("\u0001") === col.key) return c;
+    return null;
+  };
+
+  for (let pi = 0; pi < dataset.parts.length; pi++) {
+    const part = dataset.parts[pi];
+    const rgs = part.meta.rowGroups;
+    const bytesOf = (rg) => {
+      let n = 0;
+      for (const c of rg.columns) if (c.meta) n += c.meta.totalCompressedSize;
+      return n;
+    };
+    /* a partition column holds one value for the whole file, so a clause on
+       it can rule out every row group at once */
+    const fileOut = !anyGroupMatches(groups, (f) => {
+      const col = cols[f.ci];
+      if (!col || col.partKey === undefined) return true;
+      return partitionCanMatch(f, col, part.partValues ? part.partValues[col.partKey] : null);
+    });
+    for (let gi = 0; gi < rgs.length; gi++) {
+      const rg = rgs[gi];
+      plan.total++;
+      plan.rowsTotal += rg.numRows;
+      plan.bytesTotal += bytesOf(rg);
+      if (fileOut) { plan.byPartition++; continue; }
+
+      const bounds = new Map();
+      const statsSay = (f) => {
+        const col = cols[f.ci];
+        if (!col || col.partKey !== undefined) return true;   /* partitions done above */
+        if (!bounds.has(f.ci)) {
+          const chunk = chunkOf(rg, col);
+          const leaf = part.leafByPath ? part.leafByPath.get(col.key) : null;
+          bounds.set(f.ci, chunk && leaf ? chunkBounds(chunk, leaf, col.spec) : null);
+        }
+        const b = bounds.get(f.ci);
+        return !b || clauseCanMatch(f, col.spec, b);
+      };
+      if (!anyGroupMatches(groups, statsSay)) { plan.byStats++; continue; }
+
+      /* whatever the statistics could not rule out, a bloom filter might:
+         an equality test on unsorted data is exactly what they are for */
+      let ruled = null;
+      for (const grp of groups) {
+        for (const f of grp) {
+          const col = cols[f.ci];
+          if (!col || col.partKey !== undefined) continue;
+          const bytes = bloomBytes(f, col);
+          if (!bytes) continue;
+          const chunk = chunkOf(rg, col);
+          if (!chunk || chunk.meta.bloomFilterOffset == null) continue;
+          const data = await readBloom(part.src, chunk);
+          if (data && !bloomHas(data, xxh64(bytes))) (ruled || (ruled = new Set())).add(f);
+        }
+      }
+      if (ruled && !anyGroupMatches(groups, (f) => !ruled.has(f) && statsSay(f))) {
+        plan.byBloom++;
+        continue;
+      }
+
+      /* the same question one level down: which pages of this group could
+         hold a match. Ranges are intersected within an AND and united across
+         ORs, so every column reads exactly the same rows. */
+      let ranges = null, narrowed = false;
+      if (rg.numRows > PAGE_NARROW_MIN) {
+        const perGroup = [];
+        for (const grp of groups) {
+          let acc = null;
+          for (const f of grp) {
+            const r = await clauseRanges(part, rg, f, cols[f.ci], rg.numRows);
+            if (!r) continue;                      /* this clause narrows nothing */
+            narrowed = true;
+            acc = acc === null ? r : intersectRanges(acc, r);
+            if (!acc.length) break;
+          }
+          perGroup.push(acc === null ? [[0, rg.numRows]] : acc);
+        }
+        if (narrowed) {
+          let all = [];
+          for (const g of perGroup) all = unionRanges(all, g);
+          ranges = all;
+        }
+      }
+      if (ranges) {
+        const rows = rangeCount(ranges);
+        if (!rows) { plan.byPages++; plan.rowsSkipped += rg.numRows; continue; }
+        /* reading page by page costs a read apiece, so it has to save enough
+           pages to be worth not reading the chunk in one go */
+        if (rows > rg.numRows * PAGE_NARROW_KEEP) ranges = null;
+        else { plan.narrowed++; plan.rowsSkipped += rg.numRows - rows; plan.estimated = true; }
+      }
+      keep.set(pi + ":" + gi, ranges);
+      plan.kept++;
+      plan.rows += ranges ? rangeCount(ranges) : rg.numRows;
+      plan.bytesKept += ranges ? Math.round(bytesOf(rg) * rangeCount(ranges) / rg.numRows) : bytesOf(rg);
+    }
+    if (onProgress && dataset.parts.length > 1) await onProgress(pi, dataset.parts.length);
+  }
+  const files = new Set();
+  for (const k of keep.keys()) files.add(k.split(":")[0]);
+  plan.files = files.size;
+  plan.ms = Math.round(performance.now() - t0);
+  return plan;
+}
+
+/** What the scan saved, in the words of what it read rather than skipped. */
+function planReport(plan) {
+  const skipped = plan.total - plan.kept;
+  if (!skipped) {
+    return "read every one of " + num(plan.total) + " row groups &mdash; " +
+      "nothing in this file's statistics rules any of them out";
+  }
+  const why = [];
+  if (plan.byStats) why.push(num(plan.byStats) + " by statistics");
+  if (plan.byBloom) why.push(num(plan.byBloom) + " by bloom filter");
+  if (plan.byPartition) why.push(num(plan.byPartition) + " by partition");
+  if (plan.byPages) why.push(num(plan.byPages) + " by page index");
+  return "read <b>" + num(plan.kept) + "</b> of " + num(plan.total) + " row groups" +
+    (plan.filesTotal > 1 ? " in " + num(plan.files) + " of " + num(plan.filesTotal) + " files" : "") +
+    " &middot; " + (plan.estimated ? "about " : "") + "<b>" + bytesHuman(plan.bytesKept) +
+      "</b> of " + bytesHuman(plan.bytesTotal) +
+    " &middot; skipped " + num(skipped) + " (" + why.join(", ") + ")" +
+    (plan.narrowed ? " &middot; and " + num(plan.narrowed) + " narrowed by page to " +
+      num(plan.rows) + " of " + num(plan.rowsTotal) + " rows" : "") +
+    " in " + num(plan.ms) + " ms";
+}
+
+/* ---------------------------------------------------------- the scan */
+/**
+ * Plans, then rebuilds the table from only the row groups that survived,
+ * then runs the query over them. The answer is the same as reading the
+ * whole file; the difference is how much of it came off disk.
+ */
+async function runScan() {
+  const dataset = state.dataset, q = state.query;
+  if (!dataset || !state.table) return;
+  if (state.sqlDirty && !adoptSql(true)) return;
+  busy(true, "reading what the footers claim…");
+  await new Promise((r) => setTimeout(r, 0));
+  try {
+    const plan = await planScan(dataset, q, state.table, async (i, n) => {
+      busy(true, "planning… " + num(i + 1) + " of " + num(n) + " files");
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    if (!plan) {
+      showPlan("<em>Nothing to push down — this needs a WHERE clause the file's own " +
+        "statistics can be tested against.</em>");
+      return;
+    }
+    const table = newTable(dataset);
+    table.plan = plan.keep;
+    table.scan = plan;
+    table.need = neededColumns(table, true);
+    busy(true, "decoding " + num(Math.min(plan.rows, FIRST_ROWS)) + " rows of "
+      + num(plan.kept) + " row groups…");
+    await new Promise((r) => setTimeout(r, 0));
+    await loadMore(dataset, table, FIRST_ROWS);
+    state.table = table;
+    if (state.display.order.length !== table.cols.length) state.display = newDisplay(table.cols);
+    renderMeta();
+    updateButtons();
+    runQuery();
+    showPlan(planReport(plan));
+  } catch (e) {
+    showError(e);
+  } finally { busy(false); }
+}
+function showPlan(html) {
+  const el = $("qplan");
+  el.innerHTML = html;
+  el.hidden = !html;
+}
+/** A scanned table holds only the rows that could match, so leaving the
+    query behind means reading the file again the ordinary way. */
+async function unscan() {
+  const dataset = state.dataset;
+  if (!dataset || !state.table || !state.table.scan) return;
+  busy(true, "reading the file again…");
+  await new Promise((r) => setTimeout(r, 0));
+  try {
+    const table = newTable(dataset);
+    await loadMore(dataset, table, FIRST_ROWS);
+    state.table = table;
+    setView(baseView(table));
+    renderMeta();
+    updateButtons();
+  } catch (e) { showError(e); } finally { busy(false); }
+}
+/** The button is only worth pressing when there is something to push down. */
+function updateScanButton() {
+  const b = $("qscan");
+  if (!b) return;
+  const t = state.table;
+  const groups = t ? t.dataset.numGroups : 0;
+  const has = !!(t && state.query && clauseGroups(state.query.filters, t.cols).length);
+  b.disabled = !has || groups < 2;
+  b.classList.toggle("on", !!(t && t.scan));
 }
 
 /* ======================================================================
@@ -5206,6 +6364,9 @@ function sideName(dataset) {
 }
 function renderDiff() {
   if (!state.table) return;
+  /* growing or scanning the open file leaves columns nobody asked for behind;
+     a diff wants all of them */
+  if (needFilled(state.table.cols.map((c, i) => i), renderDiff)) return;
   const A = sideA(), B = diff.b;
   $("diffbar").innerHTML = [
     "<span class='qtitle'>COMPARE</span>",
@@ -5260,6 +6421,9 @@ async function openCompare(entries, label) {
       name: label || (entries.length === 1 ? entries[0].path : entries.length + " files") };
     diff.rows = null;
     diff.cap = 200;
+    busy(true, "decoding the rest of this file to compare it…");
+    await new Promise((r) => setTimeout(r, 0));
+    await fillColumns(state.dataset, state.table, state.table.cols.map((c, i) => i));
     diff.keys = suggestKey(state.table, table);
     renderDiff();
   } catch (e) {
@@ -5291,7 +6455,9 @@ async function loadAllBoth() {
   busy(true, "decoding every row…");
   await new Promise((r) => setTimeout(r, 0));
   try {
+    state.table.need = null;                       /* the diff wants every column */
     await loadMore(state.dataset, state.table, Infinity);
+    await fillColumns(state.dataset, state.table, state.table.cols.map((c, i) => i));
     if (diff.b) await loadMore(diff.b.dataset, diff.b.table, Infinity);
     refreshView(true);
     renderMeta();
@@ -5460,12 +6626,12 @@ async function openFile(file) { return openEntries(entriesFromFiles([file])); }
  * once it has decoded; swapping the two sides of a diff does it without
  * reading anything again.
  */
-function adoptDataset(dataset, table, name, showCount) {
+function adoptDataset(dataset, table, name, showCount, keepDisplay) {
   state.dataset = dataset;
   state.src = dataset.parts[0].src;
   state.meta = dataset.reference;
   state.table = table;
-  state.display = newDisplay(table.cols);
+  if (!keepDisplay) state.display = newDisplay(table.cols);
   setView(baseView(table));
   state.query = newQuery();            /* a different file means different columns */
   $("qstat").textContent = "";
@@ -5485,6 +6651,7 @@ async function openEntries(entries, label) {
   const old = $("err");
   if (old) old.remove();
   busy(true, "reading footers...");
+  poolStart();                     /* the other cores, once there is a file for them */
   const named = !!label || entries.length === 1;
   const name = label || (entries.length === 1 ? entries[0].path : entries.length + " files");
   $("fileline").innerHTML = "<b>" + esc(name) + "</b>";
@@ -5500,13 +6667,19 @@ async function openEntries(entries, label) {
     });
     parts = dataset.parts.length;
     const table = newTable(dataset);
+    /* the display and the query decide which columns are worth decoding, so
+       they are settled before the first read rather than after it */
+    state.display = newDisplay(table.cols);
+    state.query = newQuery();
+    table.need = neededColumns(table);
     busy(true, "decoding " + num(Math.min(dataset.numRows, FIRST_ROWS)) + " rows...");
     await new Promise((r) => setTimeout(r, 0));
     await loadMore(dataset, table, FIRST_ROWS);
+    showPlan("");
     diff.b = null;                     /* a new file needs a new comparison */
     diff.rows = null;
     diff.keys = [];
-    adoptDataset(dataset, table, name, parts > 1 && named);
+    adoptDataset(dataset, table, name, parts > 1 && named, true);
   } catch (e) {
     $("gridwrap").hidden = true;
     $("pager").hidden = true;
@@ -5553,22 +6726,17 @@ function updateButtons() {
     $("toggleQuery").textContent = "Hide query";
   }
   if (can) {
-    const left = t.dataset.numRows - t.rowsLoaded;
-    let next = 0;
-    for (let pi = t.nextPart; pi < t.dataset.parts.length && next < FIRST_ROWS; pi++) {
-      const groups = t.dataset.parts[pi].meta.rowGroups;
-      for (let g = pi === t.nextPart ? t.nextGroup : 0; g < groups.length && next < FIRST_ROWS; g++) {
-        next += groups[g].numRows;
-      }
-    }
+    const next = rowsAhead(t.dataset, t, FIRST_ROWS);
+    const left = t.scan ? t.scan.rows - t.rowsLoaded : t.dataset.numRows - t.rowsLoaded;
     $("more").textContent = "Load " + num(next) + " more";
-    $("all").textContent = "Load all " + num(left);
+    $("all").textContent = "Load all " + num(left) + (t.scan ? " matching" : "");
   }
 }
 async function grow(n) {
   busy(true, "decoding...");
   await new Promise((r) => setTimeout(r, 0));
   try {
+    state.table.need = neededColumns(state.table);
     await loadMore(state.dataset, state.table, n);
     if (state.query && state.query.active) runQuery(); else setView(baseView(state.table));
     renderMeta();
@@ -5686,17 +6854,30 @@ function init() {
     if (compare) openCompare(entries, folder); else openEntries(entries, folder);
   });
 }
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
-else init();
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
+}
 
 /* exposed so this file can be driven from a test harness */
-window.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
+/* running as a worker: no document, and the job is to decode what is asked */
+if (typeof document === "undefined" && typeof self !== "undefined" && typeof importScripts === "function") {
+  workerMain(self);
+}
+
+const HOST = typeof window !== "undefined" ? window : (typeof self !== "undefined" ? self : null);
+if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
   hivePartition, isParquetPath, entriesFromFiles,
   runQuery, querySql, parseSql, sqlTokenize, adoptSql, chart, chartData, chartDefaults, niceTicks,
   baseView, setView, compileFilter, aggregate, exportParts, viewValue,
   displayCols, newDisplay, refreshView,
   diff, schemaDiff, datasetShape, columnStats, rowDiff, suggestKey, cellEq, cellKey, colShape,
   rawStat, showStat, statValue,
+  fillColumns, unfilled, neededColumns, queryColumns, readColumnRows, readColumnChunk, readPage,
+  planScan, planReport, chunkBounds, clauseCanMatch, clauseGroups, xxh64, bloomHas, readBloom,
+  bloomBytes, groupsLeft, rowsAhead, readOffsetIndex, readColumnIndex, readRowsRanges, clauseRanges,
+  intersectRanges, unionRanges, mergeRanges, rangeCount,
+  pool, poolStart, workerCan,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
 </script>
 </body>

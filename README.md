@@ -61,7 +61,25 @@ the last good state stays put. **tidy** rewrites your text the way the builder
 would.
 
 The SQL is a record of the query, not how it runs: the engine executes over the
-columns already decoded in memory.
+columns already decoded in memory — unless you press **Scan file**, which
+turns that around. A parquet file says a lot about itself before any of it is
+decoded: min, max and a null count per column chunk, often a bloom filter, and
+sometimes the same per page. Scan reads the footers, works out which row groups
+and which pages could hold a row your `WHERE` matches, and reads only those.
+The answer is identical to reading the whole file; the difference is how much
+came off disk. `id >= 195000` over 200,000 rows reads one row group of twenty,
+130 KB of 2.5 MB; `id = 150000` narrows further to a single page, 8,192 rows.
+An equality test on an unsorted column, where min and max span everything, is
+what the bloom filters are for, and a partition value rules out whole files at
+once. The panel says what it read and why it skipped the rest, because skipping
+is only worth trusting when it is visible.
+
+Anything that cannot be *proved* impossible is read: a column with no
+statistics, a byte array carrying only the pre-2.8 min/max some writers wrote
+in signed order, text outside ASCII where parquet's byte order and JavaScript's
+disagree. Those cost time, never the answer. A scanned table holds only the
+rows that could match, so the metadata bar says so, and Reset reads the file
+again the ordinary way.
 
 **Chart** in the header draws the current result instead of tabulating it —
 column, horizontal bar, line or scatter, picked automatically from the data (a
@@ -76,8 +94,13 @@ are switched off. The chart downloads as SVG.
 
 **Columns** in the header opens a picker: search by name or type, hide what you
 do not need, pin a column so it stays at the left edge while you scroll
-sideways, and drag to reorder. Hiding is a display choice only — a hidden
-column stays decoded and can still be filtered, grouped and sorted on.
+sideways, and drag to reorder. A hidden column can still be filtered, grouped
+and sorted on — but it is no longer decoded when more rows are read, and
+neither is anything else nobody is looking at. With a `GROUP BY` on screen,
+only the columns it names are read: loading the rest of a 60-column file that
+way costs two columns, not sixty. Ask for one of the others — unhide it, drop
+it into the query, run a diff — and it is decoded over exactly the row groups
+already read, and joins the ones that were there all along.
 
 **Diff** puts a second file beside the open one and says what moved. The
 schema first: columns added, removed or retyped, and the pair that is probably
@@ -116,6 +139,15 @@ By default the first 20,000 rows are read (rounded up to whole row groups);
 buttons load more or all of it. Summaries describe the rows actually read, and
 the header says so when that is less than the whole file.
 
+Where the browser has cores to spare, the page uses them: it starts a few
+workers on **its own `<script>` text**, so they know every codec and encoding
+the page does and there is still only one file. A row group's column chunks
+are read together in one go, and the columns that can come back as one buffer
+— runs of numbers, runs of bytes — are decoded on the other cores and handed
+over rather than copied. Text and anything nested stay here, which is no loss:
+that work happens while the workers are busy with the rest. Small files skip
+all of it, because a round trip costs more than they do.
+
 ## What it understands
 
 Everything below is decoded inside `index.html` — the thrift footer, the
@@ -146,9 +178,13 @@ node tools/check-query.mjs /tmp/fx/*.parquet  # run the query engine against duc
 node tools/check-sql.mjs /tmp/fx/a.parquet    # SQL round trip, execution, refusals
 node tools/check-folder.mjs /tmp/fx/folders   # partitioned folders read as one table
 node tools/check-diff.mjs /tmp/fx/diff /tmp/fx/*.parquet   # diff, and every file vs itself
+node tools/check-push.mjs /tmp/fx/push        # pushdown: the same answer, less read
 node tools/fuzz-zstd.mjs 1000                 # zstd decoder vs node's zstd encoder
 node tools/browser.mjs /tmp/fx/a.parquet      # drive the page in real Chromium
 node tools/browser-diff.mjs /tmp/fx/diff      # drive the diff panel, and count requests
+node tools/browser-push.mjs /tmp/fx/push      # drive the scan, and time it
+node tools/browser-lazy.mjs /tmp/fx/wide.parquet   # only decode what is wanted
+node tools/browser-workers.mjs /tmp/fx/*.parquet   # the other cores agree, cell for cell
 ```
 
 `check.mjs` pulls the `<script>` out of `index.html` and runs it against a stub
@@ -160,4 +196,8 @@ again — then runs hand-written SQL past duckdb and checks that malformed
 queries are refused with a useful message. `check-diff.mjs` reads a pair of
 files built to differ in exactly three ways and insists the diff names those
 three and nothing else, then diffs every other file against itself: whatever
-its types, a file has to come out equal to itself.
+its types, a file has to come out equal to itself. `check-push.mjs` runs every
+query twice — over the whole file, and over only what a plan kept — and insists
+on the same rows cell for cell, with an expected skip per case so pruning that
+quietly stops is a failure too; `check-query.mjs` does that second run for
+every filtered case it already had.
