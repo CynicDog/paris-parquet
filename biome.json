@@ -1,0 +1,23 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
+  "files": {
+    "includes": ["src/**/*.js", "tools/**/*.mjs", "scripts/**/*.mjs", "!src/*.html"]
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "useTemplate": "off",
+        "useExponentiationOperator": "off"
+      },
+      "suspicious": {
+        "noSelfCompare": "off",
+        "noControlCharactersInRegex": "off"
+      }
+    }
+  }
+}

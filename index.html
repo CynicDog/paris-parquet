@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- GENERATED FILE. Edit src/*.js and src/index.template.html, then run scripts/compose.sh (or npm run build) -- do not hand-edit this file. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -401,13 +402,7 @@ details[open]>summary::before{content:"▾ "}
 
 <script>
 "use strict";
-/* =====================================================================
-   paris-parquet — a self-contained parquet reader + viewer.
-   No dependencies: thrift, snappy, lz4, zstd, gzip and every parquet
-   encoding below are decoded in this file.
-   ===================================================================== */
 
-/* ---------------------------------------------------------------- bytes */
 const utf8 = new TextDecoder("utf-8");
 
 class Cursor {
@@ -428,6 +423,7 @@ class Cursor {
 }
 
 /* --------------------------------------------------- thrift compact read */
+
 const TSTOP = 0, TTRUE = 1, TFALSE = 2, TBYTE = 3, TI16 = 4, TI32 = 5, TI64 = 6,
       TDOUBLE = 7, TBINARY = 8, TLIST = 9, TSET = 10, TMAP = 11, TSTRUCT = 12;
 
@@ -673,11 +669,9 @@ function parseStatistics(s) {
   };
 }
 
-/* ======================================================================
-   Decompression
-   ====================================================================== */
 
 /* -------------------------------------------------------------- snappy */
+
 function snappyDecompress(src, expected) {
   let p = 0, shift = 0, len = 0, b;
   do { b = src[p++]; len += (b & 0x7f) * Math.pow(2, shift); shift += 7; } while (b & 0x80);
@@ -788,9 +782,6 @@ async function gzipDecompress(src) {
   catch (e) { try { return await inflate(src, "deflate"); } catch (e2) { return await inflate(src, "deflate-raw"); } }
 }
 
-/* ======================================================================
-   zstd  (RFC 8878) — raw frames, no dictionary
-   ====================================================================== */
 const POW2 = new Float64Array(64);
 for (let i = 0; i < 64; i++) POW2[i] = Math.pow(2, i);
 const highbit = (x) => 31 - Math.clz32(x);
@@ -1064,7 +1055,6 @@ function zstdFrame(src, p, grow, getOut, setO, getO) {
       setO(o + size); p += 1;
     } else if (type === 2) {
       const blockEnd = p + size;
-      /* ---- literals section ---- */
       const lh = src[p];
       const ltype = lh & 3, lfmt = (lh >> 2) & 3;
       let regen = 0, comp = 0, streams = 1, lp = p;
@@ -1114,7 +1104,6 @@ function zstdFrame(src, p, grow, getOut, setO, getO) {
         lp = sectionEnd;
       }
 
-      /* ---- sequences section ---- */
       let nbSeq = 0;
       if (lp < blockEnd) {
         const b0 = src[lp++];
@@ -1180,7 +1169,6 @@ function zstdFrame(src, p, grow, getOut, setO, getO) {
           mlState = ML.newState[mlState] + br.bits(ML.nbBits[mlState]);
           ofState = OF.newState[ofState] + br.bits(OF.nbBits[ofState]);
         }
-        /* ---- execute ---- */
         grow(litLength + matchLength);
         const out = getOut(); let o = getO();
         for (let i = 0; i < litLength; i++) out[o++] = literals[litPos++];
@@ -1189,7 +1177,6 @@ function zstdFrame(src, p, grow, getOut, setO, getO) {
         for (let i = 0; i < matchLength; i++) out[o++] = out[s++];
         setO(o);
       }
-      /* ---- trailing literals ---- */
       const rest = literals.length - litPos;
       if (rest > 0) {
         grow(rest);
@@ -1224,13 +1211,11 @@ async function decompress(codec, src, uncompressedSize) {
   }
 }
 
-/* ======================================================================
-   Parquet encodings
-   ====================================================================== */
 const bitWidth = (max) => (max === 0 ? 0 : 32 - Math.clz32(max));
 const u32le = (b, p) => (b[p] | (b[p + 1] << 8) | (b[p + 2] << 16) | (b[p + 3] << 24)) >>> 0;
 
 /** RLE / bit-packing hybrid (parquet's level + dictionary-index encoding). */
+
 function rleHybrid(b, pos, end, width, count, out) {
   out = out || new Int32Array(count);
   let n = 0;
@@ -1473,9 +1458,6 @@ function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out, conv
   }
 }
 
-/* ======================================================================
-   Column chunk reader
-   ====================================================================== */
 /**
  * Decodes the one page starting at `pos` into `out`, which collects values,
  * definition and repetition levels and carries the dictionary between pages.
@@ -1751,9 +1733,6 @@ function assemble(leaf, values, defs, reps, convert) {
   return rows;
 }
 
-/* ======================================================================
-   Physical values -> display values
-   ====================================================================== */
 const JULIAN_EPOCH = 2440588;                       // 1970-01-01
 function beBigInt(bytes) {
   let v = 0n;
@@ -1902,9 +1881,6 @@ function listLabel(leaf, inner) {
   return s;
 }
 
-/* ======================================================================
-   Display formatting
-   ====================================================================== */
 const pad2 = (n) => (n < 10 ? "0" + n : "" + n);
 function fmtDatePart(ms) {
   const d = new Date(ms);
@@ -1957,9 +1933,6 @@ function jsonish(v, spec) {
   try { return JSON.stringify(walk(v)); } catch (e) { return String(v); }
 }
 
-/* ======================================================================
-   Column summaries
-   ====================================================================== */
 const BINS = 24;
 /** A mean is an estimate; this keeps it short and stops it looking exact. */
 function compactNumber(x) {
@@ -2073,9 +2046,6 @@ function summarize(col, index, count) {
   return s;
 }
 
-/* ======================================================================
-   Reading a table
-   ====================================================================== */
 function fileSource(file) {
   return {
     size: file.size,
@@ -2085,11 +2055,6 @@ function fileSource(file) {
   };
 }
 
-/* ===================================================================
-   A dataset is one or more parquet files read as a single table.
-   A lone file is the same thing with one part, so there is one path
-   through the reader rather than two.
-   =================================================================== */
 function isParquetPath(path) {
   const name = path.split("/").pop();
   if (!name || name[0] === "." || name[0] === "_") return false;   /* _SUCCESS, .crc, hidden */
@@ -2259,21 +2224,6 @@ async function sniffUtf8(dataset, col, atHand, isFirstGroup) {
   return yes;
 }
 
-/* ======================================================================
-   Workers — decoding column chunks on the other cores.
-
-   The decoders in this file are the only ones there are, so the workers
-   run this same file: the page hands its own <script> text to a Blob URL
-   and starts workers on that. Nothing is duplicated, nothing is fetched,
-   and a worker knows every codec and encoding the page does.
-
-   This thread reads the bytes — waiting on a disk is not work it minds —
-   and hands them over rather than copying them. What comes back is the
-   assembled rows: as one Float64Array where the column is numbers with no
-   nulls in it, as one buffer and its offsets where it is byte strings,
-   and otherwise copied value by value, which is why the columns that
-   would be copied that way are decoded here instead.
-   ====================================================================== */
 const OWN_SCRIPT = (typeof document !== "undefined" && document.currentScript) || null;
 const pool = { workers: [], free: [], waiting: [], jobs: new Map(), id: 0, url: null,
   off: false, force: false, started: false, used: 0, workMs: 0 };
@@ -2527,6 +2477,7 @@ function workerMain(scope) {
  * while the group is first read or long afterwards, which is what lets a
  * column be filled in later without re-reading anything else.
  */
+
 async function readColumnRows(dataset, part, rg, col, sel, took, firstGroup, ctx) {
   if (col.partKey !== undefined) {
     const v = part.partValues ? part.partValues[col.partKey] : null;
@@ -2715,10 +2666,8 @@ function rowsAhead(dataset, table, limit) {
   return rows;
 }
 
-/* ======================================================================
-   Rendering
-   ====================================================================== */
 const $ = (id) => document.getElementById(id);
+
 const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESCAPES[c]);
 const num = (n) => (n == null ? "-" : Number(n).toLocaleString("en-US"));
@@ -3040,6 +2989,7 @@ function doExport(format) {
 }
 
 /* ---------------------------------------------------------------- grid */
+
 function summaryCard(col) {
   const s = col.summary, spec = col.spec;
   if (!s) return "";
@@ -3407,6 +3357,7 @@ function openInspector(viewRow, ci, cell) {
 
 /* ------------------------------------------------------------ metadata */
 /** The physical value a statistics blob holds, before any logical type. */
+
 function rawStat(bytes, leaf) {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   switch (leaf.type) {
@@ -3638,12 +3589,6 @@ function renderMeta() {
   $("mgrip").hidden = $("meta").classList.contains("collapsed");
 }
 
-
-/* ======================================================================
-   Query builder — drop columns into zones, run it over the decoded rows.
-   The generated SQL is shown for the record; the engine below is what
-   actually executes, straight over the column arrays already in memory.
-   ====================================================================== */
 const PREDS = [
   { id: "eq", label: "=", sql: "=" },
   { id: "ne", label: "≠", sql: "<>" },
@@ -4254,12 +4199,6 @@ function querySql() {
 }
 
 
-/* ======================================================================
-   Reading SQL back
-   The panel beside the zones is editable, so the SQL has to parse as well
-   as print. This covers exactly what the builder can hold; anything else
-   is named and refused rather than quietly half-applied.
-   ====================================================================== */
 const SQL_KEYWORDS = {
   SELECT: 1, FROM: 1, WHERE: 1, GROUP: 1, ORDER: 1, BY: 1, LIMIT: 1, AND: 1, OR: 1, NOT: 1,
   IS: 1, NULL: 1, LIKE: 1, BETWEEN: 1, AS: 1, ASC: 1, DESC: 1, DISTINCT: 1, TRUE: 1, FALSE: 1,
@@ -4354,7 +4293,6 @@ function parseSql(text, cols) {
   const selectAggs = [];      /* {ci, agg, alias, tok} */
   const selectPlain = [];     /* {ci, tok} */
 
-  /* ---------------- SELECT ---------------- */
   if (!eatKw("SELECT")) { fail("expected SELECT"); return { query: null, errors, warnings }; }
   if (isKw("DISTINCT")) { fail("SELECT DISTINCT is not supported; use GROUP BY instead"); p++; }
   for (;;) {
@@ -4391,7 +4329,6 @@ function parseSql(text, cols) {
     if (!eatOp(",")) break;
   }
 
-  /* ---------------- FROM ---------------- */
   if (eatKw("FROM")) {
     if (peek().t === "name") p++;
     else fail("expected a table name after FROM");
@@ -4401,7 +4338,6 @@ function parseSql(text, cols) {
     }
   } else fail("expected FROM");
 
-  /* ---------------- WHERE ---------------- */
   const parsePredicate = () => {
     const colTok = peek();
     if (colTok.t !== "name") { fail("expected a column name in WHERE", colTok); p++; return null; }
@@ -4507,7 +4443,6 @@ function parseSql(text, cols) {
     }
   }
 
-  /* ---------------- GROUP BY ---------------- */
   if (isKw("GROUP")) {
     step();
     if (!eatKw("BY")) fail("expected BY after GROUP");
@@ -4528,7 +4463,6 @@ function parseSql(text, cols) {
   }
   if (isKw("HAVING")) fail("HAVING is not supported; filter before grouping with WHERE");
 
-  /* ---------------- shape ---------------- */
   const agg = selectAggs.length > 0 || q.groupBy.length > 0;
   if (agg) {
     q.mode = "agg";
@@ -4549,7 +4483,6 @@ function parseSql(text, cols) {
     q.select = starSelect ? [] : selectPlain.map((s) => s.ci);
   }
 
-  /* ---------------- ORDER BY ---------------- */
   if (isKw("ORDER")) {
     step();
     if (!eatKw("BY")) fail("expected BY after ORDER");
@@ -4589,7 +4522,6 @@ function parseSql(text, cols) {
     }
   }
 
-  /* ---------------- LIMIT ---------------- */
   if (eatKw("LIMIT")) {
     const t = peek();
     if (t.t === "num" && t.v > 0 && Number.isInteger(t.v)) { q.limit = t.v; p++; }
@@ -4601,7 +4533,6 @@ function parseSql(text, cols) {
   /* only worth saying when nothing more specific has already been said */
   if (peek().t !== "end" && !errors.length) fail("unexpected " + (peek().raw || "input"), peek());
 
-  /* ---------------- values against the schema ---------------- */
   for (const f of q.filters) {
     const issue = filterIssue(f, cols);
     if (issue === "invalid") {
@@ -4619,6 +4550,7 @@ function parseSql(text, cols) {
 }
 
 /* ----------------------------------------------------------------- UI */
+
 const TYPE_TAG = { number: "NUM", string: "STR", bool: "BOOL", temporal: "TS", binary: "BIN", nested: "LIST" };
 function typeTag(spec) {
   if (spec.kind === "temporal") return spec.sub === "date" ? "DATE" : spec.sub === "time" ? "TIME" : "TS";
@@ -4923,22 +4855,10 @@ function queryHeight(px) {
   return h;
 }
 
-/* ======================================================================
-   Predicate pushdown — working out what not to read.
-
-   A parquet file says quite a lot about itself before any of it is
-   decoded: every column chunk carries min, max and a null count, and may
-   carry a bloom filter. A WHERE clause can often be proved impossible
-   against those, and a row group that cannot match is a row group that
-   never has to be read.
-
-   The rule throughout is one-sided: "false" here has to mean provably no
-   row can match. Anything that cannot be proved reads, so a missing,
-   truncated or untrustworthy statistic costs time, never correctness.
-   ====================================================================== */
 
 /* below this a row group is a page or two, and narrowing costs more than it
    saves — the index reads alone would outweigh the pages they rule out */
+
 const PAGE_NARROW_MIN = 4096;
 /* and narrowing that leaves most of the group behind is not narrowing */
 const PAGE_NARROW_KEEP = 0.8;
@@ -5409,14 +5329,6 @@ function updateScanButton() {
   b.classList.toggle("on", !!(t && t.scan));
 }
 
-/* ======================================================================
-   Diff — two datasets side by side.
-
-   Everything here reads what the two readers already produced: the footers
-   answer the schema, shape and statistics questions without touching a data
-   page, and the row diff walks the columns already decoded in memory.
-   ====================================================================== */
-const diff = { on: false, b: null, keys: [], rows: null, cap: 200 };
 
 /**
  * What makes two columns of the same name the same column. The spec label
@@ -5424,6 +5336,9 @@ const diff = { on: false, b: null, keys: [], rows: null, cap: 200 };
  * so it says more than the physical type on its own. The utf-8 note is a
  * sniffing result rather than a property of the file, so it is not compared.
  */
+
+const diff = { on: false, b: null, keys: [], rows: null, cap: 200 };
+
 function colShape(col) {
   const leaf = col.leaf;
   if (!leaf) return { phys: "PATH", type: col.spec.label, rep: "partition" };
@@ -6071,10 +5986,8 @@ function swapSides() {
   renderDiff();
 }
 
-/* ======================================================================
-   Wiring
-   ====================================================================== */
 /* ---------------------------------------------------------- resizing */
+
 function columnWidth(index, px) {
   const view = state.view;
   if (!view || !view.cols[index]) return;
@@ -6439,6 +6352,7 @@ if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, 
   intersectRanges, unionRanges, mergeRanges, rangeCount,
   pool, poolStart, workerCan,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
+
 </script>
 </body>
 </html>

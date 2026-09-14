@@ -7,6 +7,11 @@ everything (footer parsing, compression codecs, encodings) is implemented
 inside `index.html`. Save it, open it in a browser, drop a `.parquet` file on
 it. Nothing leaves your machine.
 
+That's true for anyone *using* the file. `index.html` is a generated build
+artifact now — the source lives in `src/`, split into modules by
+responsibility (see **Developing** below) — but the thing you download, save,
+or mail is still exactly one HTML file with nothing else required to run it.
+
 ```sh
 open index.html      # or double-click it, or mail it to someone
 ```
@@ -119,11 +124,52 @@ resolution.
   for one file: build a hash on the smaller side, push its keys into the
   larger side's row-group/page skipping, prune columns on both sides.
 
+## Developing
+
+The source lives in `src/`, one module per responsibility (`codecs.js`,
+`encoding.js`, `query.js`, `pushdown.js`, `diff.js`, `ui-*.js`, and so on),
+using real `import`/`export` so each module's dependencies are explicit and
+checkable. `index.html` is generated from it — never edit `index.html` by
+hand, it says so at the top of the file.
+
+```sh
+npm install        # once, for Biome
+npm run build       # src/*.js + src/index.template.html -> index.html
+npm run lint         # biome check against src/, tools/, scripts/
+npm test              # unit tests, plus the integration suite if fixtures exist
+```
+
+`scripts/compose.sh` (via `scripts/compose.mjs`) is a strip-and-concatenate,
+not a bundler: it deletes the `import`/`export` statements and concatenates
+the module bodies, in a fixed dependency order, into one script sharing one
+global scope — the same shape the file has always shipped in. That fixed
+order is why the modules use real imports for Biome and editors to check,
+but don't need a real module resolver to build.
+
+`biome.json` turns lint on for real, tuned to the codebase's own style
+rather than the defaults wholesale (dense string-concatenation over template
+literals, the `x !== x` NaN check, deliberate control-character ranges in
+byte/encoding regexes are all quieted; genuine correctness rules —
+unused imports/variables, suspicious equality, assignment-in-expression —
+stay on). The formatter is off on purpose: reformatting the existing style is
+a separate decision from turning lint on, not bundled into this pass.
+
 ## Tests
 
 The `tools/` directory is for developing the file; none of it ships to a
 user. It needs `pyarrow` (to write fixtures and act as the source of truth)
-and optionally `playwright`.
+and optionally `playwright` and `duckdb` (its Python package, for the
+query-engine cross-checks).
+
+`npm test` runs the unit tests under `src/*.test.js` — fast, each one
+exercising a single module directly through a real `import`, no file to
+decode (the SQL parser against malformed input, `aggregate`'s rollup/pivot/
+cube reshaping against hand-built columns, `clauseCanMatch`'s pushdown logic
+against hand-built statistics) — and then, if a fixture directory exists
+(`python3 tools/fixtures.py /tmp/fx` first), the integration suite below,
+which exercises the *built* `index.html` end to end. Both matter: the unit
+tests catch a regression in one module in milliseconds; the integration
+suite is the one that would catch the build step itself going wrong.
 
 ```sh
 python3 tools/fixtures.py /tmp/fx             # write fixtures + expected values
