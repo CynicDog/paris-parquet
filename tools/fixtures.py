@@ -193,6 +193,51 @@ def diffpair(root):
     print("%-28s a/b (drift), c/d (row sets), e (rename)" % "diff/")
 
 
+def pushdown(root):
+    """Files whose footers let a WHERE clause rule row groups out."""
+    import shutil
+    shutil.rmtree(root, ignore_errors=True)
+    os.makedirs(root, exist_ok=True)
+    n = 200000
+    rg = 10000
+
+    # sorted: min/max per row group are disjoint, so a range prunes hard
+    t = pa.table({
+        "id": pa.array(range(n), pa.int64()),
+        "grp": pa.array([i % 97 for i in range(n)], pa.int32()),
+        "sku": pa.array(["sku-%06d" % i for i in range(n)]),
+        "amt": pa.array([(i % 1000) * 0.25 for i in range(n)], pa.float64()),
+    })
+    pq.write_table(t, root + "/sorted.parquet", compression="snappy", row_group_size=rg)
+
+    # shuffled: every row group spans the whole range, so only a bloom filter
+    # can rule one out for an equality test
+    order = list(range(n))
+    random.Random(7).shuffle(order)
+    sh = pa.table({
+        "id": pa.array(order, pa.int64()),
+        "sku": pa.array(["sku-%06d" % i for i in order]),
+        "amt": pa.array([(i % 1000) * 0.25 for i in order], pa.float64()),
+    })
+    try:
+        pq.write_table(sh, root + "/shuffled.parquet", compression="snappy", row_group_size=rg,
+                       bloom_filter_options={"id": {"ndv": rg}, "sku": {"ndv": rg}})
+    except Exception as exc:
+        print("skip bloom fixture: %s" % exc)
+        pq.write_table(sh, root + "/shuffled.parquet", compression="snappy", row_group_size=rg)
+
+    # no statistics at all: nothing can be ruled out, answers must still match
+    pq.write_table(t.slice(0, 50000), root + "/nostats.parquet", compression="snappy",
+                   row_group_size=5000, write_statistics=False)
+
+    # nulls: whole row groups that are entirely null, and some with none
+    col = [None if (i // rg) % 2 == 0 else i for i in range(n)]
+    pq.write_table(pa.table({"id": pa.array(range(n), pa.int64()),
+                             "maybe": pa.array(col, pa.int64())}),
+                   root + "/nulls.parquet", compression="snappy", row_group_size=rg)
+    print("%-28s sorted, shuffled+bloom, nostats, nulls" % "push/")
+
+
 def main(out):
     os.makedirs(out, exist_ok=True)
     b, e, enc = basic(), edge(), encodings()
@@ -236,6 +281,7 @@ def main(out):
 
     folders(os.path.join(out, "folders"))
     diffpair(os.path.join(out, "diff"))
+    pushdown(os.path.join(out, "push"))
 
     try:
         import polars as pl

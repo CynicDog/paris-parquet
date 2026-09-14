@@ -176,7 +176,7 @@ async function checkFile(file) {
   const tableName = path.basename(file).replace(/\.parquet$/, "").replace(/[^A-Za-z0-9_]/g, "_");
 
   const problems = [];
-  let ran = 0;
+  let ran = 0, planned = 0, pruned = 0, groups = 0;
   for (const c of cases(table.cols)) {
     const q = { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], metrics: [], limit: null };
     c.patch(q);
@@ -224,6 +224,45 @@ async function checkFile(file) {
     mine.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
     theirs.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
     ran++;
+    /* the same query again, over only the row groups a plan kept. Skipping is
+       allowed to change how much is read and nothing else, so this has to come
+       back as the very same rows. */
+    if (q.filters.length) {
+      const plan = await PARIS.planScan(dataset, q, table);
+      if (plan) {
+        const scanned = PARIS.newTable(dataset);
+        scanned.plan = plan.keep;
+        PARIS.state.table = scanned;
+        await PARIS.loadMore(dataset, scanned, Infinity);
+        PARIS.state.query = q;
+        PARIS.runQuery();
+        const sv = PARIS.state.view;
+        const pushed = [];
+        for (let r = 0; r < sv.count; r++) {
+          const row = [];
+          for (let ci = 0; ci < sv.cols.length; ci++) {
+            row.push(canon(sv.index ? sv.cols[ci].rows[sv.index[r]] : sv.cols[ci].rows[r], sv.cols[ci].spec));
+          }
+          pushed.push(row);
+        }
+        pushed.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+        PARIS.state.table = table;
+        PARIS.state.query = q;
+        planned++;
+        groups += plan.total;
+        pruned += plan.total - plan.kept;
+        if (pushed.length !== mine.length) {
+          problems.push(`${c.name}: pushdown gave ${pushed.length} rows, a full read gives ${mine.length}` +
+            ` (kept ${plan.kept}/${plan.total} row groups)\n        ${sql.replace(/\n/g, " ")}`);
+        } else {
+          const at = pushed.findIndex((row, i) => row.some((v, j) => v !== mine[i][j]));
+          if (at >= 0) {
+            problems.push(`${c.name}: pushdown row ${at}\n        push ${key(pushed[at])}` +
+              `\n        full ${key(mine[at])}\n        ${sql.replace(/\n/g, " ")}`);
+          }
+        }
+      }
+    }
     if (mine.length !== theirs.length) {
       problems.push(`${c.name}: ${mine.length} rows, duckdb says ${theirs.length}\n        ${sql.replace(/\n/g, " ")}`);
       continue;
@@ -235,7 +274,7 @@ async function checkFile(file) {
       }
     }
   }
-  return { problems, ran };
+  return { problems, ran, planned, pruned, groups };
 }
 
 let failed = 0;
@@ -257,7 +296,8 @@ for (const f of files) {
     console.log(`FAIL ${name} ${r.problems.length} of ${r.ran} queries differ`);
     for (const p of r.problems.slice(0, 4)) console.log("       " + p);
   } else {
-    console.log(`ok   ${name} ${r.ran} queries match duckdb`);
+    console.log(`ok   ${name} ${r.ran} queries match duckdb` +
+      (r.planned ? `, ${r.planned} also pushed down (${r.pruned}/${r.groups} row groups skipped)` : ""));
   }
 }
 console.log(failed ? `\n${failed}/${files.length} files failed` : `\nall ${files.length} files agree with duckdb`);
