@@ -25,10 +25,24 @@ open index.html      # or double-click it, or mail it to someone
   version, the writer that produced it, footer size, page encodings, encryption
   status and any key/value metadata.
 
-Both splits are draggable: the bar between the grid and the metadata panel
-resizes the panel, and the right edge of any column header resizes that column
-(double-click it to go back to the default width). The panel height is
-remembered; column widths last for the session.
+Below the grid is a pager: 100 rows a page by default, or 10, 200, 500, 1,000,
+3,000 or all of them. A page that fits in one draw goes into the page whole, so
+scrolling it costs nothing at all; larger pages fall back to windowing.
+
+Between the grid and the metadata sits the **query builder**. Drag a column
+from the list into `SELECT`, `WHERE`, `ORDER BY` — or switch to Aggregate and
+drop into `GROUP BY` and `METRICS` — then Run. Filters offer `=`, `≠`, `<`,
+`≤`, `>`, `≥`, `LIKE`, `BETWEEN`, `IS NULL` and `IS NOT NULL`, chained with AND
+or OR (AND binds tighter, as in SQL). Aggregates are `COUNT`,
+`COUNT(DISTINCT)`, `SUM`, `AVG`, `MIN` and `MAX`. The equivalent SQL is shown
+beside the zones and can be copied, but it is a record of the query, not how it
+runs: the engine executes over the columns already decoded in memory. Results
+replace the grid, and the summary cards above recompute over them.
+
+All three splits are draggable: the bars above the query and metadata panels
+resize them, and the right edge of any column header resizes that column
+(double-click it to go back to the default width). Panel heights and the page
+size are remembered; column widths last for the session.
 
 The button in the top right switches the colour theme between `auto` (whatever
 the browser is set to), `light` and `dark`. The choice is remembered where the
@@ -62,11 +76,14 @@ It needs `pyarrow` (to write fixtures and to be the source of truth) and
 optionally `playwright`.
 
 ```sh
-python3 tools/fixtures.py /tmp/fx          # write fixtures + expected values
-node tools/check.mjs /tmp/fx/*.parquet     # decode each one, compare every cell
-node tools/fuzz-zstd.mjs 1000              # zstd decoder vs node's zstd encoder
-node tools/browser.mjs /tmp/fx/a.parquet   # drive the page in real Chromium
+python3 tools/fixtures.py /tmp/fx             # write fixtures + expected values
+node tools/check.mjs /tmp/fx/*.parquet        # decode each one, compare every cell
+node tools/check-query.mjs /tmp/fx/*.parquet  # run the query engine against duckdb
+node tools/fuzz-zstd.mjs 1000                 # zstd decoder vs node's zstd encoder
+node tools/browser.mjs /tmp/fx/a.parquet      # drive the page in real Chromium
 ```
 
 `check.mjs` pulls the `<script>` out of `index.html` and runs it against a stub
 DOM, so the tests exercise the shipped file rather than a copy of it.
+`check-query.mjs` builds a query, asks the engine and duckdb the same question
+over the same file, and compares every cell of the two answers.

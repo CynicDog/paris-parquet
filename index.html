@@ -58,6 +58,17 @@ body.dragging #drop{background:var(--accent-soft);outline:2px dashed var(--accen
 #busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   background:color-mix(in srgb,var(--bg) 80%,transparent);font:12px var(--mono);color:var(--dim);z-index:30}
 
+/* ---------- pagination ---------- */
+#pager{flex:none;display:flex;align-items:center;gap:7px;padding:4px 10px;border-top:1px solid var(--line);
+  background:var(--panel);font:11px/1.6 var(--mono);color:var(--dim);flex-wrap:wrap}
+#pager button{padding:1px 8px;font-size:12px;line-height:1.3;min-width:26px}
+#pager input,#pager select{font:11px var(--mono);background:var(--panel);color:var(--ink);
+  border:1px solid var(--line);border-radius:4px;padding:1px 4px}
+#pager input{width:52px;text-align:right}
+#pager b{color:var(--accent);font-weight:600}
+.pinfo{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.psep{width:1px;height:13px;background:var(--line);display:inline-block}
+
 /* ---------- grid ---------- */
 #gridwrap{flex:1;overflow:auto;min-height:0;position:relative}
 table.grid{border-collapse:separate;border-spacing:0;table-layout:fixed;width:max-content;font:12px/1.4 var(--mono)}
@@ -103,6 +114,60 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .bools i{display:block;text-align:center;overflow:hidden}
 .bools i.t{background:var(--bool)} .bools i.f{background:var(--dim)} .bools i.n{background:var(--line)}
 
+/* ---------- query builder ---------- */
+#query{flex:none;height:var(--queryh,258px);display:flex;flex-direction:column;overflow:hidden;
+  border-top:1px solid var(--line);background:var(--panel)}
+.qbar{flex:none;display:flex;align-items:center;gap:8px;padding:5px 12px;border-bottom:1px solid var(--line2);
+  font:11px var(--mono);color:var(--dim);flex-wrap:wrap}
+.qtitle{font-weight:700;letter-spacing:.08em;color:var(--dim)}
+#qstat b{color:var(--accent)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:2px 9px;font-size:11px;background:var(--panel);color:var(--dim)}
+.seg button.on{background:var(--accent);color:#fff}
+.qbody{flex:1;display:flex;min-height:0}
+.qcols{flex:0 0 196px;overflow:auto;border-right:1px solid var(--line2);background:var(--bg)}
+.qhead{position:sticky;top:0;background:var(--bg);padding:5px 10px;font:10px var(--mono);font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--line2);
+  display:flex;justify-content:space-between;align-items:center;z-index:1}
+.qcol{display:flex;align-items:center;gap:6px;padding:3px 10px;cursor:grab;font:11px var(--mono);
+  border-bottom:1px solid var(--line2);user-select:none}
+.qcol:hover{background:var(--accent-soft)}
+.qgrab{color:var(--faint);font-size:10px;flex:none}
+.qcname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.qtag{font-size:9px;font-weight:700;border:1px solid var(--line);border-radius:3px;padding:0 3px;flex:none}
+.qzones{flex:1;overflow:auto;padding:9px 12px;display:flex;flex-direction:column;gap:9px;min-width:0}
+.qzone{min-width:0}
+.qzlabel{font:10px var(--mono);font-weight:700;letter-spacing:.08em;color:var(--faint);margin-bottom:3px}
+.qdrop{min-height:30px;border:1px dashed var(--line);border-radius:5px;padding:4px 7px;display:flex;
+  flex-wrap:wrap;gap:4px;align-items:center;background:var(--panel)}
+.qdrop.empty{background:var(--bg)}
+.qdrop.over{border-color:var(--accent);background:var(--accent-soft)}
+.qhint{font:11px var(--mono);color:var(--faint);user-select:none}
+.qchip{display:inline-flex;align-items:center;gap:3px;font:11px var(--mono);background:var(--bg);
+  border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--ink)}
+.qrow{display:flex;align-items:center;gap:4px;flex-wrap:wrap;width:100%}
+.qrow code{font:11px var(--mono);background:var(--bg);border:1px solid var(--line2);border-radius:3px;
+  padding:1px 6px;color:var(--ink)}
+.qbtns{display:inline-flex;gap:2px}
+.qb{font:10px var(--mono);padding:1px 5px;border:1px solid var(--line);border-radius:3px;background:var(--panel);
+  color:var(--dim);font-weight:600;min-width:0}
+.qb.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.qlink{font:10px var(--mono);font-weight:700;color:var(--accent);background:none;border:1px solid var(--accent);
+  border-radius:3px;padding:0 5px;width:36px}
+.qin{font:11px var(--mono);background:var(--panel);color:var(--ink);border:1px solid var(--line);
+  border-radius:3px;padding:1px 5px}
+.qx{background:none;border:0;color:var(--faint);cursor:pointer;font-size:13px;line-height:1;padding:0 2px;min-width:0}
+.qx:hover{color:var(--err)}
+.qin.bad{border-color:var(--err);color:var(--err)}
+.qwarn{color:var(--warn);font-style:normal}
+.qlimit{display:flex;align-items:center;gap:8px}
+.qlimit .qzlabel{margin:0}
+.qsqlwrap{flex:0 0 272px;border-left:1px solid var(--line2);display:flex;flex-direction:column;overflow:hidden;
+  background:var(--bg)}
+.qsqlwrap .qhead button{font:10px var(--mono);padding:0 6px;border-radius:3px}
+#qsql{margin:0;padding:8px 10px;overflow:auto;flex:1;font:11px/1.55 var(--mono);color:var(--ink);
+  white-space:pre-wrap;word-break:break-word}
+
 /* ---------- footer / metadata ---------- */
 #mgrip{flex:none;height:7px;background:var(--bg);cursor:row-resize;position:relative;z-index:6}
 #mgrip::after{content:"";position:absolute;left:50%;top:2px;margin-left:-19px;width:38px;height:3px;
@@ -138,6 +203,7 @@ details[open]>summary::before{content:"▾ "}
 .muted{color:var(--faint)}
 .warnbox{border:1px solid var(--warn);color:var(--warn);border-radius:5px;padding:6px 9px;margin:8px 0;font:11px/1.5 var(--mono)}
 </style>
+<style id="colstyle"></style>
 </head>
 <body>
 <header>
@@ -148,6 +214,7 @@ details[open]>summary::before{content:"▾ "}
   <div class="grow"></div>
   <button id="more" hidden>Load more rows</button>
   <button id="all" hidden>Load all</button>
+  <button id="toggleQuery" hidden>Query</button>
   <button id="toggleMeta" hidden>Hide metadata</button>
   <button id="theme" title="Colour theme: follow the browser, or force light or dark">auto</button>
 </header>
@@ -159,9 +226,27 @@ details[open]>summary::before{content:"▾ "}
       The file never leaves your machine.</div>
   </div>
   <div id="gridwrap" hidden><table class="grid" id="grid"></table></div>
+  <div id="pager" hidden></div>
   <div id="busy" hidden>reading…</div>
 </div>
 
+<div id="qgrip" hidden title="Drag to resize the query panel"></div>
+<section id="query" hidden>
+  <div class="qbar">
+    <span class="qtitle">QUERY</span>
+    <span class="seg" id="qmode"><button data-mode="rows" class="on">Rows</button><button data-mode="agg">Aggregate</button></span>
+    <button id="qrun" title="Run the query (Enter)">Run</button>
+    <button id="qclear" disabled>Reset</button>
+    <span id="qstat"></span>
+    <span class="grow"></span>
+    <span class="muted">drag a column into a zone, or double-click it</span>
+  </div>
+  <div class="qbody">
+    <div class="qcols" id="qcols"></div>
+    <div class="qzones" id="qzones"></div>
+    <div class="qsqlwrap"><div class="qhead">SQL<button id="qcopy">copy</button></div><pre id="qsql"></pre></div>
+  </div>
+</section>
 <div id="mgrip" hidden title="Drag to resize the metadata panel"></div>
 <div id="meta" hidden>
   <div class="mbar" id="mbar"></div>
@@ -1590,16 +1675,22 @@ function lessThan(a, b) {
   }
   return false;
 }
-function summarize(col) {
+/**
+ * Summarises one column. `index`, when given, selects which underlying rows
+ * belong to the current view, so a filtered result summarises itself without
+ * copying any values.
+ */
+function summarize(col, index, count) {
   const rows = col.rows, spec = col.spec;
-  const n = rows.length;
+  const n = count == null ? (index ? index.length : rows.length) : count;
+  const at = index ? (i) => rows[index[i]] : (i) => rows[i];
   let nulls = 0;
-  for (let i = 0; i < n; i++) if (rows[i] === null || rows[i] === undefined) nulls++;
+  for (let i = 0; i < n; i++) { const v = at(i); if (v === null || v === undefined) nulls++; }
   const s = { n, nulls, kind: spec.kind };
 
   if (spec.kind === "bool") {
     let t = 0, f = 0;
-    for (const v of rows) { if (v === true) t++; else if (v === false) f++; }
+    for (let i = 0; i < n; i++) { const v = at(i); if (v === true) t++; else if (v === false) f++; }
     s.trues = t; s.falses = f;
     return s;
   }
@@ -1607,7 +1698,7 @@ function summarize(col) {
     let min = Infinity, max = -Infinity, sum = 0, cnt = 0, nan = 0;
     let lo = null, hi = null;
     for (let i = 0; i < n; i++) {
-      const v = rows[i];
+      const v = at(i);
       if (v === null || v === undefined) continue;
       const x = numeric(v);
       if (!isFinite(x)) { nan++; continue; }
@@ -1623,7 +1714,7 @@ function summarize(col) {
       const hist = new Int32Array(BINS);
       const span = max - min;
       for (let i = 0; i < n; i++) {
-        const v = rows[i];
+        const v = at(i);
         if (v === null || v === undefined) continue;
         const x = numeric(v);
         if (!isFinite(x)) continue;
@@ -1643,7 +1734,7 @@ function summarize(col) {
   let distinctCapped = false;
   let minLen = Infinity, maxLen = -Infinity, sumLen = 0, cnt = 0;
   for (let i = 0; i < n; i++) {
-    const v = rows[i];
+    const v = at(i);
     if (v === null || v === undefined) continue;
     cnt++;
     let key, len;
@@ -1667,7 +1758,7 @@ function summarize(col) {
   }
   if (spec.kind === "nested") {
     let empties = 0;
-    for (const v of rows) if (Array.isArray(v) && v.length === 0) empties++;
+    for (let i = 0; i < n; i++) { const v = at(i); if (Array.isArray(v) && v.length === 0) empties++; }
     s.empties = empties;
   }
   return s;
@@ -1739,7 +1830,6 @@ async function loadMore(src, table, maxRows, onProgress) {
     table.groupsLoaded++;
   }
   table.truncated = table.nextGroup < meta.rowGroups.length;
-  for (const col of table.cols) col.summary = summarize(col);
   return added;
 }
 
@@ -1761,8 +1851,110 @@ function bytesHuman(n) {
 const pct = (a, b) => (b ? (a / b * 100).toFixed(a / b >= 0.1 || a === 0 ? 0 : 1) + "%" : "0%");
 
 const COL_W = 178, ROW_H = 22;
-const state = { src: null, meta: null, table: null, first: 0 };
+/* how many cells may be drawn in one go before the grid falls back to
+   windowing; 100 rows of 40 columns fits comfortably inside it */
+const CELL_BUDGET = 8000;
+const PAGE_SIZES = [10, 100, 200, 500, 1000, 3000, Infinity];
+const state = { src: null, meta: null, table: null, view: null, page: 0, pageSize: 100, first: 0 };
 
+/**
+ * A view is what the grid draws: a list of columns, a row count, and an
+ * optional Int32Array picking which underlying rows to show, in what order.
+ * The unfiltered table is a view with no index, so nothing is copied until a
+ * query actually reshapes the data.
+ */
+function baseView(table) {
+  return { cols: table.cols, index: null, count: table.rowsLoaded, label: null, agg: false };
+}
+function viewValue(view, ci, row) {
+  const rows = view.cols[ci].rows;
+  return view.index ? rows[view.index[row]] : rows[row];
+}
+function summarizeView(view) {
+  for (const col of view.cols) col.summary = summarize(col, view.index, view.count);
+}
+function setView(view) {
+  state.view = view;
+  state.page = 0;
+  summarizeView(view);
+  renderGrid();
+  renderPager();
+}
+
+/* ------------------------------------------------------------ pagination */
+function pageBounds() {
+  const v = state.view;
+  if (!v) return [0, 0];
+  const size = state.pageSize;
+  if (!isFinite(size)) return [0, v.count];
+  const pages = Math.max(1, Math.ceil(v.count / size));
+  if (state.page >= pages) state.page = pages - 1;
+  if (state.page < 0) state.page = 0;
+  const start = state.page * size;
+  return [start, Math.min(v.count, start + size)];
+}
+function pageCount() {
+  const v = state.view;
+  if (!v || !isFinite(state.pageSize)) return 1;
+  return Math.max(1, Math.ceil(v.count / state.pageSize));
+}
+function gotoPage(n) {
+  const last = pageCount() - 1;
+  const p = Math.max(0, Math.min(last, n));
+  if (p === state.page) return;
+  state.page = p;
+  $("gridwrap").scrollTop = 0;
+  state.first = -1;
+  renderRows(true);
+  renderPager();
+}
+function renderPager() {
+  const v = state.view;
+  const bar = $("pager");
+  if (!v) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const [from, to] = pageBounds();
+  const pages = pageCount();
+  const opts = PAGE_SIZES.map((n) => "<option value='" + n + "'" +
+    (n === state.pageSize ? " selected" : "") + ">" + (isFinite(n) ? num(n) : "All") + "</option>").join("");
+  const dis = (on) => (on ? " disabled" : "");
+  bar.innerHTML =
+    "<button id='pfirst' title='First page'" + dis(state.page === 0) + ">&laquo;</button>" +
+    "<button id='pprev' title='Previous page'" + dis(state.page === 0) + ">&lsaquo;</button>" +
+    "<span class='pinfo'>page <input id='pnum' value='" + (state.page + 1) +
+    "' size='4' inputmode='numeric'> of " + num(pages) + "</span>" +
+    "<button id='pnext' title='Next page'" + dis(state.page >= pages - 1) + ">&rsaquo;</button>" +
+    "<button id='plast' title='Last page'" + dis(state.page >= pages - 1) + ">&raquo;</button>" +
+    "<span class='psep'></span>" +
+    "<label class='pinfo'>rows <select id='psize'>" + opts + "</select></label>" +
+    "<span class='psep'></span>" +
+    "<span class='pinfo'>" + (v.count ? num(from + 1) + "&ndash;" + num(to) : "0") + " of " + num(v.count) +
+    (v.label ? " <b>" + esc(v.label) + "</b>" : "") + "</span>" +
+    (state.table && state.table.truncated
+      ? "<span class='pinfo muted'>&middot; " + num(state.table.rowsLoaded) + " of " +
+        num(state.meta.numRows) + " rows read</span>" : "");
+  $("pfirst").onclick = () => gotoPage(0);
+  $("pprev").onclick = () => gotoPage(state.page - 1);
+  $("pnext").onclick = () => gotoPage(state.page + 1);
+  $("plast").onclick = () => gotoPage(pages - 1);
+  $("pnum").onchange = (e) => {
+    const n = parseInt(e.target.value, 10);
+    if (isFinite(n)) gotoPage(n - 1); else renderPager();
+  };
+  $("psize").onchange = (e) => {
+    const size = Number(e.target.value);
+    const anchor = pageBounds()[0];
+    state.pageSize = size;
+    state.page = isFinite(size) ? Math.floor(anchor / size) : 0;
+    try { localStorage.setItem("paris-parquet-pagesize", String(size)); } catch (err) { /* fine */ }
+    $("gridwrap").scrollTop = 0;
+    state.first = -1;
+    renderRows(true);
+    renderPager();
+  };
+}
+
+/* ---------------------------------------------------------------- grid */
 function summaryCard(col) {
   const s = col.summary, spec = col.spec;
   if (!s) return "";
@@ -1823,27 +2015,42 @@ function summaryCard(col) {
 }
 
 function renderGrid() {
-  const table = state.table;
+  const view = state.view;
+  if (!view) return;
   const grid = $("grid");
-  const cols = table.cols;
-  if (!table.widths || table.widths.length !== cols.length) table.widths = cols.map(() => COL_W);
+  const cols = view.cols;
+  const widths = state.table.widths;
+  if (!widths || widths.length !== cols.length) state.table.widths = cols.map(() => COL_W);
   let html = "<colgroup><col style='width:62px'>";
-  for (let i = 0; i < cols.length; i++) html += "<col style='width:" + table.widths[i] + "px'>";
+  for (let i = 0; i < cols.length; i++) html += "<col style='width:" + state.table.widths[i] + "px'>";
   html += "</colgroup><thead><tr class='r-name'><th class='rownum'>#</th>";
-  let i = 0;
-  for (const c of cols) {
-    const title = c.leaf.path.join(".") + "  -  " + c.spec.label + " (" + c.spec.physical +
-      ", " + c.leaf.rep.toLowerCase() + ")";
+  for (let i = 0; i < cols.length; i++) {
+    const c = cols[i];
+    const title = (c.leaf ? c.leaf.path.join(".") : c.name) + "  -  " + c.spec.label +
+      (c.leaf ? " (" + c.spec.physical + ", " + c.leaf.rep.toLowerCase() + ")" : "");
     html += "<th title='" + esc(title) + "'><span class='cname'>" + esc(c.name) +
       "</span><span class='ctype t-" + c.spec.kind + "'>" + esc(c.spec.label) +
-      (c.leaf.rep === "OPTIONAL" && !c.spec.nested ? "?" : "") +
+      (c.leaf && c.leaf.rep === "OPTIONAL" && !c.spec.nested ? "?" : "") +
       "</span><i class='grip' data-col='" + i + "' title='Drag to resize, double-click to reset'></i></th>";
-    i++;
   }
   html += "</tr><tr class='r-sum'><th class='rownum'></th>";
   for (const c of cols) html += "<th>" + summaryCard(c) + "</th>";
   html += "</tr></thead><tbody id='tbody'></tbody>";
   grid.innerHTML = html;
+
+  /* Per-column alignment and colour go in one stylesheet keyed by position,
+     so a body cell can be a bare <td> - at 40 columns that is the difference
+     between a smooth scroll and a stuttering one. */
+  let css = "";
+  for (let i = 0; i < cols.length; i++) {
+    const kind = cols[i].spec.kind;
+    const nth = "#grid td:nth-child(" + (i + 2) + ")";
+    if (kind === "number") css += nth + "{text-align:right}";
+    else if (kind === "bool") css += nth + "{color:var(--bool)}";
+    else if (kind === "binary" || kind === "nested") css += nth + "{color:var(--dim)}";
+  }
+  $("colstyle").textContent = css;
+
   $("gridwrap").hidden = false;
   $("drop").hidden = true;
   const nameRow = grid.querySelector("tr.r-name");
@@ -1853,35 +2060,52 @@ function renderGrid() {
 }
 
 function renderRows(force) {
-  const table = state.table;
-  if (!table) return;
+  const view = state.view;
+  if (!view) return;
   const wrap = $("gridwrap"), body = $("tbody");
   if (!body) return;
-  const head = wrap.querySelector("thead").offsetHeight;
-  const total = table.rowsLoaded;
-  const viewport = wrap.clientHeight;
-  const scroll = Math.max(0, wrap.scrollTop - head);
-  const visible = Math.ceil(viewport / ROW_H) + 12;
-  let first = Math.max(0, Math.floor(scroll / ROW_H) - 6);
-  if (first + visible > total) first = Math.max(0, total - visible);
+  const [pageStart, pageEnd] = pageBounds();
+  const total = pageEnd - pageStart;
+  const ncols = view.cols.length;
+  let first, visible;
+  if (total * ncols <= CELL_BUDGET) {
+    /* A small page goes into the DOM whole. Scrolling then costs nothing at
+       all: the early return below sees the same window every time. Replacing
+       the tbody is a fixed cost regardless of row count, so drawing 100 rows
+       is no dearer than drawing the 35 that happen to be on screen. */
+    first = 0;
+    visible = total;
+  } else {
+    const head = wrap.querySelector("thead").offsetHeight;
+    const viewport = wrap.clientHeight;
+    const scroll = Math.max(0, wrap.scrollTop - head);
+    visible = Math.ceil(viewport / ROW_H) + 12;
+    first = Math.max(0, Math.floor(scroll / ROW_H) - 6);
+    if (first + visible > total) first = Math.max(0, total - visible);
+  }
   if (!force && first === state.first) return;
   state.first = first;
   const last = Math.min(total, first + visible);
-  const cols = table.cols;
-  const span = cols.length + 1;
+  const cols = view.cols;
+  const index = view.index;
+  const span = ncols + 1;
+  const specs = new Array(ncols), data = new Array(ncols);
+  for (let i = 0; i < ncols; i++) { specs[i] = cols[i].spec; data[i] = cols[i].rows; }
   const parts = [];
   if (first > 0) {
     parts.push("<tr><td class='pad' colspan='" + span + "' style='height:" + first * ROW_H + "px'></td></tr>");
   }
   for (let r = first; r < last; r++) {
-    parts.push("<tr><td class='rownum'>" + (r + 1) + "</td>");
-    for (let ci = 0; ci < cols.length; ci++) {
-      const col = cols[ci];
-      const v = col.rows[r];
+    const abs = pageStart + r;
+    const src = index ? index[abs] : abs;
+    parts.push("<tr><td class='rownum'>", String((view.agg ? abs : src) + 1), "</td>");
+    for (let ci = 0; ci < ncols; ci++) {
+      const v = data[ci][src];
       if (v === null || v === undefined) { parts.push("<td class='null'>null</td>"); continue; }
-      let text = fmtValue(v, col.spec);
+      let text = fmtValue(v, specs[ci]);
       if (text.length > 300) text = text.slice(0, 300) + "...";
-      parts.push("<td class='v-" + col.spec.kind + "' title='" + esc(text) + "'>" + esc(text) + "</td>");
+      /* only long values need the tooltip, and skipping it halves the markup */
+      parts.push(text.length > 22 ? "<td title='" + esc(text) + "'>" : "<td>", esc(text), "</td>");
     }
     parts.push("</tr>");
   }
@@ -2071,7 +2295,614 @@ function renderMeta() {
   }
   $("mbody").innerHTML = cards.join("");
   $("meta").hidden = false;
+  if (!state.metaTouched) {
+    /* the query panel takes the room the metadata panel used to have, so the
+       metadata starts folded away; one click brings it back */
+    $("meta").classList.add("collapsed");
+    $("toggleMeta").textContent = "Show metadata";
+  }
   $("mgrip").hidden = $("meta").classList.contains("collapsed");
+}
+
+
+/* ======================================================================
+   Query builder — drop columns into zones, run it over the decoded rows.
+   The generated SQL is shown for the record; the engine below is what
+   actually executes, straight over the column arrays already in memory.
+   ====================================================================== */
+const PREDS = [
+  { id: "eq", label: "=", sql: "=" },
+  { id: "ne", label: "≠", sql: "<>" },
+  { id: "lt", label: "<", sql: "<" },
+  { id: "le", label: "≤", sql: "<=" },
+  { id: "gt", label: ">", sql: ">" },
+  { id: "ge", label: "≥", sql: ">=" },
+  { id: "like", label: "LIKE", sql: "LIKE" },
+  { id: "between", label: "BTW", sql: "BETWEEN" },
+  { id: "null", label: "NULL", sql: "IS NULL" },
+  { id: "notnull", label: "!NULL", sql: "IS NOT NULL" },
+];
+const NO_OPERAND = { null: 1, notnull: 1 };
+const AGGS = ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MIN", "MAX"];
+const AGG_SHORT = { COUNT: "COUNT", COUNT_DISTINCT: "CNTD", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "MAX" };
+let qid = 0;
+
+function newQuery() {
+  return { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], metrics: [], limit: null };
+}
+
+/* -------------------------------------------------------- value parsing */
+function parseTemporal(text, spec) {
+  const t = text.trim();
+  if (/^-?\d+(\.\d+)?$/.test(t)) return parseFloat(t);          /* raw epoch millis */
+  if (spec.sub === "time") {
+    const m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/);
+    if (!m) return NaN;
+    return ((+m[1] * 60 + +m[2]) * 60 + (+m[3] || 0)) * 1000 + (m[4] ? +(m[4] + "000").slice(0, 3) : 0);
+  }
+  const m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?Z?$/);
+  if (!m) return NaN;
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0),
+    m[7] ? +(m[7] + "000").slice(0, 3) : 0);
+}
+function parseOperand(text, spec) {
+  const t = String(text).trim();
+  if (spec.kind === "number") return parseFloat(t);
+  if (spec.kind === "temporal") return parseTemporal(t, spec);
+  if (spec.kind === "bool") return /^(true|t|1|y|yes)$/i.test(t) ? 1 : 0;
+  return t;
+}
+/** Numeric key for a stored value, or null when the column compares as text. */
+function sortKey(spec) {
+  if (spec.kind === "bool") return (v) => (v === true ? 1 : v === false ? 0 : NaN);
+  if (spec.kind === "number" || spec.kind === "temporal") return numeric;
+  return null;
+}
+function textOf(v, spec) {
+  return spec.kind === "string" ? v : fmtValue(v, spec);
+}
+
+/* ------------------------------------------------------------- filtering */
+/** Compiles one clause into a row test, or null if it is not filled in yet. */
+function compileFilter(f, cols) {
+  const col = cols[f.ci];
+  if (!col) return null;
+  const rows = col.rows, spec = col.spec, p = f.pred;
+  if (p === "null") return (r) => rows[r] === null || rows[r] === undefined;
+  if (p === "notnull") return (r) => rows[r] !== null && rows[r] !== undefined;
+  if (f.value === "" || f.value == null) return null;
+  if (p === "like") {
+    const needle = String(f.value).toLowerCase();
+    return (r) => {
+      const v = rows[r];
+      return v !== null && v !== undefined && String(textOf(v, spec)).toLowerCase().indexOf(needle) >= 0;
+    };
+  }
+  const key = sortKey(spec);
+  if (!key) {                                   /* text comparison */
+    const a = String(f.value), b = String(f.valueTo == null ? f.value : f.valueTo);
+    const get = (r) => { const v = rows[r]; return v === null || v === undefined ? null : String(textOf(v, spec)); };
+    switch (p) {
+      case "eq": return (r) => get(r) === a;
+      case "ne": return (r) => { const x = get(r); return x !== null && x !== a; };
+      case "lt": return (r) => { const x = get(r); return x !== null && x < a; };
+      case "le": return (r) => { const x = get(r); return x !== null && x <= a; };
+      case "gt": return (r) => { const x = get(r); return x !== null && x > a; };
+      case "ge": return (r) => { const x = get(r); return x !== null && x >= a; };
+      case "between": return (r) => { const x = get(r); return x !== null && x >= a && x <= b; };
+      default: return null;
+    }
+  }
+  const a = parseOperand(f.value, spec);
+  if (!isFinite(a)) return null;
+  const b = f.valueTo == null || f.valueTo === "" ? a : parseOperand(f.valueTo, spec);
+  switch (p) {
+    case "eq": return (r) => key(rows[r]) === a;
+    case "ne": return (r) => { const x = key(rows[r]); return x === x && x !== a; };
+    case "lt": return (r) => key(rows[r]) < a;
+    case "le": return (r) => key(rows[r]) <= a;
+    case "gt": return (r) => key(rows[r]) > a;
+    case "ge": return (r) => key(rows[r]) >= a;
+    case "between": return (r) => { const x = key(rows[r]); return x >= a && x <= b; };
+    default: return null;
+  }
+}
+/**
+ * Why a clause will not be applied: "empty" if no value has been typed yet,
+ * "invalid" if what was typed is not a value this column could hold. Either
+ * way the clause is skipped, and the UI says so rather than quietly widening
+ * the result.
+ */
+function filterIssue(f, cols) {
+  const col = cols[f.ci];
+  if (!col) return "missing";
+  if (NO_OPERAND[f.pred]) return null;
+  if (f.value === "" || f.value == null) return "empty";
+  if (f.pred === "like") return null;
+  if (!sortKey(col.spec)) return null;                 /* text compares anything */
+  if (!isFinite(parseOperand(f.value, col.spec))) return "invalid";
+  if (f.pred === "between" && f.valueTo !== "" && f.valueTo != null &&
+      !isFinite(parseOperand(f.valueTo, col.spec))) return "invalid";
+  return null;
+}
+
+/** AND binds tighter than OR, so the clauses become OR-ed groups of ANDs. */
+function orGroups(filters, cols) {
+  const groups = [];
+  let current = null;
+  for (const f of filters) {
+    const test = compileFilter(f, cols);
+    if (!test) continue;
+    if (!current || f.linker === "OR") { current = []; groups.push(current); }
+    current.push(test);
+  }
+  return groups;
+}
+
+function buildComparator(sorts, cols) {
+  const parts = sorts.map((s) => {
+    const col = cols[s.ci];
+    const rows = col.rows, key = sortKey(col.spec), spec = col.spec;
+    const sign = s.dir === "DESC" ? -1 : 1;
+    if (key) {
+      return (x, y) => {
+        const a = key(rows[x]), b = key(rows[y]);
+        const an = a !== a || a === undefined, bn = b !== b || b === undefined;
+        if (an || bn) return an && bn ? 0 : an ? 1 : -1;     /* nulls last */
+        return a < b ? -sign : a > b ? sign : 0;
+      };
+    }
+    return (x, y) => {
+      const va = rows[x], vb = rows[y];
+      const an = va === null || va === undefined, bn = vb === null || vb === undefined;
+      if (an || bn) return an && bn ? 0 : an ? 1 : -1;
+      const a = String(textOf(va, spec)), b = String(textOf(vb, spec));
+      return a < b ? -sign : a > b ? sign : 0;
+    };
+  });
+  return (x, y) => {
+    for (let i = 0; i < parts.length; i++) { const c = parts[i](x, y); if (c) return c; }
+    return x - y;
+  };
+}
+
+/* ------------------------------------------------------------ aggregates */
+/* a group key joins its parts with \u0001 and writes null as \u0000, so no
+   two group values can collide by running into each other */
+const keyPart = (v) => (v === null || v === undefined ? "\u0000" : typeof v === "object" ? JSON.stringify(v) : String(v));
+
+function aggregate(q, cols, index, n) {
+  const gcis = q.groupBy;
+  const metrics = q.metrics.filter((m) => cols[m.ci]);
+  const gRows = gcis.map((ci) => cols[ci].rows);
+  const mRows = metrics.map((m) => cols[m.ci].rows);
+  const mKeys = metrics.map((m) => sortKey(cols[m.ci].spec));
+  const mSpecs = metrics.map((m) => cols[m.ci].spec);
+  const groups = new Map();
+  const total = index ? index.length : n;
+
+  for (let i = 0; i < total; i++) {
+    const r = index ? index[i] : i;
+    let key = "";
+    for (let g = 0; g < gRows.length; g++) key += keyPart(gRows[g][r]) + "\u0001";
+    let acc = groups.get(key);
+    if (!acc) {
+      acc = { row: r, m: metrics.map(() => ({ n: 0, sum: 0, min: null, max: null, set: null })) };
+      groups.set(key, acc);
+    }
+    for (let m = 0; m < metrics.length; m++) {
+      const v = mRows[m][r];
+      if (v === null || v === undefined) continue;
+      const a = acc.m[m];
+      a.n++;
+      const kind = metrics[m].agg;
+      if (kind === "SUM" || kind === "AVG") { const x = mKeys[m] ? mKeys[m](v) : NaN; if (x === x) a.sum += x; }
+      else if (kind === "COUNT_DISTINCT") { (a.set || (a.set = new Set())).add(keyPart(v)); }
+      else if (kind === "MIN" || kind === "MAX") {
+        const cmpLess = mKeys[m]
+          ? (x, y) => lessThan(x, y)
+          : (x, y) => String(textOf(x, mSpecs[m])) < String(textOf(y, mSpecs[m]));
+        if (a.min === null || cmpLess(v, a.min)) a.min = v;
+        if (a.max === null || cmpLess(a.max, v)) a.max = v;
+      }
+    }
+  }
+
+  const outCols = [];
+  for (const ci of gcis) outCols.push({ name: cols[ci].name, spec: cols[ci].spec, leaf: cols[ci].leaf, rows: [] });
+  const countSpec = { kind: "number", label: "count", physical: "INT64", convert: (v) => v };
+  for (const m of metrics) {
+    const src = cols[m.ci];
+    const isCount = m.agg === "COUNT" || m.agg === "COUNT_DISTINCT";
+    const keeps = m.agg === "MIN" || m.agg === "MAX";
+    outCols.push({
+      name: m.alias || AGG_SHORT[m.agg] + "(" + src.name + ")",
+      spec: isCount ? countSpec : keeps ? src.spec : { kind: "number", label: m.agg.toLowerCase(), physical: src.spec.physical, convert: (v) => v },
+      rows: [],
+    });
+  }
+  for (const acc of groups.values()) {
+    let k = 0;
+    for (const ci of gcis) outCols[k++].rows.push(cols[ci].rows[acc.row]);
+    for (let m = 0; m < metrics.length; m++) {
+      const a = acc.m[m], kind = metrics[m].agg;
+      let v = null;
+      if (kind === "COUNT") v = a.n;
+      else if (kind === "COUNT_DISTINCT") v = a.set ? a.set.size : 0;
+      else if (kind === "SUM") v = a.n ? a.sum : null;
+      else if (kind === "AVG") v = a.n ? a.sum / a.n : null;
+      else if (kind === "MIN") v = a.min;
+      else if (kind === "MAX") v = a.max;
+      outCols[k++].rows.push(v);
+    }
+  }
+  return outCols;
+}
+
+/* -------------------------------------------------------------- running */
+function runQuery() {
+  const q = state.query, table = state.table;
+  if (!table) return;
+  const t0 = performance.now();
+  const cols = table.cols, n = table.rowsLoaded;
+
+  const groups = orGroups(q.filters, cols);
+  let index = null;
+  if (groups.length) {
+    const buf = new Int32Array(n);
+    let k = 0;
+    for (let r = 0; r < n; r++) {
+      for (let g = 0; g < groups.length; g++) {
+        const grp = groups[g];
+        let ok = true;
+        for (let i = 0; i < grp.length; i++) if (!grp[i](r)) { ok = false; break; }
+        if (ok) { buf[k++] = r; break; }
+      }
+    }
+    index = buf.slice(0, k);
+  }
+
+  let view;
+  if (q.mode === "agg" && (q.groupBy.length || q.metrics.length)) {
+    const outCols = aggregate(q, cols, index, n);
+    let count = outCols.length ? outCols[0].rows.length : 0;
+    const order = aggSort(q, cols, outCols);
+    if (order) {
+      const idx = new Int32Array(count);
+      for (let i = 0; i < count; i++) idx[i] = i;
+      idx.sort(buildComparator(order, outCols));
+      for (const c of outCols) { const src = c.rows; c.rows = new Array(count); for (let i = 0; i < count; i++) c.rows[i] = src[idx[i]]; }
+    }
+    if (q.limit != null && q.limit < count) { count = q.limit; for (const c of outCols) c.rows.length = count; }
+    view = { cols: outCols, index: null, count, agg: true, label: "grouped" };
+  } else {
+    const outCols = q.select.length ? q.select.map((ci) => cols[ci]).filter(Boolean) : cols;
+    if (q.sort.length) {
+      if (!index) { index = new Int32Array(n); for (let i = 0; i < n; i++) index[i] = i; }
+      index.sort(buildComparator(q.sort, cols));
+    }
+    let count = index ? index.length : n;
+    if (q.limit != null && q.limit < count) {
+      count = q.limit;
+      if (index) index = index.subarray(0, count);
+    }
+    view = { cols: outCols, index, count, agg: false,
+      label: !index ? (count < n ? "limited" : null) : groups.length ? "filtered" : "sorted" };
+  }
+  q.active = true;
+  const ms = Math.round(performance.now() - t0);
+  setView(view);
+  const skipped = q.filters.filter((f) => filterIssue(f, cols)).length;
+  $("qstat").innerHTML = "<b>" + num(view.count) + "</b> " + (view.agg ? "groups" : "rows") +
+    " from " + num(n) + (table.truncated ? " read" : "") + " &middot; " + ms + " ms" +
+    (skipped ? " &middot; <em class='qwarn'>" + skipped + " clause" + (skipped === 1 ? "" : "s") +
+      " skipped</em>" : "");
+  $("qclear").disabled = false;
+}
+/** In aggregate mode, ORDER BY can only mean one of the output columns. */
+function aggSort(q, cols, outCols) {
+  const order = [];
+  for (const s of q.sort) {
+    const src = cols[s.ci];
+    if (!src) continue;
+    let at = q.groupBy.indexOf(s.ci);
+    if (at < 0) {
+      const m = q.metrics.findIndex((x) => x.ci === s.ci);
+      if (m >= 0) at = q.groupBy.length + m;
+    }
+    if (at >= 0 && at < outCols.length) order.push({ ci: at, dir: s.dir });
+  }
+  return order.length ? order : null;
+}
+function resetQuery() {
+  const mode = state.query ? state.query.mode : "rows";
+  state.query = newQuery();
+  state.query.mode = mode;
+  $("qstat").textContent = "";
+  $("qclear").disabled = true;
+  if (state.table) setView(baseView(state.table));
+  renderQuery();
+}
+
+/* ------------------------------------------------------------ SQL text */
+function sqlIdent(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : '"' + name.replace(/"/g, '""') + '"';
+}
+function sqlLiteral(text, spec) {
+  if (spec.kind === "number" && isFinite(parseFloat(text))) return String(parseFloat(text));
+  if (spec.kind === "bool") return /^(true|t|1|y|yes)$/i.test(String(text).trim()) ? "TRUE" : "FALSE";
+  return "'" + String(text).replace(/'/g, "''") + "'";
+}
+function querySql() {
+  const q = state.query, table = state.table;
+  if (!table) return "";
+  const cols = table.cols;
+  const from = (state.src && state.src.name ? state.src.name : "parquet").replace(/\.[^.]*$/, "");
+  const lines = [];
+  if (q.mode === "agg" && (q.groupBy.length || q.metrics.length)) {
+    const sel = q.groupBy.map((ci) => sqlIdent(cols[ci].name));
+    for (const m of q.metrics) {
+      if (!cols[m.ci]) continue;
+      const inner = sqlIdent(cols[m.ci].name);
+      const fn = m.agg === "COUNT_DISTINCT" ? "COUNT(DISTINCT " + inner + ")" : m.agg + "(" + inner + ")";
+      sel.push(m.alias ? fn + " AS " + sqlIdent(m.alias) : fn);
+    }
+    lines.push("SELECT " + (sel.length ? sel.join(",\n       ") : "*"));
+  } else if (q.select.length) {
+    lines.push("SELECT " + q.select.map((ci) => sqlIdent(cols[ci].name)).join(",\n       "));
+  } else {
+    lines.push("SELECT *");
+  }
+  lines.push("FROM " + sqlIdent(from));
+  let pending = false;
+  q.filters.forEach((f, i) => {
+    const col = cols[f.ci];
+    if (!col) return;
+    const p = PREDS.find((x) => x.id === f.pred) || PREDS[0];
+    let clause;
+    if (NO_OPERAND[f.pred]) clause = sqlIdent(col.name) + " " + p.sql;
+    else if (filterIssue(f, cols)) {
+      /* no usable value yet: shown so the shape is visible, but not run */
+      clause = sqlIdent(col.name) + " " + p.sql + " ?";
+      pending = true;
+    } else if (f.pred === "between") {
+      clause = sqlIdent(col.name) + " BETWEEN " + sqlLiteral(f.value, col.spec) +
+        " AND " + sqlLiteral(f.valueTo == null ? f.value : f.valueTo, col.spec);
+    } else if (f.pred === "like") clause = sqlIdent(col.name) + " LIKE '%" + String(f.value).replace(/'/g, "''") + "%'";
+    else clause = sqlIdent(col.name) + " " + p.sql + " " + sqlLiteral(f.value, col.spec);
+    lines.push((i === 0 ? "WHERE " : "  " + (f.linker || "AND") + " ") + clause);
+  });
+  if (q.mode === "agg" && q.groupBy.length) {
+    lines.push("GROUP BY " + q.groupBy.map((ci) => sqlIdent(cols[ci].name)).join(", "));
+  }
+  const agg = q.mode === "agg" && (q.groupBy.length || q.metrics.length);
+  const order = [];
+  for (const st of q.sort) {
+    const col = cols[st.ci];
+    if (!col) continue;
+    if (!agg) { order.push(sqlIdent(col.name) + " " + st.dir); continue; }
+    /* an aggregate can only be ordered by something it actually selects */
+    if (q.groupBy.indexOf(st.ci) >= 0) { order.push(sqlIdent(col.name) + " " + st.dir); continue; }
+    const m = q.metrics.find((x) => x.ci === st.ci);
+    if (m) {
+      const inner = sqlIdent(col.name);
+      order.push((m.alias ? sqlIdent(m.alias)
+        : m.agg === "COUNT_DISTINCT" ? "COUNT(DISTINCT " + inner + ")" : m.agg + "(" + inner + ")") + " " + st.dir);
+    }
+  }
+  if (order.length) lines.push("ORDER BY " + order.join(", "));
+  if (q.limit != null) lines.push("LIMIT " + q.limit);
+  return lines.join("\n") + ";" +
+    (pending ? "\n\n-- clauses shown with ? are skipped: no value, or it does not\n" +
+      "-- parse as this column's type" : "");
+}
+
+/* ----------------------------------------------------------------- UI */
+const TYPE_TAG = { number: "NUM", string: "STR", bool: "BOOL", temporal: "TS", binary: "BIN", nested: "LIST" };
+function typeTag(spec) {
+  if (spec.kind === "temporal") return spec.sub === "date" ? "DATE" : spec.sub === "time" ? "TIME" : "TS";
+  return TYPE_TAG[spec.kind] || "?";
+}
+
+function renderQueryColumns() {
+  const table = state.table;
+  if (!table) return;
+  let html = "<div class='qhead'>Columns</div>";
+  table.cols.forEach((c, i) => {
+    html += "<div class='qcol' draggable='true' data-ci='" + i + "' title='" + esc(c.name + " - " + c.spec.label) +
+      "'><span class='qgrab'>∷</span><span class='qcname'>" + esc(c.name) + "</span>" +
+      "<span class='qtag t-" + c.spec.kind + "'>" + typeTag(c.spec) + "</span></div>";
+  });
+  $("qcols").innerHTML = html;
+}
+
+function zone(id, label, hint, body, empty) {
+  return "<div class='qzone'><div class='qzlabel'>" + label + "</div>" +
+    "<div class='qdrop" + (empty ? " empty" : "") + "' data-zone='" + id + "'>" +
+    (empty ? "<span class='qhint'>" + hint + "</span>" : body) + "</div></div>";
+}
+const chip = (text, act, id) => "<span class='qchip'>" + esc(text) +
+  "<button class='qx' data-act='" + act + "' data-id='" + id + "'>×</button></span>";
+
+function renderQuery() {
+  const q = state.query, table = state.table;
+  if (!table) return;
+  const cols = table.cols;
+  const nameOf = (ci) => (cols[ci] ? cols[ci].name : "?");
+  const parts = [];
+
+  if (q.mode === "rows") {
+    parts.push(zone("select", "SELECT", "All columns &mdash; drop to pick specific ones",
+      q.select.map((ci) => chip(nameOf(ci), "rm-select", ci)).join(""), q.select.length === 0));
+  } else {
+    parts.push(zone("groupBy", "GROUP BY", "Drop columns to group by",
+      q.groupBy.map((ci) => chip(nameOf(ci), "rm-group", ci)).join(""), q.groupBy.length === 0));
+    parts.push(zone("metrics", "METRICS", "Drop a column to aggregate it",
+      q.metrics.map((m) => {
+        let btns = "";
+        for (const a of AGGS) {
+          btns += "<button class='qb" + (m.agg === a ? " on" : "") + "' data-act='agg' data-id='" + m.id +
+            "' data-v='" + a + "'>" + AGG_SHORT[a] + "</button>";
+        }
+        return "<div class='qrow'><span class='qbtns'>" + btns + "</span><code>" + esc(nameOf(m.ci)) + "</code>" +
+          "<input class='qin' data-in='alias' data-id='" + m.id + "' value='" + esc(m.alias || "") +
+          "' placeholder='alias' size='7'>" +
+          "<button class='qx' data-act='rm-metric' data-id='" + m.id + "'>×</button></div>";
+      }).join(""), q.metrics.length === 0));
+  }
+
+  parts.push(zone("where", "WHERE", "Drop a column to filter on it",
+    q.filters.map((f, i) => {
+      let btns = "";
+      for (const p of PREDS) {
+        btns += "<button class='qb" + (f.pred === p.id ? " on" : "") + "' data-act='pred' data-id='" + f.id +
+          "' data-v='" + p.id + "'>" + p.label + "</button>";
+      }
+      const link = i === 0 ? "" : "<button class='qlink' data-act='link' data-id='" + f.id + "'>" +
+        (f.linker || "AND") + "</button>";
+      const issue = filterIssue(f, cols);
+      const inputs = NO_OPERAND[f.pred] ? "" :
+        "<input class='qin" + (issue === "invalid" ? " bad" : "") + "' data-in='val' data-id='" + f.id +
+        "' value='" + esc(f.value || "") + "' placeholder='value' size='9'" +
+        (issue === "invalid" ? " title='not a " + esc(cols[f.ci].spec.label) + " value'" : "") + ">" +
+        (f.pred === "between" ? "<input class='qin' data-in='valTo' data-id='" + f.id + "' value='" +
+          esc(f.valueTo || "") + "' placeholder='to' size='7'>" : "");
+      return "<div class='qrow'>" + link + "<code>" + esc(nameOf(f.ci)) + "</code>" +
+        "<span class='qbtns'>" + btns + "</span>" + inputs +
+        "<button class='qx' data-act='rm-filter' data-id='" + f.id + "'>×</button></div>";
+    }).join(""), q.filters.length === 0));
+
+  parts.push(zone("sort", "ORDER BY", "Drop a column to sort by",
+    q.sort.map((s) => "<div class='qrow'><code>" + esc(nameOf(s.ci)) + "</code>" +
+      "<button class='qb on' data-act='dir' data-id='" + s.id + "'>" +
+      (s.dir === "ASC" ? "ASC ↑" : "DESC ↓") + "</button>" +
+      "<button class='qx' data-act='rm-sort' data-id='" + s.id + "'>×</button></div>").join(""),
+    q.sort.length === 0));
+
+  parts.push("<div class='qzone qlimit'><div class='qzlabel'>LIMIT</div>" +
+    "<input class='qin' data-in='limit' value='" + (q.limit == null ? "" : q.limit) +
+    "' placeholder='none' size='7'></div>");
+
+  $("qzones").innerHTML = parts.join("");
+  for (const b of $("qmode").children) b.classList.toggle("on", b.dataset.mode === q.mode);
+  renderSql();
+}
+function renderSql() { $("qsql").textContent = querySql(); }
+
+function addToZone(zoneId, ci) {
+  const q = state.query;
+  switch (zoneId) {
+    case "select": if (q.select.indexOf(ci) < 0) q.select.push(ci); break;
+    case "groupBy": if (q.groupBy.indexOf(ci) < 0) q.groupBy.push(ci); break;
+    case "metrics": q.metrics.push({ id: "m" + ++qid, ci, agg: "COUNT", alias: "" }); break;
+    case "where": q.filters.push({ id: "f" + ++qid, ci, pred: "eq", value: "", valueTo: "", linker: "AND" }); break;
+    case "sort": if (!q.sort.some((s) => s.ci === ci)) q.sort.push({ id: "s" + ++qid, ci, dir: "ASC" }); break;
+    default: return;
+  }
+  renderQuery();
+}
+
+function initQuery() {
+  state.query = newQuery();
+  $("qmode").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-mode]");
+    if (!b) return;
+    state.query.mode = b.dataset.mode;
+    renderQuery();
+  });
+  $("qcols").addEventListener("dragstart", (e) => {
+    const row = e.target.closest(".qcol");
+    if (!row) return;
+    e.dataTransfer.setData("text/plain", row.dataset.ci);
+    e.dataTransfer.effectAllowed = "copy";
+  });
+  $("qcols").addEventListener("dblclick", (e) => {
+    const row = e.target.closest(".qcol");
+    if (row) addToZone(state.query.mode === "rows" ? "select" : "groupBy", +row.dataset.ci);
+  });
+  const zoneAt = (e) => e.target.closest(".qdrop");
+  $("qzones").addEventListener("dragover", (e) => {
+    const z = zoneAt(e);
+    if (!z) return;
+    e.preventDefault();
+    z.classList.add("over");
+  });
+  $("qzones").addEventListener("dragleave", (e) => { const z = zoneAt(e); if (z) z.classList.remove("over"); });
+  $("qzones").addEventListener("drop", (e) => {
+    const z = zoneAt(e);
+    if (!z) return;
+    e.preventDefault();
+    z.classList.remove("over");
+    const ci = parseInt(e.dataTransfer.getData("text/plain"), 10);
+    if (isFinite(ci)) addToZone(z.dataset.zone, ci);
+  });
+  $("qzones").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-act]");
+    if (!b) return;
+    const q = state.query, id = b.dataset.id;
+    switch (b.dataset.act) {
+      case "rm-select": q.select = q.select.filter((ci) => ci !== +id); break;
+      case "rm-group": q.groupBy = q.groupBy.filter((ci) => ci !== +id); break;
+      case "rm-metric": q.metrics = q.metrics.filter((m) => m.id !== id); break;
+      case "rm-filter": q.filters = q.filters.filter((f) => f.id !== id); break;
+      case "rm-sort": q.sort = q.sort.filter((s) => s.id !== id); break;
+      case "pred": { const f = q.filters.find((x) => x.id === id); if (f) f.pred = b.dataset.v; break; }
+      case "link": { const f = q.filters.find((x) => x.id === id); if (f) f.linker = f.linker === "OR" ? "AND" : "OR"; break; }
+      case "agg": { const m = q.metrics.find((x) => x.id === id); if (m) m.agg = b.dataset.v; break; }
+      case "dir": { const s = q.sort.find((x) => x.id === id); if (s) s.dir = s.dir === "ASC" ? "DESC" : "ASC"; break; }
+      default: return;
+    }
+    renderQuery();
+  });
+  /* typing must not re-render, or the input would lose focus mid-word */
+  $("qzones").addEventListener("input", (e) => {
+    const el = e.target.closest("[data-in]");
+    if (!el) return;
+    const q = state.query, id = el.dataset.id, v = el.value;
+    switch (el.dataset.in) {
+      case "val": { const f = q.filters.find((x) => x.id === id); if (f) f.value = v; break; }
+      case "valTo": { const f = q.filters.find((x) => x.id === id); if (f) f.valueTo = v; break; }
+      case "alias": { const m = q.metrics.find((x) => x.id === id); if (m) m.alias = v; break; }
+      case "limit": { const n = parseInt(v, 10); q.limit = isFinite(n) && n > 0 ? n : null; break; }
+      default: return;
+    }
+    /* typing does not re-render the zone, so mark the offending input here */
+    if (el.dataset.in === "val" || el.dataset.in === "valTo") {
+      const f = q.filters.find((x) => x.id === id);
+      const cols = state.table ? state.table.cols : [];
+      el.classList.toggle("bad", !!f && filterIssue(f, cols) === "invalid");
+    }
+    renderSql();
+  });
+  $("qzones").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); runQuery(); }
+  });
+  $("qrun").addEventListener("click", () => runQuery());
+  $("qclear").addEventListener("click", () => resetQuery());
+  $("qcopy").addEventListener("click", () => {
+    const text = querySql();
+    if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+    $("qcopy").textContent = "copied";
+    setTimeout(() => { $("qcopy").textContent = "copy"; }, 1200);
+  });
+  $("toggleQuery").addEventListener("click", () => {
+    const q = $("query");
+    const showing = q.hidden;
+    q.hidden = !showing;
+    $("qgrip").hidden = !showing;
+    $("toggleQuery").textContent = showing ? "Hide query" : "Query";
+    renderRows(true);
+  });
+  $("qgrip").addEventListener("pointerdown", (e) =>
+    drag(e, "rowsizing", (ev) => queryHeight($("query").getBoundingClientRect().bottom - ev.clientY)));
+}
+function queryHeight(px) {
+  const room = Math.max(120, window.innerHeight - 260);
+  const h = Math.max(120, Math.min(Math.round(px), room));
+  document.documentElement.style.setProperty("--queryh", h + "px");
+  try { localStorage.setItem("paris-parquet-queryh", String(h)); } catch (e) { /* fine */ }
+  renderRows(true);
+  return h;
 }
 
 /* ======================================================================
@@ -2080,6 +2911,7 @@ function renderMeta() {
 /* ---------------------------------------------------------- resizing */
 function columnWidth(index, px) {
   const table = state.table;
+  if (!table.widths) return;
   const w = Math.max(56, Math.round(px));
   table.widths[index] = w;
   const col = $("grid").querySelectorAll("colgroup col")[index + 1];   /* +1: row numbers */
@@ -2151,7 +2983,12 @@ async function openFile(file) {
     busy(true, "decoding " + num(Math.min(meta.numRows, FIRST_ROWS)) + " rows...");
     await new Promise((r) => setTimeout(r, 0));
     await loadMore(src, table, FIRST_ROWS);
-    renderGrid();
+    setView(baseView(table));
+    state.query = newQuery();          /* a new file means new columns */
+    $("qstat").textContent = "";
+    $("qclear").disabled = true;
+    renderQueryColumns();
+    renderQuery();
     renderMeta();
     updateButtons();
     $("fileline").innerHTML = "<b>" + esc(file.name) + "</b> &middot; " + bytesHuman(file.size) + " &middot; " +
@@ -2159,6 +2996,9 @@ async function openFile(file) {
       num(meta.rowGroups.length) + " row group" + (meta.rowGroups.length === 1 ? "" : "s");
   } catch (e) {
     $("gridwrap").hidden = true;
+    $("pager").hidden = true;
+    $("query").hidden = true;
+    $("qgrip").hidden = true;
     $("drop").hidden = false;
     $("meta").hidden = true;
     $("mgrip").hidden = true;
@@ -2182,6 +3022,12 @@ function updateButtons() {
   $("more").hidden = !can;
   $("all").hidden = !can;
   $("toggleMeta").hidden = !t;
+  $("toggleQuery").hidden = !t;
+  if (t && $("toggleQuery").textContent === "Query" && $("query").hidden) {
+    $("query").hidden = false;
+    $("qgrip").hidden = false;
+    $("toggleQuery").textContent = "Hide query";
+  }
   if (can) {
     const left = t.meta.numRows - t.rowsLoaded;
     let next = 0;
@@ -2197,7 +3043,7 @@ async function grow(n) {
   await new Promise((r) => setTimeout(r, 0));
   try {
     await loadMore(state.src, state.table, n);
-    renderGrid();
+    if (state.query && state.query.active) runQuery(); else setView(baseView(state.table));
     renderMeta();
     updateButtons();
   } catch (e) { showError(e); } finally { busy(false); }
@@ -2205,6 +3051,7 @@ async function grow(n) {
 
 function init() {
   applyTheme(storedTheme());
+  initQuery();
   $("theme").addEventListener("click", () => {
     applyTheme(THEMES[(THEMES.indexOf($("theme").textContent) + 1) % THEMES.length]);
   });
@@ -2217,12 +3064,21 @@ function init() {
   $("all").addEventListener("click", () => grow(Infinity));
   $("toggleMeta").addEventListener("click", () => {
     const m = $("meta");
+    state.metaTouched = true;
     m.classList.toggle("collapsed");
     const hidden = m.classList.contains("collapsed");
     $("mgrip").hidden = hidden;
     $("toggleMeta").textContent = hidden ? "Show metadata" : "Hide metadata";
     renderRows(true);
   });
+  try {
+    const qh = +localStorage.getItem("paris-parquet-queryh");
+    if (qh > 0) document.documentElement.style.setProperty("--queryh", qh + "px");
+  } catch (e) { /* fine */ }
+  try {
+    const size = Number(localStorage.getItem("paris-parquet-pagesize"));
+    if (PAGE_SIZES.indexOf(size) >= 0 || size === Infinity) state.pageSize = size;
+  } catch (e) { /* fine */ }
   try {
     const saved = +localStorage.getItem("paris-parquet-metah");
     if (saved > 0) document.documentElement.style.setProperty("--metah", saved + "px");
@@ -2264,6 +3120,7 @@ else init();
 
 /* exposed so this file can be driven from a test harness */
 window.PARIS = { readFooter, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
+  runQuery, querySql, baseView, setView, compileFilter, aggregate,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
 </script>
 </body>
