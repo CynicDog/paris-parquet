@@ -63,6 +63,17 @@ would.
 The SQL is a record of the query, not how it runs: the engine executes over the
 columns already decoded in memory.
 
+**Chart** in the header draws the current result instead of tabulating it —
+column, horizontal bar, line or scatter, picked automatically from the data (a
+date dimension gets a line and a time axis) or chosen by hand. Pick the axis,
+tick the series, stack them. Every mark carries a tooltip; lines get a crosshair
+that snaps to the nearest x and reads out every series at once. One category and
+one measure is a number, not a chart, so it renders as one. There is never a
+second y-axis: two measures of different scale get series toggles, not a scale
+that invents a correlation. The colours are a validated categorical order with
+its own steps for dark mode, and a series keeps its colour when its neighbours
+are switched off. The chart downloads as SVG.
+
 **Columns** in the header opens a picker: search by name or type, hide what you
 do not need, pin a column so it stays at the left edge while you scroll
 sideways, and drag to reorder. Hiding is a display choice only — a hidden
