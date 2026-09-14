@@ -25,6 +25,11 @@ open index.html      # or double-click it, or mail it to someone
   version, the writer that produced it, footer size, page encodings, encryption
   status and any key/value metadata.
 
+Both splits are draggable: the bar between the grid and the metadata panel
+resizes the panel, and the right edge of any column header resizes that column
+(double-click it to go back to the default width). The panel height is
+remembered; column widths last for the session.
+
 The button in the top right switches the colour theme between `auto` (whatever
 the browser is set to), `light` and `dark`. The choice is remembered where the
 browser allows storage.
