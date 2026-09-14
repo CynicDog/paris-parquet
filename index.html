@@ -11,13 +11,20 @@
   --num:#1a6b4a; --str:#8a4b1f; --bool:#7a3fa0; --time:#1d5f8a; --bin:#6b6b66;
   --warn:#b3541e; --err:#b32020; --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
 }
+/* dark follows the browser unless the theme button has picked a side */
 @media (prefers-color-scheme:dark){
-  :root{
+  :root:not([data-theme="light"]){
     --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#9b9d9f; --faint:#6e7073;
     --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a;
     --num:#6fd0a3; --str:#e0a06a; --bool:#c59cf0; --time:#7cc4ef; --bin:#9b9d9f;
     --warn:#e09a5e; --err:#f08a8a;
   }
+}
+:root[data-theme="dark"]{
+    --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#9b9d9f; --faint:#6e7073;
+    --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a;
+    --num:#6fd0a3; --str:#e0a06a; --bool:#c59cf0; --time:#7cc4ef; --bin:#9b9d9f;
+    --warn:#e09a5e; --err:#f08a8a;
 }
 *{box-sizing:border-box}
 [hidden]{display:none !important}
@@ -134,6 +141,7 @@ details[open]>summary::before{content:"▾ "}
   <button id="more" hidden>Load more rows</button>
   <button id="all" hidden>Load all</button>
   <button id="toggleMeta" hidden>Hide metadata</button>
+  <button id="theme" title="Colour theme: follow the browser, or force light or dark">auto</button>
 </header>
 
 <div id="stage">
@@ -2055,6 +2063,21 @@ function renderMeta() {
 /* ======================================================================
    Wiring
    ====================================================================== */
+const THEMES = ["auto", "light", "dark"];
+function applyTheme(name) {
+  const root = document.documentElement;
+  if (name === "auto") root.removeAttribute("data-theme");
+  else root.setAttribute("data-theme", name);
+  $("theme").textContent = name;
+  /* file:// pages may refuse storage entirely; the choice just won't persist */
+  try { localStorage.setItem("paris-parquet-theme", name); } catch (e) { /* fine */ }
+}
+function storedTheme() {
+  try {
+    const v = localStorage.getItem("paris-parquet-theme");
+    return THEMES.indexOf(v) >= 0 ? v : "auto";
+  } catch (e) { return "auto"; }
+}
 function showError(e) {
   const old = $("err");
   if (old) old.remove();
@@ -2136,6 +2159,10 @@ async function grow(n) {
 }
 
 function init() {
+  applyTheme(storedTheme());
+  $("theme").addEventListener("click", () => {
+    applyTheme(THEMES[(THEMES.indexOf($("theme").textContent) + 1) % THEMES.length]);
+  });
   $("picker").addEventListener("change", (e) => {
     const f = e.target.files[0];
     e.target.value = "";              /* so picking the same file again re-reads it */

@@ -25,6 +25,10 @@ open index.html      # or double-click it, or mail it to someone
   version, the writer that produced it, footer size, page encodings, encryption
   status and any key/value metadata.
 
+The button in the top right switches the colour theme between `auto` (whatever
+the browser is set to), `light` and `dark`. The choice is remembered where the
+browser allows storage.
+
 By default the first 20,000 rows are read (rounded up to whole row groups);
 buttons load more or all of it. Summaries describe the rows actually read, and
 the header says so when that is less than the whole file.
