@@ -94,8 +94,13 @@ are switched off. The chart downloads as SVG.
 
 **Columns** in the header opens a picker: search by name or type, hide what you
 do not need, pin a column so it stays at the left edge while you scroll
-sideways, and drag to reorder. Hiding is a display choice only — a hidden
-column stays decoded and can still be filtered, grouped and sorted on.
+sideways, and drag to reorder. A hidden column can still be filtered, grouped
+and sorted on — but it is no longer decoded when more rows are read, and
+neither is anything else nobody is looking at. With a `GROUP BY` on screen,
+only the columns it names are read: loading the rest of a 60-column file that
+way costs two columns, not sixty. Ask for one of the others — unhide it, drop
+it into the query, run a diff — and it is decoded over exactly the row groups
+already read, and joins the ones that were there all along.
 
 **Diff** puts a second file beside the open one and says what moved. The
 schema first: columns added, removed or retyped, and the pair that is probably
@@ -169,6 +174,7 @@ node tools/fuzz-zstd.mjs 1000                 # zstd decoder vs node's zstd enco
 node tools/browser.mjs /tmp/fx/a.parquet      # drive the page in real Chromium
 node tools/browser-diff.mjs /tmp/fx/diff      # drive the diff panel, and count requests
 node tools/browser-push.mjs /tmp/fx/push      # drive the scan, and time it
+node tools/browser-lazy.mjs /tmp/fx/wide.parquet   # only decode what is wanted
 ```
 
 `check.mjs` pulls the `<script>` out of `index.html` and runs it against a stub

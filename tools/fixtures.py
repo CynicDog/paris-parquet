@@ -252,7 +252,15 @@ def pushdown(root):
     pq.write_table(v2, root + "/pages_v2.parquet", compression="zstd", row_group_size=half,
                    data_page_size=16384, write_page_index=True, data_page_version="2.0")
 
-    print("%-28s sorted, shuffled+bloom, nostats, nulls, pages, pages_v2" % "push/")
+    # wide and long: the case where decoding only what is on screen matters
+    rows = 60000
+    cols = {"id": pa.array(range(rows), pa.int64()),
+            "grp": pa.array([i % 40 for i in range(rows)], pa.int32())}
+    for k in range(58):
+        cols["c%02d" % k] = pa.array([(i * (k + 1)) % 9973 for i in range(rows)], pa.int32())
+    pq.write_table(pa.table(cols), root + "/widelong.parquet", compression="snappy", row_group_size=10000)
+
+    print("%-28s sorted, shuffled+bloom, nostats, nulls, pages, pages_v2, widelong" % "push/")
 
 
 def main(out):

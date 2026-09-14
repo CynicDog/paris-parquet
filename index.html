@@ -2222,13 +2222,15 @@ async function readDataset(entries, onProgress) {
 
 function newTable(dataset) {
   const cols = dataset.partitionCols.map((pc) => ({
-    leaf: null, partKey: pc.partKey, key: pc.key, name: pc.name, spec: pc.spec, rows: [], sniffed: true,
+    leaf: null, partKey: pc.partKey, key: pc.key, name: pc.name, spec: pc.spec, rows: [],
+    sniffed: true, filled: 0,
   })).concat(dataset.columns.map((c) => ({
-    leaf: c.leaf, key: c.key, name: c.name, spec: typeSpec(c.leaf), rows: [], sniffed: false,
+    leaf: c.leaf, key: c.key, name: c.name, spec: typeSpec(c.leaf), rows: [], sniffed: false, filled: 0,
   })));
   return {
     dataset, meta: dataset.reference, cols,
     nextPart: 0, nextGroup: 0, rowsLoaded: 0, groupsLoaded: 0,
+    reads: [], need: null,
     truncated: dataset.numGroups > 0,
   };
 }
@@ -2267,7 +2269,63 @@ async function sniffUtf8(dataset, col, atHand, isFirstGroup) {
   return yes;
 }
 
-/** Reads row groups, part by part, until `maxRows` more rows have been added. */
+/**
+ * Decodes one column for one row group, or for the selection of rows a plan
+ * narrowed it to. The row group is read the same way whether this happens
+ * while the group is first read or long afterwards, which is what lets a
+ * column be filled in later without re-reading anything else.
+ */
+async function readColumnRows(dataset, part, rg, col, sel, took, firstGroup) {
+  if (col.partKey !== undefined) {
+    const v = part.partValues ? part.partValues[col.partKey] : null;
+    const rows = new Array(took);
+    rows.fill(v === undefined ? null : v);
+    return rows;
+  }
+  const leaf = part.leafByPath.get(col.key);
+  let chunk = null;
+  for (const c of rg.columns) if (c.meta && c.meta.path.join("\u0001") === col.key) { chunk = c; break; }
+  if (!leaf || !chunk) {                          /* this file does not have it */
+    const rows = new Array(took);
+    rows.fill(null);
+    return rows;
+  }
+  if (chunk.filePath) {
+    throw new Error("Column " + col.name + " lives in a separate file (" + chunk.filePath +
+      "), which parquet allows but nothing writes.");
+  }
+  if (chunk.encryptedMetadata || chunk.cryptoMetadata) throw new Error("Column " + col.name + " is encrypted.");
+  try {
+    if (sel) {
+      /* page by page, so the text-or-bytes question has to be settled before
+         the first of them rather than from the values at hand */
+      if (!col.sniffed) {
+        col.sniffed = true;
+        if (col.spec.maybeUtf8 && await sniffUtf8(dataset, col, [], false)) becomesText(col);
+      }
+      return await readRowsRanges(part.src, chunk, leaf, sel, rg.numRows, col.spec.convert);
+    }
+    const raw = await readColumnChunk(part.src, chunk, leaf);
+    if (!col.sniffed && raw.values.length) {
+      col.sniffed = true;
+      if (col.spec.maybeUtf8 && await sniffUtf8(dataset, col, raw.values, firstGroup)) becomesText(col);
+    }
+    return assemble(leaf, raw.values, raw.defs, raw.reps, col.spec.convert);
+  } catch (e) {
+    throw new Error('Could not read column "' + col.name + '" in ' + part.path +
+      " (" + chunk.meta.codec + ", " + chunk.meta.encodings.join("/") + "): " + e.message);
+  }
+}
+
+/**
+ * Reads row groups, part by part, until `maxRows` more rows have been added.
+ *
+ * Only the columns in `table.need` are decoded — what the grid is showing and
+ * what the query names. Every group read is written down in `table.reads`, so
+ * a column nobody wanted yet can be filled in later over exactly the same
+ * groups and rows. With no `need` set, everything is decoded, which is what
+ * the tests and the diff want.
+ */
 async function loadMore(dataset, table, maxRows, onProgress) {
   let added = 0;
   while (table.nextPart < dataset.parts.length && added < maxRows) {
@@ -2283,57 +2341,14 @@ async function loadMore(dataset, table, maxRows, onProgress) {
     const sel = table.plan ? table.plan.get(planKey) : null;
     const rg = meta.rowGroups[table.nextGroup];
     const took = sel ? rangeCount(sel) : rg.numRows;
-    if (!part.byPath) {
-      part.byPath = new Map();
-      rg.columns.forEach((c, i) => { if (c.meta) part.byPath.set(c.meta.path.join("\u0001"), i); });
-    }
-    const byPath = new Map();
-    rg.columns.forEach((c, i) => { if (c.meta) byPath.set(c.meta.path.join("\u0001"), i); });
+    const firstGroup = table.nextPart === 0 && table.nextGroup === 0;
+    table.reads.push({ pi: table.nextPart, gi: table.nextGroup, sel, rows: took, firstGroup });
     for (let ci = 0; ci < table.cols.length; ci++) {
       const col = table.cols[ci];
-      if (col.partKey !== undefined) {
-        const v = part.partValues ? part.partValues[col.partKey] : null;
-        for (let i = 0; i < took; i++) col.rows.push(v === undefined ? null : v);
-        continue;
-      }
-      const leaf = part.leafByPath.get(col.key);
-      const idx = byPath.has(col.key) ? byPath.get(col.key) : -1;
-      if (!leaf || idx < 0) {                       /* this file does not have it */
-        for (let i = 0; i < took; i++) col.rows.push(null);
-        continue;
-      }
-      const chunk = rg.columns[idx];
-      if (chunk.filePath) {
-        throw new Error("Column " + col.name + " lives in a separate file (" + chunk.filePath +
-          "), which parquet allows but nothing writes.");
-      }
-      if (chunk.encryptedMetadata || chunk.cryptoMetadata) throw new Error("Column " + col.name + " is encrypted.");
-      let rows;
-      try {
-        if (sel) {
-          /* page by page, so the text-or-bytes question has to be settled
-             before the first of them rather than from the values at hand */
-          if (!col.sniffed) {
-            col.sniffed = true;
-            if (col.spec.maybeUtf8 && await sniffUtf8(dataset, col, [], false)) becomesText(col);
-          }
-          rows = await readRowsRanges(part.src, chunk, leaf, sel, rg.numRows, col.spec.convert);
-        } else {
-          const raw = await readColumnChunk(part.src, chunk, leaf);
-          if (!col.sniffed && raw.values.length) {
-            col.sniffed = true;
-            if (col.spec.maybeUtf8 &&
-                await sniffUtf8(dataset, col, raw.values, table.nextPart === 0 && table.nextGroup === 0)) {
-              becomesText(col);
-            }
-          }
-          rows = assemble(leaf, raw.values, raw.defs, raw.reps, col.spec.convert);
-        }
-      } catch (e) {
-        throw new Error('Could not read column "' + col.name + '" in row group ' + table.nextGroup +
-          " of " + part.path + " (" + chunk.meta.codec + ", " + chunk.meta.encodings.join("/") + "): " + e.message);
-      }
+      if (table.need && !table.need.has(ci) && col.partKey === undefined) continue;
+      const rows = await readColumnRows(dataset, part, rg, col, sel, took, firstGroup);
       for (let i = 0; i < rows.length; i++) col.rows.push(rows[i]);
+      col.filled = table.reads.length;
       if (onProgress) onProgress(table.nextPart, table.nextGroup, ci, table.cols.length);
     }
     added += took;
@@ -2343,6 +2358,34 @@ async function loadMore(dataset, table, maxRows, onProgress) {
   }
   table.truncated = groupsLeft(dataset, table) > 0;
   return added;
+}
+
+/** Which columns are behind, of those asked for. */
+function unfilled(table, indexes) {
+  const out = [];
+  if (!table || !table.reads) return out;
+  for (const ci of indexes) {
+    const col = table.cols[ci];
+    if (col && col.filled < table.reads.length && out.indexOf(ci) < 0) out.push(ci);
+  }
+  return out;
+}
+/** Decodes columns over the groups already read, so they catch up. */
+async function fillColumns(dataset, table, indexes, onProgress) {
+  const behind = unfilled(table, indexes);
+  for (let k = 0; k < behind.length; k++) {
+    const col = table.cols[behind[k]];
+    for (let r = col.filled; r < table.reads.length; r++) {
+      const read = table.reads[r];
+      const part = dataset.parts[read.pi];
+      const rg = part.meta.rowGroups[read.gi];
+      const rows = await readColumnRows(dataset, part, rg, col, read.sel, read.rows, read.firstGroup);
+      for (let i = 0; i < rows.length; i++) col.rows.push(rows[i]);
+      col.filled = r + 1;
+    }
+    if (onProgress) await onProgress(k + 1, behind.length, col.name);
+  }
+  return behind.length;
 }
 
 /** How many row groups this table has still to read, the plan included. */
@@ -2436,6 +2479,61 @@ function viewValue(view, ci, row) {
 function summarizeView(view) {
   for (const col of view.cols) col.summary = summarize(col, view.index, view.count);
 }
+/** Every column a query names, wherever it names it. */
+function queryColumns(q) {
+  const out = [];
+  if (!q) return out;
+  for (const f of q.filters) out.push(f.ci);
+  for (const s of q.sort) if (s.ci != null) out.push(s.ci);
+  for (const ci of q.select) out.push(ci);
+  for (const ci of q.groupBy) out.push(ci);
+  for (const m of q.metrics) out.push(m.ci);
+  return out;
+}
+/**
+ * The columns worth decoding: what the grid is showing and what the query
+ * names. Partition columns come out of the path and cost nothing, and a
+ * hidden column a filter mentions is still needed.
+ */
+function neededColumns(table, running) {
+  const need = new Set();
+  const cols = table.cols;
+  for (let i = 0; i < cols.length; i++) if (cols[i].partKey !== undefined) need.add(i);
+  const q = state.query;
+  /* an aggregate puts its own columns on screen and a SELECT list names the
+     ones it keeps, so while either is running the rest of the display is not
+     being drawn and does not need decoding */
+  const live = q && (running || q.active);
+  const shapesItself = live &&
+    ((q.mode === "agg" && (q.groupBy.length || q.metrics.length)) || (q.mode === "rows" && q.select.length));
+  if (!shapesItself) {
+    const order = displayOrder();
+    if (!order || !order.length) for (let i = 0; i < cols.length; i++) need.add(i);
+    else for (const ci of order) need.add(ci);
+  }
+  for (const ci of queryColumns(q)) need.add(ci);
+  return need;
+}
+const wantedColumns = (table) => [...neededColumns(table)];
+/**
+ * Columns are decoded when something wants them, which means something can
+ * find one behind. Rather than draw a hole, fill it in and come back.
+ * Returns true when it has taken over: the caller should stop.
+ */
+function needFilled(indexes, again) {
+  if (!state.table || !state.dataset) return false;
+  const behind = unfilled(state.table, indexes);
+  if (!behind.length) return false;
+  if (state.filling) return true;
+  state.filling = true;
+  const names = behind.map((ci) => state.table.cols[ci].name);
+  busy(true, "decoding " + (names.length === 1 ? '"' + names[0] + '"' : num(names.length) + " more columns") + "…");
+  fillColumns(state.dataset, state.table, behind)
+    .then(() => { state.filling = false; busy(false); again(); })
+    .catch((e) => { state.filling = false; busy(false); showError(e); });
+  return true;
+}
+
 function setView(view) {
   state.view = view;
   state.page = 0;
@@ -2704,6 +2802,7 @@ function summaryCard(col) {
 }
 
 function renderGrid() {
+  if (state.table && needFilled(wantedColumns(state.table), () => refreshView(true))) return;
   const view = state.view;
   if (!view) return;
   const grid = $("grid");
@@ -4077,6 +4176,7 @@ function aggregate(q, cols, index, n) {
 function runQuery() {
   const q = state.query, table = state.table;
   if (!table) return;
+  if (needFilled(queryColumns(q).concat(wantedColumns(table)), runQuery)) return;
   const t0 = performance.now();
   const cols = table.cols, n = table.rowsLoaded;
 
@@ -5370,6 +5470,7 @@ async function runScan() {
     const table = newTable(dataset);
     table.plan = plan.keep;
     table.scan = plan;
+    table.need = neededColumns(table, true);
     busy(true, "decoding " + num(Math.min(plan.rows, FIRST_ROWS)) + " rows of "
       + num(plan.kept) + " row groups…");
     await new Promise((r) => setTimeout(r, 0));
@@ -5931,6 +6032,9 @@ function sideName(dataset) {
 }
 function renderDiff() {
   if (!state.table) return;
+  /* growing or scanning the open file leaves columns nobody asked for behind;
+     a diff wants all of them */
+  if (needFilled(state.table.cols.map((c, i) => i), renderDiff)) return;
   const A = sideA(), B = diff.b;
   $("diffbar").innerHTML = [
     "<span class='qtitle'>COMPARE</span>",
@@ -5985,6 +6089,9 @@ async function openCompare(entries, label) {
       name: label || (entries.length === 1 ? entries[0].path : entries.length + " files") };
     diff.rows = null;
     diff.cap = 200;
+    busy(true, "decoding the rest of this file to compare it…");
+    await new Promise((r) => setTimeout(r, 0));
+    await fillColumns(state.dataset, state.table, state.table.cols.map((c, i) => i));
     diff.keys = suggestKey(state.table, table);
     renderDiff();
   } catch (e) {
@@ -6016,7 +6123,9 @@ async function loadAllBoth() {
   busy(true, "decoding every row…");
   await new Promise((r) => setTimeout(r, 0));
   try {
+    state.table.need = null;                       /* the diff wants every column */
     await loadMore(state.dataset, state.table, Infinity);
+    await fillColumns(state.dataset, state.table, state.table.cols.map((c, i) => i));
     if (diff.b) await loadMore(diff.b.dataset, diff.b.table, Infinity);
     refreshView(true);
     renderMeta();
@@ -6185,12 +6294,12 @@ async function openFile(file) { return openEntries(entriesFromFiles([file])); }
  * once it has decoded; swapping the two sides of a diff does it without
  * reading anything again.
  */
-function adoptDataset(dataset, table, name, showCount) {
+function adoptDataset(dataset, table, name, showCount, keepDisplay) {
   state.dataset = dataset;
   state.src = dataset.parts[0].src;
   state.meta = dataset.reference;
   state.table = table;
-  state.display = newDisplay(table.cols);
+  if (!keepDisplay) state.display = newDisplay(table.cols);
   setView(baseView(table));
   state.query = newQuery();            /* a different file means different columns */
   $("qstat").textContent = "";
@@ -6225,6 +6334,11 @@ async function openEntries(entries, label) {
     });
     parts = dataset.parts.length;
     const table = newTable(dataset);
+    /* the display and the query decide which columns are worth decoding, so
+       they are settled before the first read rather than after it */
+    state.display = newDisplay(table.cols);
+    state.query = newQuery();
+    table.need = neededColumns(table);
     busy(true, "decoding " + num(Math.min(dataset.numRows, FIRST_ROWS)) + " rows...");
     await new Promise((r) => setTimeout(r, 0));
     await loadMore(dataset, table, FIRST_ROWS);
@@ -6232,7 +6346,7 @@ async function openEntries(entries, label) {
     diff.b = null;                     /* a new file needs a new comparison */
     diff.rows = null;
     diff.keys = [];
-    adoptDataset(dataset, table, name, parts > 1 && named);
+    adoptDataset(dataset, table, name, parts > 1 && named, true);
   } catch (e) {
     $("gridwrap").hidden = true;
     $("pager").hidden = true;
@@ -6289,6 +6403,7 @@ async function grow(n) {
   busy(true, "decoding...");
   await new Promise((r) => setTimeout(r, 0));
   try {
+    state.table.need = neededColumns(state.table);
     await loadMore(state.dataset, state.table, n);
     if (state.query && state.query.active) runQuery(); else setView(baseView(state.table));
     renderMeta();
@@ -6417,6 +6532,7 @@ window.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, summariz
   displayCols, newDisplay, refreshView,
   diff, schemaDiff, datasetShape, columnStats, rowDiff, suggestKey, cellEq, cellKey, colShape,
   rawStat, showStat, statValue,
+  fillColumns, unfilled, neededColumns, queryColumns, readColumnRows, readColumnChunk, readPage,
   planScan, planReport, chunkBounds, clauseCanMatch, clauseGroups, xxh64, bloomHas, readBloom,
   bloomBytes, groupsLeft, rowsAhead, readOffsetIndex, readColumnIndex, readRowsRanges, clauseRanges,
   intersectRanges, unionRanges, mergeRanges, rangeCount,
