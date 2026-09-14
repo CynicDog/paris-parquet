@@ -23,7 +23,7 @@ const srcDir = path.join(root, "src");
 const MANIFEST = [
   "bytes", "thrift", "codecs", "encoding", "types", "dataset", "workers",
   "columns", "view", "ui-grid", "ui-metadata", "query", "ui-query-builder",
-  "pushdown", "diff", "main",
+  "pushdown", "diff", "main", "ui-tree",
 ];
 
 const IMPORT_RE = /^import\s*\{[^}]*\}\s*from\s*"\.\/[\w-]+\.js";\n?/gm;

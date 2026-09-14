@@ -10,6 +10,7 @@ import { fmtValue, summarize, typeSpec } from "./types.js";
 import { closeInspector, initPicker, openInspector, refreshView, renderRows } from "./ui-grid.js";
 import { rawStat, renderMeta, showStat, statValue } from "./ui-metadata.js";
 import { adoptSql, initQuery, renderQuery, renderQueryColumns } from "./ui-query-builder.js";
+import { initTree } from "./ui-tree.js";
 import { COL_W, PAGE_SIZES, baseView, bytesHuman, displayCols, esc, exportParts, neededColumns, newDisplay, num, queryColumns, setView, state, viewValue } from "./view.js";
 import { pool, poolStart, workerCan, workerMain } from "./workers.js";
 
@@ -242,6 +243,7 @@ export function init() {
   initQuery();
   initPicker();
   initDiff();
+  initTree();
   $("theme").addEventListener("click", () => {
     applyTheme(THEMES[(THEMES.indexOf($("theme").textContent) + 1) % THEMES.length]);
   });

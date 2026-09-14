@@ -79,6 +79,19 @@ that disagree about a column's type are refused by name.
 - A hidden column can still be filtered/grouped/sorted on, but isn't
   decoded — a `GROUP BY` on 2 of 60 columns only reads those 2.
 
+**Folder** in the header browses the folder a file lives in, so you can open
+a sibling without a picker dialog each time.
+- Uses the File System Access API (`showDirectoryPicker`) where the browser
+  has it — a live, lazily-expandable tree. Where it doesn't (Safari, Firefox
+  as of writing), falls back to the same `webkitdirectory` picker "Open
+  folder" already uses, built into a one-time snapshot tree instead.
+- This is its own explicit grant, separate from drag-and-drop, which stays
+  exactly as frictionless and permission-free as it's always been — dropping
+  a file never hands you its folder. The tree panel always names the folder
+  it's browsing, with a `change` to pick a different one and `close` to stop;
+  nothing is persisted across a reload, so browsing again after one always
+  asks again.
+
 **Diff**
 - Compare two files: schema changes (added/removed/retyped columns, a
   rename guess), shape (rows, row groups, size, codecs, compression ratio),
@@ -123,6 +136,11 @@ resolution.
   diffing them. Needs the same pushdown discipline `Scan file` already has
   for one file: build a hash on the smaller side, push its keys into the
   larger side's row-group/page skipping, prune columns on both sides.
+- **A memory budget for large files and joins** ([#16](https://github.com/CynicDog/paris-parquet/issues/16))
+  — grouping and, eventually, a join's hash table have no size ceiling
+  today. Spilling the largest/coldest partition to OPFS (or IndexedDB where
+  OPFS isn't available) once a budget is crossed, the way DuckDB and Polars
+  spill sorts/joins to disk.
 
 ## Developing
 
