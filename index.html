@@ -68,6 +68,8 @@ body.dragging #drop{background:var(--accent-soft);outline:2px dashed var(--accen
 #pager b{color:var(--accent);font-weight:600}
 .pinfo{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
 .psep{width:1px;height:13px;background:var(--line);display:inline-block}
+#pager .grow{flex:1;min-width:8px}
+#pager #expscope{max-width:130px}
 
 /* ---------- grid ---------- */
 #gridwrap{flex:1;overflow:auto;min-height:0;position:relative}
@@ -86,6 +88,10 @@ td.pad{height:auto;padding:0;border:0}
 
 i.grip{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z-index:5}
 i.grip:hover,body.colsizing i.grip{background:var(--accent);opacity:.45}
+th.sortable{cursor:pointer}
+th.sortable:hover .cname{color:var(--accent)}
+.sortmark{float:right;color:var(--accent);font-size:10px;line-height:14px;padding-left:3px}
+.sortmark i{font-style:normal;font-size:8px;vertical-align:super;color:var(--faint)}
 .cname{font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ctype{display:block;color:var(--faint);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .t-number{color:var(--num)} .t-string{color:var(--str)} .t-bool{color:var(--bool)}
@@ -1932,7 +1938,20 @@ function renderPager() {
     (v.label ? " <b>" + esc(v.label) + "</b>" : "") + "</span>" +
     (state.table && state.table.truncated
       ? "<span class='pinfo muted'>&middot; " + num(state.table.rowsLoaded) + " of " +
-        num(state.meta.numRows) + " rows read</span>" : "");
+        num(state.meta.numRows) + " rows read</span>" : "") +
+    "<span class='grow'></span>" +
+    "<span class='pinfo'>export <select id='expscope'>" +
+    "<option value='page'>this page</option><option value='view'>all " + num(v.count) + " rows</option>" +
+    "</select>" +
+    "<button id='expcsv'>CSV</button><button id='exptsv'>TSV</button>" +
+    "<button id='expjson'>JSON</button><button id='expcopy' title='Copy as TSV'>copy</button></span>";
+  const scope = state.exportScope || "page";
+  $("expscope").value = scope;
+  $("expscope").onchange = (e) => { state.exportScope = e.target.value; };
+  $("expcsv").onclick = () => doExport("csv");
+  $("exptsv").onclick = () => doExport("tsv");
+  $("expjson").onclick = () => doExport("json");
+  $("expcopy").onclick = () => doExport("copy");
   $("pfirst").onclick = () => gotoPage(0);
   $("pprev").onclick = () => gotoPage(state.page - 1);
   $("pnext").onclick = () => gotoPage(state.page + 1);
@@ -1952,6 +1971,90 @@ function renderPager() {
     renderRows(true);
     renderPager();
   };
+}
+
+/* -------------------------------------------------------------- export */
+/** The value as the grid shows it, minus the display truncation. */
+function exportText(v, spec) {
+  return v === null || v === undefined ? null : fmtValue(v, spec);
+}
+/** Real JSON types where they exist, so numbers stay numbers. */
+function exportJson(v, spec) {
+  if (v === null || v === undefined) return null;
+  if (spec.kind === "number") return typeof v === "number" ? v : typeof v === "bigint" ? v.toString() : v;
+  if (spec.kind === "bool") return v === true;
+  if (spec.kind === "nested") {
+    const inner = { kind: spec.elementKind, sub: spec.sub, utc: spec.utc };
+    const walk = (x) => (x === null || x === undefined ? null : Array.isArray(x) ? x.map(walk) : exportJson(x, inner));
+    return walk(v);
+  }
+  return fmtValue(v, spec);
+}
+function csvField(text, sep) {
+  if (text === null) return "";
+  return /["\r\n]/.test(text) || text.indexOf(sep) >= 0 ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+/** Builds the export as an array of chunks; Blob takes it without a join. */
+function exportParts(format, from, to) {
+  const view = state.view;
+  const cols = view.cols, n = cols.length;
+  const parts = [];
+  const sep = format === "tsv" ? "\t" : ",";
+  if (format === "json") {
+    parts.push("[\n");
+    for (let r = from; r < to; r++) {
+      const obj = {};
+      for (let ci = 0; ci < n; ci++) obj[cols[ci].name] = exportJson(viewValue(view, ci, r), cols[ci].spec);
+      parts.push("  " + JSON.stringify(obj) + (r < to - 1 ? ",\n" : "\n"));
+    }
+    parts.push("]\n");
+    return parts;
+  }
+  parts.push(cols.map((c) => csvField(c.name, sep)).join(sep) + "\n");
+  let row = new Array(n);
+  for (let r = from; r < to; r++) {
+    for (let ci = 0; ci < n; ci++) row[ci] = csvField(exportText(viewValue(view, ci, r), cols[ci].spec), sep);
+    parts.push(row.join(sep) + "\n");
+  }
+  return parts;
+}
+function exportName(ext) {
+  const base = (state.src && state.src.name ? state.src.name : "parquet").replace(/\.[^.]*$/, "");
+  const v = state.view;
+  return base + (v && v.label ? "-" + v.label : "") + "." + ext;
+}
+function exportScope() {
+  return $("expscope") && $("expscope").value === "view" ? [0, state.view.count] : pageBounds();
+}
+function download(parts, mime, filename) {
+  const url = URL.createObjectURL(new Blob(parts, { type: mime }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+const COPY_LIMIT = 200000;
+function doExport(format) {
+  if (!state.view) return;
+  const [from, to] = exportScope();
+  if (format === "copy") {
+    const rows = Math.min(to, from + COPY_LIMIT);
+    const text = exportParts("tsv", from, rows).join("");
+    const say = (msg) => { const b = $("expcopy"); b.textContent = msg; setTimeout(() => { b.textContent = "copy"; }, 1400); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(() => say(rows < to ? "copied " + num(rows - from) : "copied"))
+        .catch(() => say("blocked"));
+    } else say("blocked");
+    return;
+  }
+  const ext = format === "tsv" ? "tsv" : format;
+  const mime = format === "json" ? "application/json"
+    : format === "tsv" ? "text/tab-separated-values" : "text/csv";
+  download(exportParts(format, from, to), mime + ";charset=utf-8", exportName(ext));
 }
 
 /* ---------------------------------------------------------------- grid */
@@ -2028,7 +2131,8 @@ function renderGrid() {
     const c = cols[i];
     const title = (c.leaf ? c.leaf.path.join(".") : c.name) + "  -  " + c.spec.label +
       (c.leaf ? " (" + c.spec.physical + ", " + c.leaf.rep.toLowerCase() + ")" : "");
-    html += "<th title='" + esc(title) + "'><span class='cname'>" + esc(c.name) +
+    html += "<th class='sortable' title='" + esc(title) + " — click to sort, shift-click to add a key'>" +
+      sortMark(i) + "<span class='cname'>" + esc(c.name) +
       "</span><span class='ctype t-" + c.spec.kind + "'>" + esc(c.spec.label) +
       (c.leaf && c.leaf.rep === "OPTIONAL" && !c.spec.nested ? "?" : "") +
       "</span><i class='grip' data-col='" + i + "' title='Drag to resize, double-click to reset'></i></th>";
@@ -2599,21 +2703,75 @@ function runQuery() {
       " skipped</em>" : "");
   $("qclear").disabled = false;
 }
+/** Which output column a sort clause means in aggregate mode, or -1. */
+function aggSortIndex(q, s) {
+  if (s.mid) {
+    const m = q.metrics.findIndex((x) => x.id === s.mid);
+    return m >= 0 ? q.groupBy.length + m : -1;
+  }
+  const g = q.groupBy.indexOf(s.ci);
+  if (g >= 0) return g;
+  const m = q.metrics.findIndex((x) => x.ci === s.ci);
+  return m >= 0 ? q.groupBy.length + m : -1;
+}
 /** In aggregate mode, ORDER BY can only mean one of the output columns. */
 function aggSort(q, cols, outCols) {
   const order = [];
   for (const s of q.sort) {
-    const src = cols[s.ci];
-    if (!src) continue;
-    let at = q.groupBy.indexOf(s.ci);
-    if (at < 0) {
-      const m = q.metrics.findIndex((x) => x.ci === s.ci);
-      if (m >= 0) at = q.groupBy.length + m;
-    }
+    const at = aggSortIndex(q, s);
     if (at >= 0 && at < outCols.length) order.push({ ci: at, dir: s.dir });
   }
   return order.length ? order : null;
 }
+/**
+ * Clicking a column header edits the query's ORDER BY, so the header arrows,
+ * the ORDER BY zone and the SQL never disagree about how the rows are sorted.
+ * Shift-click adds a key instead of replacing.
+ */
+function toggleSort(viewIdx, additive) {
+  const view = state.view, q = state.query, table = state.table;
+  if (!view || !table) return;
+  const col = view.cols[viewIdx];
+  if (!col) return;
+  let ci = table.cols.indexOf(col), mid = null;
+  if (ci < 0 && view.agg) {
+    if (viewIdx < q.groupBy.length) ci = q.groupBy[viewIdx];
+    else {
+      const m = q.metrics[viewIdx - q.groupBy.length];
+      if (m) { ci = m.ci; mid = m.id; }
+    }
+  }
+  if (ci < 0) return;
+  const same = (s) => (mid ? s.mid === mid : !s.mid && s.ci === ci);
+  const at = q.sort.findIndex(same);
+  const fresh = () => ({ id: "s" + ++qid, ci, dir: "ASC", mid });
+  if (!additive) {
+    if (at < 0) q.sort = [fresh()];
+    else if (q.sort[at].dir === "ASC") q.sort = [Object.assign(q.sort[at], { dir: "DESC" })];
+    else q.sort = [];
+  } else if (at < 0) q.sort.push(fresh());
+  else if (q.sort[at].dir === "ASC") q.sort[at].dir = "DESC";
+  else q.sort.splice(at, 1);
+  renderQuery();
+  runQuery();
+}
+/** The arrow a header shows: direction, plus its place when there are several. */
+function sortMark(viewIdx) {
+  const view = state.view, q = state.query, table = state.table;
+  if (!view || !q || !q.sort.length) return "";
+  const col = view.cols[viewIdx];
+  let at = -1;
+  if (view.agg) {
+    at = q.sort.findIndex((s) => aggSortIndex(q, s) === viewIdx);
+  } else {
+    const ci = table.cols.indexOf(col);
+    at = ci < 0 ? -1 : q.sort.findIndex((s) => !s.mid && s.ci === ci);
+  }
+  if (at < 0) return "";
+  return "<span class='sortmark'>" + (q.sort[at].dir === "ASC" ? "▲" : "▼") +
+    (q.sort.length > 1 ? "<i>" + (at + 1) + "</i>" : "") + "</span>";
+}
+
 function resetQuery() {
   const mode = state.query ? state.query.mode : "rows";
   state.query = newQuery();
@@ -2682,8 +2840,8 @@ function querySql() {
     if (!col) continue;
     if (!agg) { order.push(sqlIdent(col.name) + " " + st.dir); continue; }
     /* an aggregate can only be ordered by something it actually selects */
-    if (q.groupBy.indexOf(st.ci) >= 0) { order.push(sqlIdent(col.name) + " " + st.dir); continue; }
-    const m = q.metrics.find((x) => x.ci === st.ci);
+    if (!st.mid && q.groupBy.indexOf(st.ci) >= 0) { order.push(sqlIdent(col.name) + " " + st.dir); continue; }
+    const m = st.mid ? q.metrics.find((x) => x.id === st.mid) : q.metrics.find((x) => x.ci === st.ci);
     if (m) {
       const inner = sqlIdent(col.name);
       order.push((m.alias ? sqlIdent(m.alias)
@@ -2772,8 +2930,14 @@ function renderQuery() {
         "<button class='qx' data-act='rm-filter' data-id='" + f.id + "'>×</button></div>";
     }).join(""), q.filters.length === 0));
 
+  /* a sort on a metric names the metric, matching the header and the SQL */
+  const sortName = (s) => {
+    if (!s.mid) return nameOf(s.ci);
+    const m = q.metrics.find((x) => x.id === s.mid);
+    return m ? (m.alias || AGG_SHORT[m.agg] + "(" + nameOf(m.ci) + ")") : nameOf(s.ci);
+  };
   parts.push(zone("sort", "ORDER BY", "Drop a column to sort by",
-    q.sort.map((s) => "<div class='qrow'><code>" + esc(nameOf(s.ci)) + "</code>" +
+    q.sort.map((s) => "<div class='qrow'><code>" + esc(sortName(s)) + "</code>" +
       "<button class='qb on' data-act='dir' data-id='" + s.id + "'>" +
       (s.dir === "ASC" ? "ASC ↑" : "DESC ↓") + "</button>" +
       "<button class='qx' data-act='rm-sort' data-id='" + s.id + "'>×</button></div>").join(""),
@@ -3090,11 +3254,23 @@ function init() {
     if (!grip) return;
     const index = +grip.dataset.col;
     const startX = e.clientX, startW = state.table.widths[index];
-    drag(e, "colsizing", (ev) => columnWidth(index, startW + ev.clientX - startX));
+    drag(e, "colsizing", (ev) => {
+      state.justResized = true;
+      columnWidth(index, startW + ev.clientX - startX);
+    });
+    window.addEventListener("pointerup", () => setTimeout(() => { state.justResized = false; }, 0), { once: true });
   });
   $("gridwrap").addEventListener("dblclick", (e) => {
     const grip = e.target.closest("i.grip");
     if (grip) columnWidth(+grip.dataset.col, COL_W);
+  });
+  $("gridwrap").addEventListener("click", (e) => {
+    if (state.justResized) return;              /* the click that ends a drag */
+    if (e.target.closest("i.grip")) return;
+    const th = e.target.closest("tr.r-name th");
+    if (!th || th.classList.contains("rownum")) return;
+    const idx = Array.prototype.indexOf.call(th.parentNode.children, th) - 1;
+    if (idx >= 0) toggleSort(idx, e.shiftKey);
   });
   let raf = 0;
   $("gridwrap").addEventListener("scroll", () => {
@@ -3120,7 +3296,7 @@ else init();
 
 /* exposed so this file can be driven from a test harness */
 window.PARIS = { readFooter, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
-  runQuery, querySql, baseView, setView, compileFilter, aggregate,
+  runQuery, querySql, baseView, setView, compileFilter, aggregate, exportParts, viewValue,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
 </script>
 </body>
