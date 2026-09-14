@@ -72,9 +72,10 @@ async function checkFile(PARIS, file) {
   const expected = JSON.parse(fs.readFileSync(expectPath, "utf8"));
   const src = source(file);
   const t0 = Date.now();
-  const meta = await PARIS.readFooter(src);
-  const table = PARIS.newTable(meta);
-  await PARIS.loadMore(src, table, Infinity);
+  const dataset = await PARIS.readDataset([{ src, path: src.name }]);
+  const meta = dataset.reference;
+  const table = PARIS.newTable(dataset);
+  await PARIS.loadMore(dataset, table, Infinity);
   const ms = Date.now() - t0;
 
   const problems = [];

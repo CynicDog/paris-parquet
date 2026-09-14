@@ -10,6 +10,12 @@ is read locally by the page; nothing is uploaded anywhere.
 open index.html      # or double-click it, or mail it to someone
 ```
 
+Drop a file, several files, or a whole partitioned folder: `year=2024/month=01/
+part-0.parquet` reads as one table with `year` and `month` as real columns you
+can filter and group by. Files the ecosystem leaves lying around (`_SUCCESS`,
+`.crc`, dotfiles) are ignored, a part missing a column reads as null there, and
+two parts that disagree about a column's type are refused by name.
+
 ## What you get
 
 - **A table** of the rows, virtualised so a wide or long file stays responsive.
@@ -92,9 +98,9 @@ compression codecs and the encodings are all implemented in the file.
 | **Types** | all physical types including int96, plus string, enum, json, uuid, decimal (int32/int64/fixed/binary, exact — no float rounding), date, time, timestamp (ms/us/ns), float16, unsigned ints, interval |
 | **Nesting** | structs, lists, maps and any nesting of them, assembled back from repetition and definition levels; one grid column per leaf, showing the nested value |
 
-Known limits, on purpose: one self-contained file at a time (no partitioned
-directories, no multi-file column chunks), encrypted parquet is reported and
-refused, and nanosecond timestamps display at microsecond resolution.
+Known limits, on purpose: a column chunk must live in the file that describes
+it (parquet allows otherwise; nothing writes it), encrypted parquet is reported
+and refused, and nanosecond timestamps display at microsecond resolution.
 
 ## Tests
 
@@ -107,6 +113,7 @@ python3 tools/fixtures.py /tmp/fx             # write fixtures + expected values
 node tools/check.mjs /tmp/fx/*.parquet        # decode each one, compare every cell
 node tools/check-query.mjs /tmp/fx/*.parquet  # run the query engine against duckdb
 node tools/check-sql.mjs /tmp/fx/a.parquet    # SQL round trip, execution, refusals
+node tools/check-folder.mjs /tmp/fx/folders   # partitioned folders read as one table
 node tools/fuzz-zstd.mjs 1000                 # zstd decoder vs node's zstd encoder
 node tools/browser.mjs /tmp/fx/a.parquet      # drive the page in real Chromium
 ```

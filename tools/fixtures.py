@@ -108,6 +108,44 @@ def write(out, name, table, **kw):
     expect.main(path, path[: -len(".parquet")] + ".expect.json")
 
 
+def folders(root):
+    """Folder-shaped datasets: hive partitions, a flat set, a ragged set, a clash."""
+    import shutil
+    shutil.rmtree(root, ignore_errors=True)
+    for year in (2023, 2024):
+        for month in (1, 2, 3):
+            n = 40 + month
+            t = pa.table({
+                "id": pa.array([year * 10000 + month * 100 + i for i in range(n)], pa.int64()),
+                "name": pa.array(["n%d" % (i % 7) for i in range(n)]),
+                "amt": pa.array([round(random.uniform(0, 100), 2) for _ in range(n)]),
+                "ts": pa.array([datetime.datetime(year, month, 1) + datetime.timedelta(hours=i) for i in range(n)]),
+            })
+            d = "%s/hive/year=%d/month=%02d" % (root, year, month)
+            os.makedirs(d, exist_ok=True)
+            pq.write_table(t, d + "/part-0.parquet", compression="zstd")
+    open(root + "/hive/_SUCCESS", "w").write("")          # must be ignored
+    open(root + "/hive/year=2024/.hidden.parquet", "wb").write(b"not parquet")
+
+    os.makedirs(root + "/flat", exist_ok=True)
+    for k in range(3):
+        pq.write_table(pa.table({"a": pa.array(range(k * 10, k * 10 + 10), pa.int32()),
+                                 "b": pa.array(["x%d" % i for i in range(10)])}),
+                       "%s/flat/chunk-%02d.parquet" % (root, k), compression="snappy")
+
+    os.makedirs(root + "/ragged", exist_ok=True)
+    pq.write_table(pa.table({"a": pa.array([1, 2, 3], pa.int32()), "b": pa.array(["p", "q", "r"])}),
+                   root + "/ragged/one.parquet")
+    pq.write_table(pa.table({"a": pa.array([4, 5], pa.int32())}), root + "/ragged/two.parquet")
+    pq.write_table(pa.table({"a": pa.array([6], pa.int32()), "b": pa.array(["z"]), "c": pa.array([9.5])}),
+                   root + "/ragged/three.parquet")
+
+    os.makedirs(root + "/conflict", exist_ok=True)
+    pq.write_table(pa.table({"a": pa.array([1, 2], pa.int32())}), root + "/conflict/int.parquet")
+    pq.write_table(pa.table({"a": pa.array(["x", "y"])}), root + "/conflict/str.parquet")
+    print("%-28s hive, flat, ragged and conflicting folders" % "folders/")
+
+
 def main(out):
     os.makedirs(out, exist_ok=True)
     b, e, enc = basic(), edge(), encodings()
@@ -148,6 +186,8 @@ def main(out):
     })
     write(out, "big_zstd", big, compression="zstd", row_group_size=100000)
     write(out, "big_snappy", big, compression="snappy", row_group_size=100000)
+
+    folders(os.path.join(out, "folders"))
 
     try:
         import polars as pl

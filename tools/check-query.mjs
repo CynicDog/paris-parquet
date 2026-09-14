@@ -163,12 +163,14 @@ function cases(cols) {
 
 async function checkFile(file) {
   const src = source(file);
-  const meta = await PARIS.readFooter(src);
-  const table = PARIS.newTable(meta);
-  await PARIS.loadMore(src, table, Infinity);
+  const dataset = await PARIS.readDataset([{ src, path: src.name }]);
+  const meta = dataset.reference;
+  const table = PARIS.newTable(dataset);
+  await PARIS.loadMore(dataset, table, Infinity);
   if (!table.rowsLoaded) return { skipped: "no rows" };
 
   PARIS.state.src = src;
+  PARIS.state.dataset = dataset;
   PARIS.state.meta = meta;
   PARIS.state.table = table;
   const tableName = path.basename(file).replace(/\.parquet$/, "").replace(/[^A-Za-z0-9_]/g, "_");
