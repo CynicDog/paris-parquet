@@ -13,7 +13,7 @@ const { chromium } = createRequire(import.meta.url)("playwright");
 const args = process.argv.slice(2);
 const shotAt = args.indexOf("--shot");
 const shot = shotAt >= 0 ? args[shotAt + 1] : null;
-const files = args.filter((a, i) => !a.startsWith("--") && i !== shotAt + 1);
+const files = args.filter((a, i) => !a.startsWith("--") && !(shotAt >= 0 && i === shotAt + 1));
 const wide = args.includes("--wide");
 const here = path.dirname(new URL(import.meta.url).pathname);
 const appPath = path.join(here, "..", "index.html");
