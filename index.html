@@ -2013,14 +2013,19 @@ function renderPager() {
     "<option value='page'>this page</option><option value='view'>all " + num(v.count) + " rows</option>" +
     "</select>" +
     "<button id='expcsv'>CSV</button><button id='exptsv'>TSV</button>" +
-    "<button id='expjson'>JSON</button><button id='expcopy' title='Copy as TSV'>copy</button></span>";
+    "<button id='expjson'>JSON</button><button id='expmd' title='Markdown table'>MD</button>" +
+    "<span class='psep'></span>" +
+    "<button id='expcopy' title='Copy as TSV, for a spreadsheet'>copy</button>" +
+    "<button id='expcopymd' title='Copy as a markdown table'>copy MD</button></span>";
   const scope = state.exportScope || "page";
   $("expscope").value = scope;
   $("expscope").onchange = (e) => { state.exportScope = e.target.value; };
   $("expcsv").onclick = () => doExport("csv");
   $("exptsv").onclick = () => doExport("tsv");
   $("expjson").onclick = () => doExport("json");
+  $("expmd").onclick = () => doExport("md");
   $("expcopy").onclick = () => doExport("copy");
+  $("expcopymd").onclick = () => doExport("copymd");
   $("pfirst").onclick = () => gotoPage(0);
   $("pprev").onclick = () => gotoPage(state.page - 1);
   $("pnext").onclick = () => gotoPage(state.page + 1);
@@ -2063,6 +2068,12 @@ function csvField(text, sep) {
   if (text === null) return "";
   return /["\r\n]/.test(text) || text.indexOf(sep) >= 0 ? '"' + text.replace(/"/g, '""') + '"' : text;
 }
+/** A markdown cell: pipes escaped, and newlines turned into breaks so the
+    row survives — a raw newline would end the table. */
+function mdField(text) {
+  if (text === null) return "";
+  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
+}
 /** Builds the export as an array of chunks; Blob takes it without a join. */
 function exportParts(format, from, to) {
   const view = state.view;
@@ -2077,6 +2088,17 @@ function exportParts(format, from, to) {
       parts.push("  " + JSON.stringify(obj) + (r < to - 1 ? ",\n" : "\n"));
     }
     parts.push("]\n");
+    return parts;
+  }
+  if (format === "md") {
+    parts.push("| " + cols.map((c) => mdField(c.name)).join(" | ") + " |\n");
+    /* numbers line up on the right, the way the grid shows them */
+    parts.push("| " + cols.map((c) => (c.spec.kind === "number" ? "---:" : ":---")).join(" | ") + " |\n");
+    const cells = new Array(n);
+    for (let r = from; r < to; r++) {
+      for (let ci = 0; ci < n; ci++) cells[ci] = mdField(exportText(viewValue(view, ci, r), cols[ci].spec));
+      parts.push("| " + cells.join(" | ") + " |\n");
+    }
     return parts;
   }
   parts.push(cols.map((c) => csvField(c.name, sep)).join(sep) + "\n");
@@ -2109,10 +2131,12 @@ const COPY_LIMIT = 200000;
 function doExport(format) {
   if (!state.view) return;
   const [from, to] = exportScope();
-  if (format === "copy") {
+  if (format === "copy" || format === "copymd") {
     const rows = Math.min(to, from + COPY_LIMIT);
-    const text = exportParts("tsv", from, rows).join("");
-    const say = (msg) => { const b = $("expcopy"); b.textContent = msg; setTimeout(() => { b.textContent = "copy"; }, 1400); };
+    const text = exportParts(format === "copymd" ? "md" : "tsv", from, rows).join("");
+    const btn = $(format === "copymd" ? "expcopymd" : "expcopy");
+    const was = btn.textContent;
+    const say = (msg) => { btn.textContent = msg; setTimeout(() => { btn.textContent = was; }, 1400); };
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text)
         .then(() => say(rows < to ? "copied " + num(rows - from) : "copied"))
@@ -2120,9 +2144,10 @@ function doExport(format) {
     } else say("blocked");
     return;
   }
-  const ext = format === "tsv" ? "tsv" : format;
   const mime = format === "json" ? "application/json"
-    : format === "tsv" ? "text/tab-separated-values" : "text/csv";
+    : format === "tsv" ? "text/tab-separated-values"
+    : format === "md" ? "text/markdown" : "text/csv";
+  const ext = format;
   download(exportParts(format, from, to), mime + ";charset=utf-8", exportName(ext));
 }
 

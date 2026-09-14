@@ -30,9 +30,10 @@ and shift-click to add a second key. The header arrows, the query panel's
 `ORDER BY` and the SQL are the same thing seen three ways.
 
 Below the grid is a pager: 100 rows a page by default, or 10, 200, 500, 1,000,
-3,000 or all of them. Next to it, the current view exports as CSV, TSV or JSON,
-or copies to the clipboard as TSV for pasting into a spreadsheet — either this
-page or every row of the view, filters and sorting included. A page that fits in one draw goes into the page whole, so
+3,000 or all of them. Next to it, the current view exports as CSV, TSV,
+JSON or a markdown table, or copies to the clipboard as TSV for a spreadsheet
+or as markdown for a ticket — either this page or every row of the view,
+filters and sorting included. A page that fits in one draw goes into the page whole, so
 scrolling it costs nothing at all; larger pages fall back to windowing.
 
 Between the grid and the metadata sits the **query builder**. Drag a column
