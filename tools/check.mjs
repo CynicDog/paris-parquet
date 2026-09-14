@@ -18,6 +18,7 @@ function stubElement() {
     style: { setProperty() {} },
     classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
     addEventListener() {}, removeEventListener() {},
+    setAttribute() {}, removeAttribute() {}, getAttribute: () => null,
     querySelector: () => stubElement(), querySelectorAll: () => [],
     appendChild() {}, prepend() {}, remove() {},
   };

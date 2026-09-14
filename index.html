@@ -11,13 +11,20 @@
   --num:#1a6b4a; --str:#8a4b1f; --bool:#7a3fa0; --time:#1d5f8a; --bin:#6b6b66;
   --warn:#b3541e; --err:#b32020; --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
 }
+/* dark follows the browser unless the theme button has picked a side */
 @media (prefers-color-scheme:dark){
-  :root{
+  :root:not([data-theme="light"]){
     --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#9b9d9f; --faint:#6e7073;
     --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a;
     --num:#6fd0a3; --str:#e0a06a; --bool:#c59cf0; --time:#7cc4ef; --bin:#9b9d9f;
     --warn:#e09a5e; --err:#f08a8a;
   }
+}
+:root[data-theme="dark"]{
+    --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#9b9d9f; --faint:#6e7073;
+    --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a;
+    --num:#6fd0a3; --str:#e0a06a; --bool:#c59cf0; --time:#7cc4ef; --bin:#9b9d9f;
+    --warn:#e09a5e; --err:#f08a8a;
 }
 *{box-sizing:border-box}
 [hidden]{display:none !important}
@@ -66,6 +73,8 @@ tbody td{height:22px;line-height:22px;padding-top:0;padding-bottom:0;white-space
 tbody tr:hover td{background:var(--accent-soft)}
 td.pad{height:auto;padding:0;border:0}
 
+i.grip{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z-index:5}
+i.grip:hover,body.colsizing i.grip{background:var(--accent);opacity:.45}
 .cname{font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ctype{display:block;color:var(--faint);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .t-number{color:var(--num)} .t-string{color:var(--str)} .t-bool{color:var(--bool)}
@@ -95,8 +104,14 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .bools i.t{background:var(--bool)} .bools i.f{background:var(--dim)} .bools i.n{background:var(--line)}
 
 /* ---------- footer / metadata ---------- */
-#meta{flex:none;max-height:42vh;overflow:auto;border-top:1px solid var(--line);background:var(--panel)}
-#meta.collapsed{max-height:none;overflow:visible}
+#mgrip{flex:none;height:7px;background:var(--bg);cursor:row-resize;position:relative;z-index:6}
+#mgrip::after{content:"";position:absolute;left:50%;top:2px;margin-left:-19px;width:38px;height:3px;
+  border-radius:2px;background:var(--line)}
+#mgrip:hover::after,body.rowsizing #mgrip::after{background:var(--accent)}
+#meta{flex:none;height:var(--metah,38vh);overflow:auto;border-top:1px solid var(--line);background:var(--panel)}
+#meta.collapsed{height:auto;overflow:visible}
+body.rowsizing{cursor:row-resize} body.colsizing{cursor:col-resize}
+body.rowsizing,body.colsizing{user-select:none}
 #meta.collapsed .mbody{display:none}
 .mbar{display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid var(--line2);
   position:sticky;top:0;background:var(--panel);z-index:2;font:11px var(--mono);color:var(--dim);flex-wrap:wrap}
@@ -134,6 +149,7 @@ details[open]>summary::before{content:"▾ "}
   <button id="more" hidden>Load more rows</button>
   <button id="all" hidden>Load all</button>
   <button id="toggleMeta" hidden>Hide metadata</button>
+  <button id="theme" title="Colour theme: follow the browser, or force light or dark">auto</button>
 </header>
 
 <div id="stage">
@@ -146,6 +162,7 @@ details[open]>summary::before{content:"▾ "}
   <div id="busy" hidden>reading…</div>
 </div>
 
+<div id="mgrip" hidden title="Drag to resize the metadata panel"></div>
 <div id="meta" hidden>
   <div class="mbar" id="mbar"></div>
   <div class="mbody" id="mbody"></div>
@@ -1809,15 +1826,19 @@ function renderGrid() {
   const table = state.table;
   const grid = $("grid");
   const cols = table.cols;
+  if (!table.widths || table.widths.length !== cols.length) table.widths = cols.map(() => COL_W);
   let html = "<colgroup><col style='width:62px'>";
-  for (let i = 0; i < cols.length; i++) html += "<col style='width:" + COL_W + "px'>";
+  for (let i = 0; i < cols.length; i++) html += "<col style='width:" + table.widths[i] + "px'>";
   html += "</colgroup><thead><tr class='r-name'><th class='rownum'>#</th>";
+  let i = 0;
   for (const c of cols) {
     const title = c.leaf.path.join(".") + "  -  " + c.spec.label + " (" + c.spec.physical +
       ", " + c.leaf.rep.toLowerCase() + ")";
     html += "<th title='" + esc(title) + "'><span class='cname'>" + esc(c.name) +
       "</span><span class='ctype t-" + c.spec.kind + "'>" + esc(c.spec.label) +
-      (c.leaf.rep === "OPTIONAL" && !c.spec.nested ? "?" : "") + "</span></th>";
+      (c.leaf.rep === "OPTIONAL" && !c.spec.nested ? "?" : "") +
+      "</span><i class='grip' data-col='" + i + "' title='Drag to resize, double-click to reset'></i></th>";
+    i++;
   }
   html += "</tr><tr class='r-sum'><th class='rownum'></th>";
   for (const c of cols) html += "<th>" + summaryCard(c) + "</th>";
@@ -2050,11 +2071,57 @@ function renderMeta() {
   }
   $("mbody").innerHTML = cards.join("");
   $("meta").hidden = false;
+  $("mgrip").hidden = $("meta").classList.contains("collapsed");
 }
 
 /* ======================================================================
    Wiring
    ====================================================================== */
+/* ---------------------------------------------------------- resizing */
+function columnWidth(index, px) {
+  const table = state.table;
+  const w = Math.max(56, Math.round(px));
+  table.widths[index] = w;
+  const col = $("grid").querySelectorAll("colgroup col")[index + 1];   /* +1: row numbers */
+  if (col) col.style.width = w + "px";
+}
+function metaHeight(px) {
+  const room = Math.max(90, window.innerHeight - 220);
+  const h = Math.max(58, Math.min(Math.round(px), room));
+  document.documentElement.style.setProperty("--metah", h + "px");
+  try { localStorage.setItem("paris-parquet-metah", String(h)); } catch (e) { /* fine */ }
+  renderRows(true);
+  return h;
+}
+/** Runs a pointer drag, keeping the cursor and text selection sane. */
+function drag(event, cls, onMove) {
+  event.preventDefault();
+  document.body.classList.add(cls);
+  const move = (e) => onMove(e);
+  const up = () => {
+    document.body.classList.remove(cls);
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+const THEMES = ["auto", "light", "dark"];
+function applyTheme(name) {
+  const root = document.documentElement;
+  if (name === "auto") root.removeAttribute("data-theme");
+  else root.setAttribute("data-theme", name);
+  $("theme").textContent = name;
+  /* file:// pages may refuse storage entirely; the choice just won't persist */
+  try { localStorage.setItem("paris-parquet-theme", name); } catch (e) { /* fine */ }
+}
+function storedTheme() {
+  try {
+    const v = localStorage.getItem("paris-parquet-theme");
+    return THEMES.indexOf(v) >= 0 ? v : "auto";
+  } catch (e) { return "auto"; }
+}
 function showError(e) {
   const old = $("err");
   if (old) old.remove();
@@ -2094,6 +2161,7 @@ async function openFile(file) {
     $("gridwrap").hidden = true;
     $("drop").hidden = false;
     $("meta").hidden = true;
+    $("mgrip").hidden = true;
     $("more").hidden = true;
     $("all").hidden = true;
     $("toggleMeta").hidden = true;
@@ -2136,6 +2204,10 @@ async function grow(n) {
 }
 
 function init() {
+  applyTheme(storedTheme());
+  $("theme").addEventListener("click", () => {
+    applyTheme(THEMES[(THEMES.indexOf($("theme").textContent) + 1) % THEMES.length]);
+  });
   $("picker").addEventListener("change", (e) => {
     const f = e.target.files[0];
     e.target.value = "";              /* so picking the same file again re-reads it */
@@ -2146,14 +2218,37 @@ function init() {
   $("toggleMeta").addEventListener("click", () => {
     const m = $("meta");
     m.classList.toggle("collapsed");
-    $("toggleMeta").textContent = m.classList.contains("collapsed") ? "Show metadata" : "Hide metadata";
+    const hidden = m.classList.contains("collapsed");
+    $("mgrip").hidden = hidden;
+    $("toggleMeta").textContent = hidden ? "Show metadata" : "Hide metadata";
+    renderRows(true);
+  });
+  try {
+    const saved = +localStorage.getItem("paris-parquet-metah");
+    if (saved > 0) document.documentElement.style.setProperty("--metah", saved + "px");
+  } catch (e) { /* fine */ }
+  $("mgrip").addEventListener("pointerdown", (e) =>
+    drag(e, "rowsizing", (ev) => metaHeight(window.innerHeight - ev.clientY)));
+  $("gridwrap").addEventListener("pointerdown", (e) => {
+    const grip = e.target.closest("i.grip");
+    if (!grip) return;
+    const index = +grip.dataset.col;
+    const startX = e.clientX, startW = state.table.widths[index];
+    drag(e, "colsizing", (ev) => columnWidth(index, startW + ev.clientX - startX));
+  });
+  $("gridwrap").addEventListener("dblclick", (e) => {
+    const grip = e.target.closest("i.grip");
+    if (grip) columnWidth(+grip.dataset.col, COL_W);
   });
   let raf = 0;
   $("gridwrap").addEventListener("scroll", () => {
     if (raf) return;
     raf = requestAnimationFrame(() => { raf = 0; renderRows(false); });
   });
-  window.addEventListener("resize", () => renderRows(true));
+  window.addEventListener("resize", () => {
+    const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--metah"));
+    if (cur > 0) metaHeight(cur); else renderRows(true);
+  });
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
   document.addEventListener("dragover", (e) => { stop(e); document.body.classList.add("dragging"); });
   document.addEventListener("dragleave", (e) => { if (e.relatedTarget === null) document.body.classList.remove("dragging"); });
