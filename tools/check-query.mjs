@@ -205,6 +205,19 @@ async function checkFile(file) {
     }
     const theirs = [];
     for (let r = 0; r < duck.rows; r++) theirs.push(duck.columns.map((c2) => c2.values[r]));
+    /* SUM and AVG over floats depend on summation order, so their last bit or
+       two may differ from duckdb's; everything else must match exactly. */
+    const soft = view.cols.map((c, i) => {
+      if (q.mode !== "agg") return false;
+      const m = q.metrics[i - q.groupBy.length];
+      return !!m && (m.agg === "SUM" || m.agg === "AVG");
+    });
+    const near = (a, b, j) => {
+      if (a === b) return true;
+      if (!soft[j] || a === null || b === null) return false;
+      const x = parseFloat(a), y = parseFloat(b);
+      return isFinite(x) && isFinite(y) && Math.abs(x - y) <= 1e-12 * Math.max(1, Math.abs(x), Math.abs(y));
+    };
     const key = (row) => JSON.stringify(row);
     mine.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
     theirs.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
@@ -214,7 +227,7 @@ async function checkFile(file) {
       continue;
     }
     for (let r = 0; r < mine.length; r++) {
-      if (key(mine[r]) !== key(theirs[r])) {
+      if (mine[r].some((v, j) => !near(v, theirs[r][j], j))) {
         problems.push(`${c.name}: row ${r}\n        got  ${key(mine[r])}\n        duck ${key(theirs[r])}\n        ${sql.replace(/\n/g, " ")}`);
         break;
       }

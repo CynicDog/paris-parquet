@@ -208,7 +208,17 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
   background:var(--bg)}
 .qsqlwrap .qhead button{font:10px var(--mono);padding:0 6px;border-radius:3px}
 #qsql{margin:0;padding:8px 10px;overflow:auto;flex:1;font:11px/1.55 var(--mono);color:var(--ink);
-  white-space:pre-wrap;word-break:break-word}
+  background:var(--bg);border:0;border-top:1px solid transparent;resize:none;outline:none;
+  white-space:pre;min-height:60px;width:100%}
+#qsql:focus{background:var(--panel);border-top-color:var(--accent)}
+#qsql.bad{color:var(--err)}
+#qsqlstate{font-size:10px;font-weight:400}
+#qsqlstate.ok{color:var(--num)} #qsqlstate.bad{color:var(--err)} #qsqlstate.warn{color:var(--warn)}
+#qsqlmsg{flex:none;max-height:38%;overflow:auto;border-top:1px solid var(--line2);padding:5px 8px;
+  font:10.5px/1.5 var(--mono)}
+#qsqlmsg .e{color:var(--err)} #qsqlmsg .w{color:var(--warn)}
+#qsqlmsg div{margin-bottom:2px}
+.qsqlwrap .qhead button{font:10px var(--mono);padding:0 6px;border-radius:3px}
 
 /* ---------- footer / metadata ---------- */
 #mgrip{flex:none;height:7px;background:var(--bg);cursor:row-resize;position:relative;z-index:6}
@@ -293,7 +303,14 @@ details[open]>summary::before{content:"▾ "}
   <div class="qbody">
     <div class="qcols" id="qcols"></div>
     <div class="qzones" id="qzones"></div>
-    <div class="qsqlwrap"><div class="qhead">SQL<button id="qcopy">copy</button></div><pre id="qsql"></pre></div>
+    <div class="qsqlwrap">
+      <div class="qhead">SQL <span id="qsqlstate"></span><span class="grow"></span>
+        <button id="qformat" title="Rewrite it the way the builder would">tidy</button>
+        <button id="qcopy">copy</button></div>
+      <textarea id="qsql" spellcheck="false" wrap="off"
+        title="Edit freely — valid SQL flows back into the zones"></textarea>
+      <div id="qsqlmsg" hidden></div>
+    </div>
   </div>
 </section>
 <div id="mgrip" hidden title="Drag to resize the metadata panel"></div>
@@ -2726,6 +2743,7 @@ const PREDS = [
 const NO_OPERAND = { null: 1, notnull: 1 };
 const AGGS = ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MIN", "MAX"];
 const AGG_SHORT = { COUNT: "COUNT", COUNT_DISTINCT: "CNTD", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "MAX" };
+const AGG_BY_NAME = { COUNT: "COUNT", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "MAX" };
 let qid = 0;
 
 function newQuery() {
@@ -2888,7 +2906,7 @@ function aggregate(q, cols, index, n) {
     for (let g = 0; g < gRows.length; g++) key += keyPart(gRows[g][r]) + "\u0001";
     let acc = groups.get(key);
     if (!acc) {
-      acc = { row: r, m: metrics.map(() => ({ n: 0, sum: 0, min: null, max: null, set: null })) };
+      acc = { row: r, m: metrics.map(() => ({ n: 0, sum: 0, c: 0, min: null, max: null, set: null })) };
       groups.set(key, acc);
     }
     for (let m = 0; m < metrics.length; m++) {
@@ -2897,7 +2915,16 @@ function aggregate(q, cols, index, n) {
       const a = acc.m[m];
       a.n++;
       const kind = metrics[m].agg;
-      if (kind === "SUM" || kind === "AVG") { const x = mKeys[m] ? mKeys[m](v) : NaN; if (x === x) a.sum += x; }
+      if (kind === "SUM" || kind === "AVG") {
+        const x = mKeys[m] ? mKeys[m](v) : NaN;
+        if (x === x) {
+          /* Neumaier summation: adding a million doubles naively drifts, and
+             the lost low bits are exactly what a mean is made of */
+          const t = a.sum + x;
+          a.c += Math.abs(a.sum) >= Math.abs(x) ? (a.sum - t) + x : (x - t) + a.sum;
+          a.sum = t;
+        }
+      }
       else if (kind === "COUNT_DISTINCT") { (a.set || (a.set = new Set())).add(keyPart(v)); }
       else if (kind === "MIN" || kind === "MAX") {
         const cmpLess = mKeys[m]
@@ -2930,8 +2957,8 @@ function aggregate(q, cols, index, n) {
       let v = null;
       if (kind === "COUNT") v = a.n;
       else if (kind === "COUNT_DISTINCT") v = a.set ? a.set.size : 0;
-      else if (kind === "SUM") v = a.n ? a.sum : null;
-      else if (kind === "AVG") v = a.n ? a.sum / a.n : null;
+      else if (kind === "SUM") v = a.n ? a.sum + a.c : null;
+      else if (kind === "AVG") v = a.n ? (a.sum + a.c) / a.n : null;
       else if (kind === "MIN") v = a.min;
       else if (kind === "MAX") v = a.max;
       outCols[k++].rows.push(v);
@@ -3152,6 +3179,365 @@ function querySql() {
       "-- parse as this column's type" : "");
 }
 
+
+/* ======================================================================
+   Reading SQL back
+   The panel beside the zones is editable, so the SQL has to parse as well
+   as print. This covers exactly what the builder can hold; anything else
+   is named and refused rather than quietly half-applied.
+   ====================================================================== */
+const SQL_KEYWORDS = {
+  SELECT: 1, FROM: 1, WHERE: 1, GROUP: 1, ORDER: 1, BY: 1, LIMIT: 1, AND: 1, OR: 1, NOT: 1,
+  IS: 1, NULL: 1, LIKE: 1, BETWEEN: 1, AS: 1, ASC: 1, DESC: 1, DISTINCT: 1, TRUE: 1, FALSE: 1,
+  HAVING: 1, JOIN: 1, UNION: 1, OFFSET: 1, INNER: 1, LEFT: 1, RIGHT: 1, FULL: 1, OUTER: 1,
+  CROSS: 1, ON: 1, CASE: 1, WHEN: 1, WITH: 1, INTO: 1, VALUES: 1, INSERT: 1, UPDATE: 1, DELETE: 1,
+};
+const SQL_SCAN = /\s+|--[^\n]*|\/\*[\s\S]*?\*\/|'(?:[^']|'')*'|"(?:[^"]|"")*"|[A-Za-z_][A-Za-z_0-9$]*|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|<=|>=|<>|!=|[(),.*<>=;]|\S/g;
+
+function sqlTokenize(text) {
+  const out = [];
+  SQL_SCAN.lastIndex = 0;
+  let m;
+  while ((m = SQL_SCAN.exec(text))) {
+    const raw = m[0], at = m.index;
+    const c = raw[0];
+    if (/\s/.test(c) || raw.startsWith("--") || raw.startsWith("/*")) continue;
+    if (c === "'") { out.push({ t: "str", v: raw.slice(1, -1).replace(/''/g, "'"), at, raw }); continue; }
+    if (c === '"') { out.push({ t: "name", v: raw.slice(1, -1).replace(/""/g, '"'), at, raw, quoted: true }); continue; }
+    if (/[0-9]/.test(c)) { out.push({ t: "num", v: parseFloat(raw), at, raw }); continue; }
+    if (/[A-Za-z_]/.test(c)) {
+      const up = raw.toUpperCase();
+      out.push(SQL_KEYWORDS[up] ? { t: "kw", v: up, at, raw } : { t: "name", v: raw, at, raw });
+      continue;
+    }
+    out.push({ t: "op", v: raw, at, raw });
+  }
+  out.push({ t: "end", v: "", at: text.length, raw: "" });
+  return out;
+}
+
+/** Cheap edit distance, only used to suggest a column the user meant. */
+function nearestName(name, names) {
+  const a = name.toLowerCase();
+  let best = null, bestScore = Infinity;
+  for (const n of names) {
+    const b = n.toLowerCase();
+    if (Math.abs(a.length - b.length) > 3) continue;
+    const d = new Array(b.length + 1);
+    for (let j = 0; j <= b.length; j++) d[j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      let prev = d[0];
+      d[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        const t = d[j];
+        d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+        prev = t;
+      }
+    }
+    if (d[b.length] < bestScore) { bestScore = d[b.length]; best = n; }
+  }
+  return bestScore <= Math.max(2, Math.ceil(name.length / 3)) ? best : null;
+}
+
+const OP_PRED = { "=": "eq", "<>": "ne", "!=": "ne", "<": "lt", "<=": "le", ">": "gt", ">=": "ge" };
+
+/**
+ * Parses SQL into the builder's own shape.
+ * Returns { query, errors, warnings }; query is null when it cannot be held.
+ */
+function parseSql(text, cols) {
+  const toks = sqlTokenize(text);
+  const errors = [], warnings = [];
+  let p = 0;
+  const at = (t) => (t ? t.at : text.length);
+  const fail = (msg, tok) => { errors.push({ msg, at: at(tok || toks[p]) }); };
+  /* p can run past the end when a clause is cut short, so every read clamps */
+  const tokAt = (i) => toks[Math.min(i, toks.length - 1)];
+  const peek = () => tokAt(p);
+  const isKw = (w) => peek().t === "kw" && peek().v === w;
+  const isOp = (w) => peek().t === "op" && peek().v === w;
+  const step = () => { if (p < toks.length - 1) p++; };
+  const eatKw = (w) => (isKw(w) ? (step(), true) : false);
+  const eatOp = (w) => (isOp(w) ? (step(), true) : false);
+  const names = cols.map((c) => c.name);
+
+  const resolve = (tok) => {
+    const name = tok.v;
+    let i = names.indexOf(name);
+    if (i >= 0) return i;
+    const lower = name.toLowerCase();
+    const hits = [];
+    for (let k = 0; k < names.length; k++) if (names[k].toLowerCase() === lower) hits.push(k);
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) { fail('"' + name + '" matches more than one column; quote the exact name', tok); return -1; }
+    const near = nearestName(name, names);
+    fail('no column named "' + name + '"' + (near ? ' — did you mean "' + near + '"?' : ""), tok);
+    return -1;
+  };
+
+  const q = { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], metrics: [], limit: null };
+  let starSelect = false;
+  const selectAggs = [];      /* {ci, agg, alias, tok} */
+  const selectPlain = [];     /* {ci, tok} */
+
+  /* ---------------- SELECT ---------------- */
+  if (!eatKw("SELECT")) { fail("expected SELECT"); return { query: null, errors, warnings }; }
+  if (isKw("DISTINCT")) { fail("SELECT DISTINCT is not supported; use GROUP BY instead"); p++; }
+  for (;;) {
+    if (eatOp("*")) { starSelect = true; }
+    else if (peek().t === "kw" && AGG_BY_NAME[peek().v]) { fail("unexpected keyword " + peek().v); p++; }
+    else if (peek().t === "name" && tokAt(p + 1) && tokAt(p + 1).t === "op" && tokAt(p + 1).v === "(") {
+      const fnTok = peek();
+      const fn = fnTok.v.toUpperCase();
+      step(); step();
+      let agg = null;
+      if (fn === "COUNT" && isKw("DISTINCT")) { p++; agg = "COUNT_DISTINCT"; }
+      else if (AGG_BY_NAME[fn]) agg = AGG_BY_NAME[fn];
+      else fail(fn + "() is not one of COUNT, SUM, AVG, MIN, MAX", fnTok);
+      let ci = -1;
+      if (eatOp("*")) {
+        if (agg !== "COUNT") fail("only COUNT(*) may take a star", fnTok);
+        ci = 0;                                        /* COUNT(*) counts rows */
+      } else if (peek().t === "name") ci = resolve((step(), tokAt(p - 1)));
+      else fail("expected a column inside " + fn + "()");
+      if (!eatOp(")")) fail("expected )");
+      let alias = "";
+      if (eatKw("AS")) { if (peek().t === "name") alias = (step(), tokAt(p - 1)).v; else fail("expected a name after AS"); }
+      else if (peek().t === "name") alias = (step(), tokAt(p - 1)).v;
+      if (agg && ci >= 0) selectAggs.push({ ci, agg, alias, tok: fnTok });
+    } else if (peek().t === "name") {
+      const tok = (step(), tokAt(p - 1));
+      const ci = resolve(tok);
+      if (eatKw("AS") || peek().t === "name") {
+        fail("a plain column cannot be renamed here; only aggregates take an alias", tok);
+        if (peek().t === "name") p++;
+      }
+      if (ci >= 0) selectPlain.push({ ci, tok });
+    } else { fail("expected a column, * or an aggregate"); break; }
+    if (!eatOp(",")) break;
+  }
+
+  /* ---------------- FROM ---------------- */
+  if (eatKw("FROM")) {
+    if (peek().t === "name") p++;
+    else fail("expected a table name after FROM");
+    if (isOp(",") || isKw("JOIN") || isKw("INNER") || isKw("LEFT") || isKw("RIGHT") ||
+        isKw("FULL") || isKw("CROSS")) {
+      fail("one file at a time: joins are not supported");
+    }
+  } else fail("expected FROM");
+
+  /* ---------------- WHERE ---------------- */
+  const parsePredicate = () => {
+    const colTok = peek();
+    if (colTok.t !== "name") { fail("expected a column name in WHERE", colTok); p++; return null; }
+    step();
+    const ci = resolve(colTok);
+    if (isKw("IS")) {
+      step();
+      const not = eatKw("NOT");
+      if (!eatKw("NULL")) { fail("expected NULL after IS"); return null; }
+      return { ci, pred: not ? "notnull" : "null", value: "", linker: "AND" };
+    }
+    if (isKw("NOT") && tokAt(p + 1) && tokAt(p + 1).t === "kw" &&
+        (tokAt(p + 1).v === "LIKE" || tokAt(p + 1).v === "BETWEEN")) {
+      fail("NOT " + tokAt(p + 1).v + " cannot be held by the builder");
+      return null;
+    }
+    if (eatKw("LIKE")) {
+      const t = peek();
+      if (t.t !== "str") { fail("LIKE needs a quoted pattern", t); return null; }
+      step();
+      let v = t.v;
+      const wrapped = v.startsWith("%") && v.endsWith("%") && v.length >= 2;
+      v = v.replace(/^%/, "").replace(/%$/, "");
+      if (!wrapped) warnings.push({ msg: "LIKE is matched as 'contains', so the pattern is treated as %" + v + "%", at: at(t) });
+      if (v.indexOf("%") >= 0 || v.indexOf("_") >= 0) {
+        warnings.push({ msg: "wildcards inside a LIKE pattern are matched literally", at: at(t) });
+      }
+      return { ci, pred: "like", value: v, linker: "AND" };
+    }
+    if (eatKw("BETWEEN")) {
+      const lo = literal();
+      if (!eatKw("AND")) { fail("expected AND in BETWEEN"); return null; }
+      const hi = literal();
+      if (lo === null || hi === null) return null;
+      return { ci, pred: "between", value: lo, valueTo: hi, linker: "AND" };
+    }
+    const opTok = peek();
+    if (opTok.t === "op" && OP_PRED[opTok.v]) {
+      step();
+      const v = literal();
+      if (v === null) return null;
+      return { ci, pred: OP_PRED[opTok.v], value: v, linker: "AND" };
+    }
+    fail("expected a comparison after " + colTok.v, opTok);
+    return null;
+  };
+  function literal() {
+    const t = peek();
+    if (t.t === "str") { p++; return t.v; }
+    if (t.t === "num") { p++; return t.raw; }
+    if (t.t === "kw" && (t.v === "TRUE" || t.v === "FALSE")) { p++; return t.v.toLowerCase(); }
+    if (t.t === "op" && (t.v === "-" || t.v === "+") && tokAt(p + 1) && tokAt(p + 1).t === "num") {
+      step(); step();
+      return (t.v === "-" ? "-" : "") + toks[p - 1].raw;
+    }
+    if (t.t === "kw" && t.v === "NULL") { fail("compare with IS NULL rather than = NULL", t); p++; return null; }
+    fail("expected a value", t);
+    step();
+    return null;
+  }
+  /* boolean expression -> OR of ANDs, which is exactly what the zones hold */
+  const parseAnd = () => {
+    const items = [];
+    for (;;) {
+      if (isKw("NOT")) { fail("NOT cannot be held by the builder"); p++; }
+      let pred;
+      if (eatOp("(")) {
+        const inner = parseOr();
+        if (!eatOp(")")) fail("expected )");
+        if (inner && inner.length === 1) pred = inner[0].length === 1 ? inner[0][0] : { group: inner[0] };
+        else if (inner) { return { nested: inner, items }; }
+        else pred = null;
+      } else pred = parsePredicate();
+      if (pred && pred.group) for (const x of pred.group) items.push(x);
+      else if (pred) items.push(pred);
+      if (!eatKw("AND")) break;
+    }
+    return { items };
+  };
+  const parseOr = () => {
+    const groups = [];
+    for (;;) {
+      const and = parseAnd();
+      if (and.nested) {
+        fail("an OR inside an AND cannot be held: rewrite (a OR b) AND c as (a AND c) OR (b AND c)");
+        return null;
+      }
+      groups.push(and.items);
+      if (!eatKw("OR")) break;
+    }
+    return groups;
+  };
+  if (eatKw("WHERE")) {
+    const groups = parseOr();
+    if (groups) {
+      groups.forEach((g, gi) => {
+        g.forEach((f, fi) => {
+          f.id = "f" + ++qid;
+          f.linker = fi === 0 && gi > 0 ? "OR" : "AND";
+          q.filters.push(f);
+        });
+      });
+    }
+  }
+
+  /* ---------------- GROUP BY ---------------- */
+  if (isKw("GROUP")) {
+    step();
+    if (!eatKw("BY")) fail("expected BY after GROUP");
+    for (;;) {
+      const t = peek();
+      if (t.t !== "name") { fail("expected a column in GROUP BY", t); break; }
+      step();
+      const ci = resolve(t);
+      if (ci >= 0 && q.groupBy.indexOf(ci) < 0) q.groupBy.push(ci);
+      if (!eatOp(",")) break;
+    }
+  }
+  if (isKw("HAVING")) fail("HAVING is not supported; filter before grouping with WHERE");
+
+  /* ---------------- shape ---------------- */
+  const agg = selectAggs.length > 0 || q.groupBy.length > 0;
+  if (agg) {
+    q.mode = "agg";
+    q.metrics = selectAggs.map((m) => ({ id: "m" + ++qid, ci: m.ci, agg: m.agg, alias: m.alias }));
+    if (starSelect) fail("SELECT * cannot be mixed with grouping; list the columns");
+    for (const s of selectPlain) {
+      if (q.groupBy.indexOf(s.ci) < 0) {
+        fail('"' + cols[s.ci].name + '" is selected but not grouped; add it to GROUP BY or aggregate it', s.tok);
+      }
+    }
+    for (const g of q.groupBy) {
+      if (!selectPlain.some((s) => s.ci === g)) {
+        warnings.push({ msg: '"' + cols[g].name + '" is grouped, so it is selected too', at: 0 });
+      }
+    }
+  } else {
+    q.mode = "rows";
+    q.select = starSelect ? [] : selectPlain.map((s) => s.ci);
+  }
+
+  /* ---------------- ORDER BY ---------------- */
+  if (isKw("ORDER")) {
+    step();
+    if (!eatKw("BY")) fail("expected BY after ORDER");
+    for (;;) {
+      const t = peek();
+      let entry = null;
+      if (t.t === "name" && tokAt(p + 1) && tokAt(p + 1).t === "op" && tokAt(p + 1).v === "(") {
+        /* ORDER BY COUNT(x) — match it to the metric that produces it */
+        const fnTok = toks[p];
+        const fn = fnTok.v.toUpperCase();
+        step(); step();
+        const distinct = fn === "COUNT" && isKw("DISTINCT") ? (p++, true) : false;
+        const kind = distinct ? "COUNT_DISTINCT" : AGG_BY_NAME[fn];
+        let ci = -1;
+        if (eatOp("*")) ci = 0; else if (peek().t === "name") ci = resolve((step(), tokAt(p - 1)));
+        if (!eatOp(")")) fail("expected )");
+        const m = q.metrics.find((x) => x.ci === ci && x.agg === kind);
+        if (m) entry = { id: "s" + ++qid, ci: m.ci, mid: m.id, dir: "ASC" };
+        else fail("ORDER BY " + fn + "(...) does not match anything selected", fnTok);
+      } else if (t.t === "name") {
+        step();
+        const alias = q.metrics.find((m) => m.alias && m.alias === t.v);
+        if (alias) entry = { id: "s" + ++qid, ci: alias.ci, mid: alias.id, dir: "ASC" };
+        else {
+          const ci = resolve(t);
+          if (ci >= 0) {
+            if (agg && q.groupBy.indexOf(ci) < 0 && !q.metrics.some((m) => m.ci === ci)) {
+              fail('"' + t.v + '" is not selected, so it cannot be ordered by', t);
+            } else entry = { id: "s" + ++qid, ci, dir: "ASC" };
+          }
+        }
+      } else { fail("expected a column in ORDER BY", t); break; }
+      if (eatKw("DESC")) { if (entry) entry.dir = "DESC"; }
+      else eatKw("ASC");
+      if (entry) q.sort.push(entry);
+      if (!eatOp(",")) break;
+    }
+  }
+
+  /* ---------------- LIMIT ---------------- */
+  if (eatKw("LIMIT")) {
+    const t = peek();
+    if (t.t === "num" && t.v > 0 && Number.isInteger(t.v)) { q.limit = t.v; p++; }
+    else { fail("LIMIT needs a positive whole number", t); p++; }
+  }
+  if (isKw("OFFSET")) fail("OFFSET is not supported; use the pager");
+  if (isKw("UNION")) fail("UNION is not supported");
+  eatOp(";");
+  /* only worth saying when nothing more specific has already been said */
+  if (peek().t !== "end" && !errors.length) fail("unexpected " + (peek().raw || "input"), peek());
+
+  /* ---------------- values against the schema ---------------- */
+  for (const f of q.filters) {
+    const issue = filterIssue(f, cols);
+    if (issue === "invalid") {
+      const col = cols[f.ci];
+      errors.push({ msg: '"' + f.value + '" is not a ' + col.spec.label + " value for " + col.name, at: 0 });
+    }
+  }
+  for (const m of q.metrics) {
+    const col = cols[m.ci];
+    if ((m.agg === "SUM" || m.agg === "AVG") && col && col.spec.kind !== "number") {
+      warnings.push({ msg: m.agg + "(" + col.name + ") over a " + col.spec.label + " column yields nothing", at: 0 });
+    }
+  }
+  return { query: errors.length ? null : q, errors, warnings };
+}
+
 /* ----------------------------------------------------------------- UI */
 const TYPE_TAG = { number: "NUM", string: "STR", bool: "BOOL", temporal: "TS", binary: "BIN", nested: "LIST" };
 function typeTag(spec) {
@@ -3179,7 +3565,7 @@ function zone(id, label, hint, body, empty) {
 const chip = (text, act, id) => "<span class='qchip'>" + esc(text) +
   "<button class='qx' data-act='" + act + "' data-id='" + id + "'>×</button></span>";
 
-function renderQuery() {
+function renderZones() {
   const q = state.query, table = state.table;
   if (!table) return;
   const cols = table.cols;
@@ -3246,9 +3632,59 @@ function renderQuery() {
 
   $("qzones").innerHTML = parts.join("");
   for (const b of $("qmode").children) b.classList.toggle("on", b.dataset.mode === q.mode);
-  renderSql();
 }
-function renderSql() { $("qsql").textContent = querySql(); }
+/** Anything the zones do overwrites the text; the builder wins its own edits. */
+function renderQuery() {
+  state.sqlDirty = false;
+  renderZones();
+  renderSql(true);
+}
+/** The builder owns the text unless the user is in the middle of editing it. */
+function renderSql(force) {
+  if (!force && state.sqlDirty) return;
+  const el = $("qsql");
+  el.value = querySql();
+  el.classList.remove("bad");
+  state.sqlDirty = false;
+  showSqlMessages({ errors: [], warnings: [] }, true);
+}
+function lineCol(text, at) {
+  const upto = text.slice(0, at);
+  const line = upto.split("\n").length;
+  return line + ":" + (at - upto.lastIndexOf("\n"));
+}
+function showSqlMessages(res, quiet) {
+  const box = $("qsqlmsg"), state_ = $("qsqlstate"), text = $("qsql").value;
+  const items = res.errors.map((e) => ({ cls: "e", m: e })).concat(res.warnings.map((w) => ({ cls: "w", m: w })));
+  if (!items.length) {
+    box.hidden = true;
+    state_.className = quiet ? "" : "ok";
+    state_.textContent = quiet ? "" : "· in step with the zones";
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = items.map((i) =>
+    "<div class='" + i.cls + "'>" + (i.m.at ? lineCol(text, i.m.at) + "  " : "") + esc(i.m.msg) + "</div>").join("");
+  state_.className = res.errors.length ? "bad" : "warn";
+  state_.textContent = res.errors.length
+    ? "· " + res.errors.length + " problem" + (res.errors.length === 1 ? "" : "s")
+    : "· " + res.warnings.length + " note" + (res.warnings.length === 1 ? "" : "s");
+}
+/** Parses what is in the box and, if it holds together, adopts it. */
+function adoptSql(andRun) {
+  const table = state.table;
+  if (!table) return false;
+  const res = parseSql($("qsql").value, table.cols);
+  showSqlMessages(res);
+  $("qsql").classList.toggle("bad", res.errors.length > 0);
+  if (!res.query) return false;
+  res.query.active = state.query ? state.query.active : false;
+  state.query = res.query;
+  state.sqlDirty = false;
+  renderZones();                       /* zones follow the text, text stays put */
+  if (andRun) { renderSql(true); runQuery(); }
+  return true;
+}
 
 function addToZone(zoneId, ci) {
   const q = state.query;
@@ -3338,7 +3774,21 @@ function initQuery() {
   $("qzones").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); runQuery(); }
   });
-  $("qrun").addEventListener("click", () => runQuery());
+  let sqlTimer = 0;
+  $("qsql").addEventListener("input", () => {
+    state.sqlDirty = true;
+    clearTimeout(sqlTimer);
+    sqlTimer = setTimeout(() => adoptSql(false), 260);
+  });
+  $("qsql").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); adoptSql(true); }
+  });
+  $("qsql").addEventListener("blur", () => { clearTimeout(sqlTimer); adoptSql(false); });
+  $("qformat").addEventListener("click", () => { if (adoptSql(false)) renderSql(true); });
+  $("qrun").addEventListener("click", () => {
+    if (state.sqlDirty && !adoptSql(true)) return;    /* refuse to run text that does not parse */
+    runQuery();
+  });
   $("qclear").addEventListener("click", () => resetQuery());
   $("qcopy").addEventListener("click", () => {
     const text = querySql();
@@ -3612,7 +4062,8 @@ else init();
 
 /* exposed so this file can be driven from a test harness */
 window.PARIS = { readFooter, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
-  runQuery, querySql, baseView, setView, compileFilter, aggregate, exportParts, viewValue,
+  runQuery, querySql, parseSql, sqlTokenize, adoptSql,
+  baseView, setView, compileFilter, aggregate, exportParts, viewValue,
   displayCols, newDisplay, refreshView,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
 </script>

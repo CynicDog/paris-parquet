@@ -41,10 +41,21 @@ from the list into `SELECT`, `WHERE`, `ORDER BY` — or switch to Aggregate and
 drop into `GROUP BY` and `METRICS` — then Run. Filters offer `=`, `≠`, `<`,
 `≤`, `>`, `≥`, `LIKE`, `BETWEEN`, `IS NULL` and `IS NOT NULL`, chained with AND
 or OR (AND binds tighter, as in SQL). Aggregates are `COUNT`,
-`COUNT(DISTINCT)`, `SUM`, `AVG`, `MIN` and `MAX`. The equivalent SQL is shown
-beside the zones and can be copied, but it is a record of the query, not how it
-runs: the engine executes over the columns already decoded in memory. Results
-replace the grid, and the summary cards above recompute over them.
+`COUNT(DISTINCT)`, `SUM`, `AVG`, `MIN` and `MAX`. Results replace the grid, and
+the summary cards above recompute over them.
+
+The SQL beside the zones is **editable, and edits flow back**. Type a query and
+the zones rearrange themselves to match; drag a chip and the text rewrites
+itself. It is checked against the file's own schema as you type: unknown
+columns (with a suggestion), values that are not of the column's type,
+aggregates that do not line up with `GROUP BY`, an `ORDER BY` naming something
+unselected. Anything the zones cannot hold — a join, `HAVING`, `NOT`, a
+subquery, `(a OR b) AND c` — is named and refused rather than half-applied, and
+the last good state stays put. **tidy** rewrites your text the way the builder
+would.
+
+The SQL is a record of the query, not how it runs: the engine executes over the
+columns already decoded in memory.
 
 **Columns** in the header opens a picker: search by name or type, hide what you
 do not need, pin a column so it stays at the left edge while you scroll
@@ -95,6 +106,7 @@ optionally `playwright`.
 python3 tools/fixtures.py /tmp/fx             # write fixtures + expected values
 node tools/check.mjs /tmp/fx/*.parquet        # decode each one, compare every cell
 node tools/check-query.mjs /tmp/fx/*.parquet  # run the query engine against duckdb
+node tools/check-sql.mjs /tmp/fx/a.parquet    # SQL round trip, execution, refusals
 node tools/fuzz-zstd.mjs 1000                 # zstd decoder vs node's zstd encoder
 node tools/browser.mjs /tmp/fx/a.parquet      # drive the page in real Chromium
 ```
@@ -102,4 +114,7 @@ node tools/browser.mjs /tmp/fx/a.parquet      # drive the page in real Chromium
 `check.mjs` pulls the `<script>` out of `index.html` and runs it against a stub
 DOM, so the tests exercise the shipped file rather than a copy of it.
 `check-query.mjs` builds a query, asks the engine and duckdb the same question
-over the same file, and compares every cell of the two answers.
+over the same file, and compares every cell of the two answers. `check-sql.mjs`
+prints a builder state as SQL, parses it back, and insists it prints the same
+again — then runs hand-written SQL past duckdb and checks that malformed
+queries are refused with a useful message.
