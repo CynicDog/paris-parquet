@@ -25,8 +25,14 @@ open index.html      # or double-click it, or mail it to someone
   version, the writer that produced it, footer size, page encodings, encryption
   status and any key/value metadata.
 
+Click a column header to sort by it — again for descending, again to clear —
+and shift-click to add a second key. The header arrows, the query panel's
+`ORDER BY` and the SQL are the same thing seen three ways.
+
 Below the grid is a pager: 100 rows a page by default, or 10, 200, 500, 1,000,
-3,000 or all of them. A page that fits in one draw goes into the page whole, so
+3,000 or all of them. Next to it, the current view exports as CSV, TSV or JSON,
+or copies to the clipboard as TSV for pasting into a spreadsheet — either this
+page or every row of the view, filters and sorting included. A page that fits in one draw goes into the page whole, so
 scrolling it costs nothing at all; larger pages fall back to windowing.
 
 Between the grid and the metadata sits the **query builder**. Drag a column
@@ -38,6 +44,15 @@ or OR (AND binds tighter, as in SQL). Aggregates are `COUNT`,
 beside the zones and can be copied, but it is a record of the query, not how it
 runs: the engine executes over the columns already decoded in memory. Results
 replace the grid, and the summary cards above recompute over them.
+
+**Columns** in the header opens a picker: search by name or type, hide what you
+do not need, pin a column so it stays at the left edge while you scroll
+sideways, and drag to reorder. Hiding is a display choice only — a hidden
+column stays decoded and can still be filtered, grouped and sorted on.
+
+Click any cell to open it in full: the whole string with its length, a hex and
+ASCII dump for binary, indented JSON for lists, structs and maps, alongside the
+column's full path and type. Escape closes it.
 
 All three splits are draggable: the bars above the query and metadata panels
 resize them, and the right edge of any column header resizes that column
