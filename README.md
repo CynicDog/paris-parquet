@@ -79,6 +79,26 @@ do not need, pin a column so it stays at the left edge while you scroll
 sideways, and drag to reorder. Hiding is a display choice only — a hidden
 column stays decoded and can still be filtered, grouped and sorted on.
 
+**Diff** puts a second file beside the open one and says what moved. The
+schema first: columns added, removed or retyped, and the pair that is probably
+a rename rather than both — one column gone and one arrived holding the same
+type. Then the shape: rows, row groups, size, codecs, encodings, compression
+ratio, format version, who wrote it. Then what the two files claim about
+themselves — each column's null count and min/max, folded over every row group
+and compared in the column's own sort order, so an unsigned or decimal column
+is not ordered by the bytes it happens to be stored in. None of that reads a
+data page; it is all in the two footers.
+
+The row diff is the part that reads data. Pick the column, or columns, whose
+value identifies a row — a unique one is picked for you where there is one —
+and it reports the rows only in A, only in B, and the rows in both whose values
+differ, with the changed cells marked `old → new` and a count per column of how
+many cells moved. A key that repeats is refused by name rather than half
+applied, because rows cannot be matched one to one on it. Both sides are held
+to the same row budget, and the panel says what it compared when that is less
+than the whole of either file. **swap** turns the comparison around without
+re-reading anything.
+
 Click any cell to open it in full: the whole string with its length, a hex and
 ASCII dump for binary, indented JSON for lists, structs and maps, alongside the
 column's full path and type. Escape closes it.
@@ -125,8 +145,10 @@ node tools/check.mjs /tmp/fx/*.parquet        # decode each one, compare every c
 node tools/check-query.mjs /tmp/fx/*.parquet  # run the query engine against duckdb
 node tools/check-sql.mjs /tmp/fx/a.parquet    # SQL round trip, execution, refusals
 node tools/check-folder.mjs /tmp/fx/folders   # partitioned folders read as one table
+node tools/check-diff.mjs /tmp/fx/diff /tmp/fx/*.parquet   # diff, and every file vs itself
 node tools/fuzz-zstd.mjs 1000                 # zstd decoder vs node's zstd encoder
 node tools/browser.mjs /tmp/fx/a.parquet      # drive the page in real Chromium
+node tools/browser-diff.mjs /tmp/fx/diff      # drive the diff panel, and count requests
 ```
 
 `check.mjs` pulls the `<script>` out of `index.html` and runs it against a stub
@@ -135,4 +157,7 @@ DOM, so the tests exercise the shipped file rather than a copy of it.
 over the same file, and compares every cell of the two answers. `check-sql.mjs`
 prints a builder state as SQL, parses it back, and insists it prints the same
 again — then runs hand-written SQL past duckdb and checks that malformed
-queries are refused with a useful message.
+queries are refused with a useful message. `check-diff.mjs` reads a pair of
+files built to differ in exactly three ways and insists the diff names those
+three and nothing else, then diffs every other file against itself: whatever
+its types, a file has to come out equal to itself.

@@ -146,6 +146,53 @@ def folders(root):
     print("%-28s hive, flat, ragged and conflicting folders" % "folders/")
 
 
+def diffpair(root):
+    """Pairs of files for the diff: one drifted schema, one shifted row set."""
+    import shutil
+    shutil.rmtree(root, ignore_errors=True)
+    os.makedirs(root, exist_ok=True)
+    n = 1000
+    base = {
+        "id": pa.array(range(n), pa.int64()),
+        "name": pa.array(["user_%d" % (i % 97) for i in range(n)]),
+        "score": pa.array([float(i % 101) for i in range(n)], pa.float64()),
+        "qty": pa.array([i % 13 for i in range(n)], pa.int32()),
+        "ts": pa.array([datetime.datetime(2024, 1, 1) + datetime.timedelta(minutes=i) for i in range(n)]),
+    }
+    pq.write_table(pa.table(base), root + "/a.parquet", compression="snappy", row_group_size=400)
+
+    # b: one column added, one column retyped, exactly 100 rows with a new score
+    scores = list(base["score"].to_pylist())
+    for i in range(0, n, 10):
+        scores[i] = scores[i] + 1000.0
+    b = {
+        "id": base["id"],
+        "name": base["name"],
+        "score": pa.array(scores, pa.float64()),
+        "qty": pa.array([i % 13 for i in range(n)], pa.int64()),          # retyped
+        "ts": base["ts"],
+        "extra": pa.array(["e%d" % i for i in range(n)]),                 # added
+    }
+    pq.write_table(pa.table(b), root + "/b.parquet", compression="snappy", row_group_size=400)
+
+    # e: the same as a, with one column under a different name
+    e = dict(base)
+    e["label"] = e.pop("name")
+    pq.write_table(pa.table(e), root + "/e.parquet", compression="snappy")
+
+    # c/d: the same shape, overlapping by half, with changes inside the overlap
+    def side(lo, hi, bump):
+        ids = list(range(lo, hi))
+        return pa.table({
+            "id": pa.array(ids, pa.int64()),
+            "name": pa.array(["n%d" % (i % 11) for i in ids]),
+            "v": pa.array([float(i) + bump * (i % 2) for i in ids], pa.float64()),
+        })
+    pq.write_table(side(0, 200, 0), root + "/c.parquet", compression="zstd")
+    pq.write_table(side(100, 300, 7), root + "/d.parquet", compression="zstd")
+    print("%-28s a/b (drift), c/d (row sets), e (rename)" % "diff/")
+
+
 def main(out):
     os.makedirs(out, exist_ok=True)
     b, e, enc = basic(), edge(), encodings()
@@ -188,6 +235,7 @@ def main(out):
     write(out, "big_snappy", big, compression="snappy", row_group_size=100000)
 
     folders(os.path.join(out, "folders"))
+    diffpair(os.path.join(out, "diff"))
 
     try:
         import polars as pl
