@@ -203,6 +203,7 @@ node tools/browser-diff.mjs /tmp/fx/diff      # drive the diff panel, and count 
 node tools/browser-push.mjs /tmp/fx/push      # drive the scan, and time it
 node tools/browser-lazy.mjs /tmp/fx/wide.parquet   # only decode what is wanted
 node tools/browser-workers.mjs /tmp/fx/*.parquet   # the other cores agree, cell for cell
+node tools/browser-tree.mjs /tmp/fx/push      # drive the folder tree, both backends, count requests
 ```
 
 - `check.mjs` pulls the `<script>` out of `index.html` and runs it against a
