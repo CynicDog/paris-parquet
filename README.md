@@ -45,6 +45,10 @@ beside the zones and can be copied, but it is a record of the query, not how it
 runs: the engine executes over the columns already decoded in memory. Results
 replace the grid, and the summary cards above recompute over them.
 
+Click any cell to open it in full: the whole string with its length, a hex and
+ASCII dump for binary, indented JSON for lists, structs and maps, alongside the
+column's full path and type. Escape closes it.
+
 All three splits are draggable: the bars above the query and metadata panels
 resize them, and the right edge of any column header resizes that column
 (double-click it to go back to the default width). Panel heights and the page

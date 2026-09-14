@@ -120,6 +120,20 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .bools i{display:block;text-align:center;overflow:hidden}
 .bools i.t{background:var(--bool)} .bools i.f{background:var(--dim)} .bools i.n{background:var(--line)}
 
+/* ---------- cell inspector ---------- */
+#inspect{position:fixed;z-index:40;max-width:min(620px,92vw);max-height:60vh;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line);border-radius:6px;
+  box-shadow:0 6px 24px rgba(0,0,0,.18)}
+.ihead{display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid var(--line2);
+  font:11px var(--mono)}
+.ihead b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ihead button{padding:0 7px;font-size:11px;line-height:18px;min-width:0}
+.imeta{display:flex;gap:9px;flex-wrap:wrap;padding:4px 8px;border-bottom:1px solid var(--line2);
+  font:10.5px var(--mono)}
+.ibody{margin:0;padding:8px;overflow:auto;font:11.5px/1.5 var(--mono);white-space:pre-wrap;
+  word-break:break-word;color:var(--ink)}
+.ibody.null{color:var(--faint);font-style:italic}
+
 /* ---------- query builder ---------- */
 #query{flex:none;height:var(--queryh,258px);display:flex;flex-direction:column;overflow:hidden;
   border-top:1px solid var(--line);background:var(--panel)}
@@ -236,6 +250,7 @@ details[open]>summary::before{content:"▾ "}
   <div id="busy" hidden>reading…</div>
 </div>
 
+<div id="inspect" hidden></div>
 <div id="qgrip" hidden title="Drag to resize the query panel"></div>
 <section id="query" hidden>
   <div class="qbar">
@@ -2202,7 +2217,7 @@ function renderRows(force) {
   for (let r = first; r < last; r++) {
     const abs = pageStart + r;
     const src = index ? index[abs] : abs;
-    parts.push("<tr><td class='rownum'>", String((view.agg ? abs : src) + 1), "</td>");
+    parts.push("<tr data-r='", String(abs), "'><td class='rownum'>", String((view.agg ? abs : src) + 1), "</td>");
     for (let ci = 0; ci < ncols; ci++) {
       const v = data[ci][src];
       if (v === null || v === undefined) { parts.push("<td class='null'>null</td>"); continue; }
@@ -2217,6 +2232,87 @@ function renderRows(force) {
     parts.push("<tr><td class='pad' colspan='" + span + "' style='height:" + (total - last) * ROW_H + "px'></td></tr>");
   }
   body.innerHTML = parts.join("");
+  if (state.inspectAt) closeInspector();
+}
+
+/* ------------------------------------------------------- cell inspector */
+function hexDump(bytes) {
+  const lines = [];
+  for (let off = 0; off < bytes.length; off += 16) {
+    const slice = bytes.subarray(off, off + 16);
+    let h = "", a = "";
+    for (let i = 0; i < 16; i++) {
+      h += i < slice.length ? HEX[slice[i]] + (i === 7 ? "  " : " ") : (i === 7 ? "    " : "   ");
+      if (i < slice.length) { const c = slice[i]; a += c >= 32 && c < 127 ? String.fromCharCode(c) : "."; }
+    }
+    lines.push(off.toString(16).padStart(8, "0") + "  " + h + " |" + a + "|");
+  }
+  return lines.join("\n");
+}
+/** The whole value, laid out for reading rather than for a table cell. */
+function inspectText(v, spec) {
+  if (v === null || v === undefined) return "null";
+  if (spec.kind === "binary" && v instanceof Uint8Array) return hexDump(v);
+  if (spec.kind === "nested") {
+    const inner = { kind: spec.elementKind, sub: spec.sub, utc: spec.utc };
+    const walk = (x) => {
+      if (x === null || x === undefined) return null;
+      if (Array.isArray(x)) return x.map(walk);
+      if (inner.kind === "bool") return x === true;
+      if (inner.kind === "number" && typeof x === "number") return x;
+      if (inner.kind === "binary" && x instanceof Uint8Array) return hex(x);
+      return fmtValue(x, inner);
+    };
+    try { return JSON.stringify(walk(v), null, 2); } catch (e) { return String(v); }
+  }
+  return fmtValue(v, spec);
+}
+function closeInspector() {
+  const el = $("inspect");
+  el.hidden = true;
+  state.inspectAt = null;
+}
+function openInspector(viewRow, ci, cell) {
+  const view = state.view;
+  if (!view || !view.cols[ci]) return;
+  const col = view.cols[ci], spec = col.spec;
+  const v = viewValue(view, ci, viewRow);
+  const text = inspectText(v, spec);
+  const isNull = v === null || v === undefined;
+  const bits = [];
+  if (col.leaf) {
+    bits.push(col.leaf.type + (col.leaf.typeLength ? "(" + col.leaf.typeLength + ")" : ""));
+    bits.push(col.leaf.rep.toLowerCase());
+  }
+  let size = "";
+  if (typeof v === "string") size = num(v.length) + " chars";
+  else if (v instanceof Uint8Array) size = num(v.length) + " bytes";
+  else if (Array.isArray(v)) size = num(v.length) + (v.length === 1 ? " element" : " elements");
+  const srcRow = view.index ? view.index[viewRow] : viewRow;
+  $("inspect").innerHTML =
+    "<div class='ihead'><b>" + esc(col.leaf ? col.leaf.path.join(".") : col.name) + "</b>" +
+    "<span class='grow'></span><button id='icopy'>copy</button><button id='iclose'>×</button></div>" +
+    "<div class='imeta'><span class='t-" + spec.kind + "'>" + esc(spec.label) + "</span>" +
+    (bits.length ? "<span class='muted'>" + esc(bits.join(" · ")) + "</span>" : "") +
+    "<span class='muted'>row " + num((view.agg ? viewRow : srcRow) + 1) + "</span>" +
+    (size ? "<span class='muted'>" + size + "</span>" : "") + "</div>" +
+    "<pre class='ibody" + (isNull ? " null" : "") + "'>" + esc(text) + "</pre>";
+  const el = $("inspect");
+  el.hidden = false;
+  const box = cell.getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  let left = Math.min(box.left, window.innerWidth - w - 8);
+  let top = box.bottom + 4;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, box.top - h - 4);
+  el.style.left = Math.max(8, left) + "px";
+  el.style.top = top + "px";
+  state.inspectAt = { viewRow, ci };
+  $("iclose").onclick = closeInspector;
+  $("icopy").onclick = () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+    $("icopy").textContent = "copied";
+    setTimeout(() => { const b = $("icopy"); if (b) b.textContent = "copy"; }, 1200);
+  };
 }
 
 /* ------------------------------------------------------------ metadata */
@@ -3268,10 +3364,24 @@ function init() {
     if (state.justResized) return;              /* the click that ends a drag */
     if (e.target.closest("i.grip")) return;
     const th = e.target.closest("tr.r-name th");
-    if (!th || th.classList.contains("rownum")) return;
-    const idx = Array.prototype.indexOf.call(th.parentNode.children, th) - 1;
-    if (idx >= 0) toggleSort(idx, e.shiftKey);
+    if (th) {
+      if (th.classList.contains("rownum")) return;
+      const idx = Array.prototype.indexOf.call(th.parentNode.children, th) - 1;
+      if (idx >= 0) toggleSort(idx, e.shiftKey);
+      return;
+    }
+    const td = e.target.closest("#tbody td");
+    if (!td || td.classList.contains("rownum") || td.classList.contains("pad")) return;
+    if (String(window.getSelection())) return;     /* they were selecting text */
+    const tr = td.parentNode;
+    const ci = Array.prototype.indexOf.call(tr.children, td) - 1;
+    const r = +tr.dataset.r;
+    if (ci >= 0 && isFinite(r)) openInspector(r, ci, td);
   });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeInspector(); });
+  document.addEventListener("pointerdown", (e) => {
+    if (state.inspectAt && !e.target.closest("#inspect") && !e.target.closest("#tbody td")) closeInspector();
+  }, true);
   let raf = 0;
   $("gridwrap").addEventListener("scroll", () => {
     if (raf) return;
