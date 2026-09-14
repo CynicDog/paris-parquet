@@ -1550,6 +1550,14 @@ function jsonish(v, spec) {
    Column summaries
    ====================================================================== */
 const BINS = 24;
+/** A mean is an estimate; this keeps it short and stops it looking exact. */
+function compactNumber(x) {
+  if (!isFinite(x)) return String(x);
+  const a = Math.abs(x);
+  if (a !== 0 && (a >= 1e12 || a < 1e-4)) return x.toExponential(4);
+  if (Number.isInteger(x)) return String(x);
+  return String(Number(x.toPrecision(8)));
+}
 function numeric(v) {
   if (v === null || v === undefined) return NaN;
   if (typeof v === "bigint") return Number(v);
@@ -1609,8 +1617,7 @@ function summarize(col) {
       /* the text comes from the stored value, so decimals and int64 stay exact */
       s.minText = fmtValue(lo, spec);
       s.maxText = fmtValue(hi, spec);
-      s.meanText = spec.kind === "temporal" ? fmtTemporal(s.mean, spec)
-        : (Number.isInteger(s.mean) ? String(s.mean) : s.mean.toPrecision(6).replace(/0+$/, "").replace(/\.$/, ""));
+      s.meanText = spec.kind === "temporal" ? fmtTemporal(s.mean, spec) : compactNumber(s.mean);
     }
     return s;
   }
@@ -1690,7 +1697,13 @@ async function loadMore(src, table, maxRows, onProgress) {
           "). paris-parquet reads one self-contained file at a time.");
       }
       if (chunk.encryptedMetadata || chunk.cryptoMetadata) throw new Error("Column " + col.name + " is encrypted.");
-      const raw = await readColumnChunk(src, chunk, col.leaf);
+      let raw;
+      try {
+        raw = await readColumnChunk(src, chunk, col.leaf);
+      } catch (e) {
+        throw new Error('Could not read column "' + col.name + '" in row group ' + table.nextGroup +
+          " (" + chunk.meta.codec + ", " + chunk.meta.encodings.join("/") + "): " + e.message);
+      }
       if (!col.sniffed && raw.values.length) {
         col.sniffed = true;
         if (col.spec.maybeUtf8 && looksUtf8(raw.values)) {
@@ -1717,8 +1730,8 @@ async function loadMore(src, table, maxRows, onProgress) {
    Rendering
    ====================================================================== */
 const $ = (id) => document.getElementById(id);
-const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ESCAPES[c]);
+const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESCAPES[c]);
 const num = (n) => (n == null ? "-" : Number(n).toLocaleString("en-US"));
 function bytesHuman(n) {
   if (n == null) return "-";
@@ -1755,7 +1768,7 @@ function summaryCard(col) {
     else {
       out.push(kv("min", esc(s.minText)));
       out.push(kv("max", esc(s.maxText)));
-      out.push(kv(spec.kind === "temporal" ? "mid" : "mean", esc(s.meanText)));
+      out.push(kv("mean", esc(s.meanText)));
       if (s.max > s.min) {                       /* a constant column has no shape to draw */
         let peak = 1;
         for (const h of s.hist) if (h > peak) peak = h;
@@ -1927,7 +1940,7 @@ function renderMeta() {
 
   $("mbar").innerHTML = [
     "<span class='tag'>rows <b>" + num(meta.numRows) + "</b></span>",
-    table.truncated ? "<span class='tag'>read so far <b>" + num(table.rowsLoaded) +
+    table.truncated && table.rowsLoaded ? "<span class='tag'>read so far <b>" + num(table.rowsLoaded) +
       "</b> rows &mdash; summaries cover these</span>" : "",
     "<span class='tag'>columns <b>" + num(leaves.length) + "</b></span>",
     "<span class='tag'>row groups <b>" + num(meta.rowGroups.length) + "</b></span>",
@@ -1976,10 +1989,14 @@ function renderMeta() {
     rgRows + "</table></div></div>");
 
   let colRows = "";
+  const firstGroup = meta.rowGroups[0];
+  const byPath = new Map();
+  if (firstGroup) firstGroup.columns.forEach((c, i) => { if (c.meta) byPath.set(c.meta.path.join(" "), c); });
   leaves.forEach((leaf, i) => {
     const a = agg[i];
     const spec = table.cols[i] ? table.cols[i].spec : typeSpec(leaf);
-    const first = meta.rowGroups[0] && meta.rowGroups[0].columns[i];
+    const key = leaf.path.join(" ");
+    const first = byPath.has(key) ? byPath.get(key) : (firstGroup && firstGroup.columns[i]);
     const st = first && first.meta ? first.meta.statistics : null;
     const mn = st ? statValue(st.minValue || st.min, leaf, spec) : null;
     const mx = st ? statValue(st.maxValue || st.max, leaf, spec) : null;
@@ -2081,6 +2098,11 @@ async function openFile(file) {
     $("all").hidden = true;
     $("toggleMeta").hidden = true;
     showError(e);
+    /* the footer usually parses even when a page does not, and it is the part
+       that explains why: codec, encodings, encryption, who wrote the file */
+    if (state.meta && state.table) {
+      try { renderMeta(); $("toggleMeta").hidden = false; } catch (e2) { /* nothing to show */ }
+    }
   } finally {
     busy(false);
   }
@@ -2114,7 +2136,11 @@ async function grow(n) {
 }
 
 function init() {
-  $("picker").addEventListener("change", (e) => { if (e.target.files[0]) openFile(e.target.files[0]); });
+  $("picker").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";              /* so picking the same file again re-reads it */
+    if (f) openFile(f);
+  });
   $("more").addEventListener("click", () => grow(FIRST_ROWS));
   $("all").addEventListener("click", () => grow(Infinity));
   $("toggleMeta").addEventListener("click", () => {
