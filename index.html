@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>paris-parquet</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAERElEQVR4AcSWTWwbRRTH/2/8sXHsBn8FEE1CCV3EgSO9cG8SWm4ckeCAVMEBCTigShXJ5lIJISGEOMABCVBP3FuSCFZI3JEQFf0CmoRCGpJ1ErtxHNvZ4b2x17Flp86Ho652dsdvZ97/N+/N27XCIz6OHWBj5pO0N+tcyM0633gzzvfe7PTXuTnnXLDuYwPQ1z6zvDlnukKFRRb7UgOvgzAB6De0xlUGeZPtOBYAfdN5qpBY+xkakwQdF6H2pt8VW88B7l15bWjl+sJPsYHqmWiCRKNj08BpjgT1FMC75gwpCruVzaK9+vtfsPrLiMY7Q7C1SByengGIuA6RG00N2xSKwq9U4d1cQN/ADkKRTkFQv4i1JwD6jjMU7ieXF8TiYUTTT4MEolzBxt1/EUu1y/haf9cTAMn56vVFN5727Ug/B5a9UqgOEYlhe2MTO2WfrU0n0UJp4MQVsbSjiXWfTcKuKOSW85sm57zxEIntQliZU7AGT2Nrvcmhhg9fvTX80vtbYj00gIhDcp4csklFsLNdNjnvT2mosLiuNVKhWqd+JaKLmYkPZ+o/cSgAyXkoRi6/VGwKRznnIzAQpW3kF5YQS3Z2q0ldSo9PfRyIy73zSHmyR5Oc52784yay2g731QY1IMIWttYK0D5Xee1R46q1upQdm7zcMNQ7BwKQsBPILa3lbe/GXcQ53KxpXAmElXkGVmYUxVwrgBGfaBeXifsGEHFT58lhW5Jc3SrBuzWPeIaRgjST9Js2ACs8TJwf728PmJxHydS5iliIpkYA3lzVYgmFe/f3zrmEfY+Vi7i0rhEwOb+15CaegM3vFpkDZSD4ZcO7f8vL815sDbkM6rZyGSPtoQASdtLaLXnrdu72PBJZIHitGojBUa6AUwfKuYg2tz0BRLxW55xzUqg8KGLtzgISgwT+aXwQdyggMhZgvyuvD++8B/Sv/FWLkKlzFY3Vcs5i5UIRm/dX0PcYBfNb7lLn2S45b5nAP9oiIDnfWFp2TzwJO1hcA0KFUfxvvREBnt84zco71HljwB6dFoD8D5cz5Ps/bi7n7LU/Fk24WdNMFQgrO4pIcgRFTxtbcDHiB1x5MLcBoLWmyk7522jy5HMAoZx/gPU//8aJxxWoHnFSIRC/etF0HEVc3Ci5SMvNTb/K93PKSiCaHOIu8ae0gOLKKvoG6gRsbT6PKi6+GgC8zA/EIE31MURqGOCNV1zmnIfRdvRCXJwaAFNyGi+KIWjKisPKPovQwMme5jzwH9wNABReAHRbnIn/2aiwFYw1916t3DjjiwHwyY9wv+t5mDrv5tQAhH31G0CttYXdg0DbROrtTt/z3VGH6xmA1MvOPOt/1e7CQM2hSmfSY5NftD8/usUAiJv02akLpOgVIvrIBz4lhXf8qn4+M+6Mp89PcoRwLEcDgIU1Q1xNj01dHBx33kufdT4fPO/cPqpqt/n/AwAA//9OUTU1AAAABklEQVQDAHfGhFDhLBUCAAAAAElFTkSuQmCC">
 <style>
 :root{
   --bg:#fbfbfa; --panel:#fff; --ink:#1c1c1a; --dim:#6b6b66; --faint:#9a9a94;
@@ -121,38 +122,6 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .bools i{display:block;text-align:center;overflow:hidden}
 .bools i.t{background:var(--bool)} .bools i.f{background:var(--dim)} .bools i.n{background:var(--line)}
 
-/* ---------- chart ---------- */
-#chartwrap{flex:1;display:flex;flex-direction:column;min-height:0;background:var(--panel)}
-#chartbar{border-bottom:1px solid var(--line2)}
-#chartbar select,#chartbar input[type=checkbox]{vertical-align:middle}
-#chartbar select{font:11px var(--mono);background:var(--panel);color:var(--ink);
-  border:1px solid var(--line);border-radius:4px;padding:1px 4px;max-width:170px}
-#chartbar button{padding:1px 8px;font-size:11px}
-.cser{display:inline-flex;align-items:center;gap:3px;margin-right:7px;cursor:pointer}
-.cser input{accent-color:var(--accent);margin:0}
-#chartlegend{flex:none;display:flex;flex-wrap:wrap;gap:14px;padding:7px 14px 2px;font:11px var(--mono);
-  color:var(--dim)}
-#chartlegend:empty{display:none}
-.lgi{display:inline-flex;align-items:center;gap:5px}
-.lgi i{width:10px;height:10px;border-radius:2px;display:inline-block}
-.lgi i.lgline{width:14px;height:2px;border-radius:1px}
-#chartbody{flex:1;min-height:0;padding:4px 8px 6px;overflow:hidden}
-#chartbody svg .mark{transition:opacity .08s}
-#chartbody svg .mark:hover{opacity:.78}
-.chartempty{height:100%;display:flex;align-items:center;justify-content:center;text-align:center;
-  color:var(--faint);font:12px var(--mono);padding:20px}
-.chartsolo{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
-.herofig{font:600 52px/1 var(--mono);color:var(--ink)}
-.herolab{font:12px var(--mono);color:var(--dim)}
-#charttip{position:fixed;z-index:50;background:var(--panel);border:1px solid var(--line);border-radius:5px;
-  box-shadow:0 4px 16px rgba(0,0,0,.18);padding:5px 8px;font:11px var(--mono);pointer-events:none;
-  max-width:280px}
-.ttcat{color:var(--dim);margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ttrow{display:flex;align-items:center;gap:6px;line-height:1.6}
-.ttrow i{width:12px;height:2px;border-radius:1px;flex:none}
-.ttrow b{color:var(--ink);font-weight:600}
-.ttrow span{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
 /* ---------- cell inspector ---------- */
 #inspect{position:fixed;z-index:40;max-width:min(620px,92vw);max-height:60vh;display:flex;flex-direction:column;
   background:var(--panel);border:1px solid var(--line);border-radius:6px;
@@ -190,6 +159,10 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .cppin.on{background:var(--accent);border-color:var(--accent);color:#fff}
 
 /* ---------- query builder ---------- */
+#qgrip{flex:none;height:7px;background:var(--bg);cursor:row-resize;position:relative;z-index:6}
+#qgrip::after{content:"";position:absolute;left:50%;top:2px;margin-left:-19px;width:38px;height:3px;
+  border-radius:2px;background:var(--line)}
+#qgrip:hover::after,body.rowsizing #qgrip::after{background:var(--accent)}
 #query{flex:none;height:var(--queryh,258px);display:flex;flex-direction:column;overflow:hidden;
   border-top:1px solid var(--line);background:var(--panel)}
 .qbar{flex:none;display:flex;align-items:center;gap:8px;padding:5px 12px;border-bottom:1px solid var(--line2);
@@ -214,6 +187,12 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .qzones{flex:1;overflow:auto;padding:9px 12px;display:flex;flex-direction:column;gap:9px;min-width:0}
 .qzone{min-width:0}
 .qzlabel{font:10px var(--mono);font-weight:700;letter-spacing:.08em;color:var(--faint);margin-bottom:3px}
+.qzlabel.qzl-flex{display:flex;align-items:center}
+.gmode{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.gmode button{border:0;border-radius:0;padding:5px 14px;font:13px var(--mono);font-weight:600;
+  letter-spacing:normal;text-transform:none;background:var(--panel);color:var(--dim)}
+.gmode button+button{border-left:1px solid var(--line)}
+.gmode button.on{background:var(--accent);color:#fff}
 .qdrop{min-height:30px;border:1px dashed var(--line);border-radius:5px;padding:4px 7px;display:flex;
   flex-wrap:wrap;gap:4px;align-items:center;background:var(--panel)}
 .qdrop.empty{background:var(--bg)}
@@ -238,7 +217,7 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .qwarn{color:var(--warn);font-style:normal}
 .qlimit{display:flex;align-items:center;gap:8px}
 .qlimit .qzlabel{margin:0}
-.qsqlwrap{flex:0 0 272px;border-left:1px solid var(--line2);display:flex;flex-direction:column;overflow:hidden;
+.qsqlwrap{flex:0 0 420px;border-left:1px solid var(--line2);display:flex;flex-direction:column;overflow:hidden;
   background:var(--bg)}
 .qsqlwrap .qhead button{font:10px var(--mono);padding:0 6px;border-radius:3px}
 #qsql{margin:0;padding:8px 10px;overflow:auto;flex:1;font:11px/1.55 var(--mono);color:var(--ink);
@@ -358,7 +337,6 @@ details[open]>summary::before{content:"▾ "}
   <div class="grow"></div>
   <button id="more" hidden>Load more rows</button>
   <button id="all" hidden>Load all</button>
-  <button id="toggleChart" hidden>Chart</button>
   <button id="toggleDiff" hidden title="Compare this file with another one">Diff</button>
   <button id="toggleCols" hidden>Columns</button>
   <button id="toggleQuery" hidden>Query</button>
@@ -374,11 +352,6 @@ details[open]>summary::before{content:"▾ "}
       Nothing leaves your machine.</div>
   </div>
   <div id="gridwrap" hidden><table class="grid" id="grid"></table></div>
-  <div id="chartwrap" hidden>
-    <div class="qbar" id="chartbar"></div>
-    <div id="chartlegend"></div>
-    <div id="chartbody"></div>
-  </div>
   <div id="diffwrap" hidden>
     <div id="diffbar"></div>
     <div id="diffbody"></div>
@@ -388,7 +361,6 @@ details[open]>summary::before{content:"▾ "}
 </div>
 
 <div id="inspect" hidden></div>
-<div id="charttip" hidden></div>
 <div id="colpick" hidden>
   <div class="ihead" id="cphead"></div>
   <div class="cpsearchwrap"><input id="cpsearch" placeholder="search name or type"></div>
@@ -2870,10 +2842,6 @@ function setView(view) {
   summarizeView(view);
   renderGrid();
   renderPager();
-  if (typeof chartDefaults === "function") {
-    chartDefaults(view);                       /* axes follow whatever is on screen */
-    if (chart.on) { renderChartControls(); renderChart(); }
-  }
 }
 
 /* ------------------------------------------------------------ pagination */
@@ -3181,7 +3149,7 @@ function renderGrid() {
   }
   $("colstyle").textContent = css;
 
-  $("gridwrap").hidden = !!(typeof chart === "object" && chart.on);
+  $("gridwrap").hidden = diff.on;
   $("drop").hidden = true;
   const nameRow = grid.querySelector("tr.r-name");
   document.documentElement.style.setProperty("--nameh", nameRow.offsetHeight + "px");
@@ -3293,7 +3261,6 @@ function togglePicker(show) {
 }
 function initPicker() {
   $("toggleCols").addEventListener("click", () => togglePicker());
-  $("toggleChart").addEventListener("click", () => showChart(!chart.on));
   $("cpsearch").addEventListener("input", renderPicker);
   const act = (e) => {
     const el = e.target.closest("[data-act]");
@@ -3356,592 +3323,6 @@ function initPicker() {
       togglePicker(false);
     }
   }, true);
-}
-
-
-/* ======================================================================
-   Charts
-   Inline SVG, drawn by hand. Colours are the validated categorical order
-   (see the palette note below); both modes are stepped for their own
-   surface rather than flipped. Series keep their slot when others are
-   switched off, so a colour always means the same column.
-   ====================================================================== */
-const SVGNS = "http://www.w3.org/2000/svg";
-/* validated with the data-viz palette validator against this page's own
-   surfaces: light #ffffff and dark #1c1e22, adjacent pairs, 6 slots */
-const SERIES_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"];
-const SERIES_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300"];
-const SERIES_CAP = SERIES_LIGHT.length;
-const CHART_MAX_CATS = 30;
-
-function darkNow() {
-  const stamped = document.documentElement.getAttribute("data-theme");
-  if (stamped === "dark") return true;
-  if (stamped === "light") return false;
-  return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
-}
-function chartInk() {
-  const dark = darkNow();
-  return {
-    series: dark ? SERIES_DARK : SERIES_LIGHT,
-    surface: dark ? "#1c1e22" : "#ffffff",
-    text: dark ? "#e6e6e3" : "#1c1c1a",
-    dim: dark ? "#9b9d9f" : "#6b6b66",
-    faint: dark ? "#6e7073" : "#9a9a94",
-    grid: dark ? "#2c2f34" : "#e2e2dd",
-  };
-}
-const el = (name, attrs) => {
-  const n = document.createElementNS(SVGNS, name);
-  for (const k in attrs) if (attrs[k] !== undefined && attrs[k] !== null) n.setAttribute(k, attrs[k]);
-  return n;
-};
-/** Labels come out of the file, so they go in as text, never as markup. */
-function svgText(x, y, text, attrs) {
-  const n = el("text", Object.assign({ x, y }, attrs));
-  n.textContent = text;
-  return n;
-}
-/** Column with a rounded data end and a square foot on the baseline. */
-function barPath(x, y, w, h, r) {
-  const rr = Math.max(0, Math.min(r, w / 2, h));
-  return "M" + x + "," + (y + h) + "V" + (y + rr) + "a" + rr + "," + rr + " 0 0 1 " + rr + ",-" + rr +
-    "h" + (w - 2 * rr) + "a" + rr + "," + rr + " 0 0 1 " + rr + "," + rr + "V" + (y + h) + "Z";
-}
-function barPathH(x, y, w, h, r) {
-  const rr = Math.max(0, Math.min(r, h / 2, w));
-  return "M" + x + "," + y + "H" + (x + w - rr) + "a" + rr + "," + rr + " 0 0 1 " + rr + "," + rr +
-    "v" + (h - 2 * rr) + "a" + rr + "," + rr + " 0 0 1 -" + rr + "," + rr + "H" + x + "Z";
-}
-/** Axis ticks on round numbers, so the reader gets 0 / 1,000 / 2,000. */
-function niceTicks(lo, hi, want) {
-  if (!isFinite(lo) || !isFinite(hi)) return { ticks: [0], lo: 0, hi: 1 };
-  if (lo === hi) { const pad = Math.abs(lo) || 1; lo -= pad / 2; hi += pad / 2; }
-  const raw = (hi - lo) / Math.max(1, want);
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const norm = raw / mag;
-  const step = (norm >= 7.5 ? 10 : norm >= 3 ? 5 : norm >= 1.5 ? 2 : 1) * mag;
-  const start = Math.ceil(lo / step) * step;
-  const ticks = [];
-  for (let t = start; t <= hi + step * 1e-9 && ticks.length < 40; t += step) {
-    ticks.push(Math.abs(t) < step * 1e-9 ? 0 : t);
-  }
-  return { ticks, step };
-}
-function tickLabel(v, spec) {
-  if (spec && spec.kind === "temporal") return fmtTemporal(v, spec);
-  const a = Math.abs(v);
-  if (a >= 1e9) return (v / 1e9).toFixed(a >= 1e10 ? 0 : 1) + "B";
-  if (a >= 1e6) return (v / 1e6).toFixed(a >= 1e7 ? 0 : 1) + "M";
-  if (a >= 1e4) return (v / 1e3).toFixed(0) + "k";
-  if (Number.isInteger(v)) return v.toLocaleString("en-US");
-  return String(Number(v.toPrecision(4)));
-}
-
-const chart = { on: false, type: "auto", x: -1, series: [], stacked: false };
-
-function numericCols(view) {
-  return view.cols.map((c, i) => i).filter((i) => view.cols[i].spec.kind === "number");
-}
-/** Picks sensible axes for whatever the view currently is. */
-function chartDefaults(view) {
-  const nums = numericCols(view);
-  let x = view.cols.findIndex((c) => c.spec.kind === "temporal");
-  if (x < 0) x = view.cols.findIndex((c) => c.spec.kind === "string" || c.spec.kind === "bool");
-  if (x < 0) x = nums.length > 1 ? nums[0] : 0;
-  const series = nums.filter((i) => i !== x).slice(0, SERIES_CAP);
-  chart.x = x;
-  chart.series = series.length ? series : nums.slice(0, 1);
-  chart.type = "auto";
-  chart.stacked = false;
-}
-function effectiveType(view, cats) {
-  if (chart.type !== "auto") return chart.type;
-  const xs = view.cols[chart.x];
-  if (xs && xs.spec.kind === "temporal") return "line";
-  const longNames = cats.some((c) => String(c.label).length > 12);
-  return cats.length > 14 || longNames ? "bar" : "column";
-}
-
-/** Rolls the view into one point per x, summing when an x repeats. */
-function chartData(view) {
-  const xi = chart.x;
-  const xcol = view.cols[xi];
-  if (!xcol) return null;
-  const sers = chart.series.filter((i) => view.cols[i]).slice(0, SERIES_CAP);
-  if (!sers.length) return null;
-  const groups = new Map();
-  let collapsed = 0;
-  for (let r = 0; r < view.count; r++) {
-    const xv = viewValue(view, xi, r);
-    const key = xv === null || xv === undefined ? "\u0000null" : String(xv);
-    let g = groups.get(key);
-    if (!g) {
-      g = { x: xv, label: xv === null || xv === undefined ? "(null)" : fmtValue(xv, xcol.spec),
-        ys: sers.map(() => null), rows: 0 };
-      groups.set(key, g);
-    } else collapsed++;
-    g.rows++;
-    sers.forEach((ci, si) => {
-      const v = numeric(viewValue(view, ci, r));
-      if (v === v && isFinite(v)) g.ys[si] = (g.ys[si] === null ? 0 : g.ys[si]) + v;
-    });
-  }
-  let points = [...groups.values()];
-  const temporal = xcol.spec.kind === "temporal";
-  const numericX = xcol.spec.kind === "number";
-  if (temporal || numericX) points.sort((a, b) => numeric(a.x) - numeric(b.x));
-  return {
-    points, collapsed, temporal, numericX,
-    xcol, series: sers.map((ci) => view.cols[ci]), seriesIdx: sers,
-  };
-}
-
-function renderChart() {
-  const host = $("chartbody");
-  if (!host) return;
-  host.textContent = "";
-  $("chartlegend").textContent = "";
-  const view = state.view;
-  if (!view) return;
-  if (chart.x < 0 || chart.x >= view.cols.length) chartDefaults(view);
-  const data = chartData(view);
-  const note = $("chartnote");
-  note.textContent = "";
-  if (!data) {
-    host.appendChild(emptyMessage("Pick a column for each axis — a chart needs one to group by and one to measure."));
-    return;
-  }
-  if (!view.count) {
-    host.appendChild(emptyMessage("Nothing to chart: the current result has no rows."));
-    return;
-  }
-  const ink = chartInk();
-
-  /* one value is a number, not a chart */
-  if (data.points.length === 1 && data.series.length === 1) {
-    host.appendChild(heroFigure(data, ink));
-    return;
-  }
-
-  renderChartLegend(data, ink);      /* before measuring: it takes height from the body */
-  const box = host.getBoundingClientRect();
-  const W = Math.max(320, Math.floor(box.width)), H = Math.max(160, Math.floor(box.height));
-
-  let points = data.points;
-  const type = effectiveType(view, points);
-  /* a horizontal bar needs a readable row; never draw more than will fit */
-  const maxCats = type === "bar" ? Math.max(5, Math.floor((H - 44) / 15)) : CHART_MAX_CATS;
-  let capped = 0;
-  if ((type === "column" || type === "bar") && points.length > maxCats) {
-    const ranked = points.slice().sort((a, b) => Math.abs(b.ys[0] || 0) - Math.abs(a.ys[0] || 0));
-    points = ranked.slice(0, maxCats);
-    capped = data.points.length;
-    if (data.temporal || data.numericX) points.sort((a, b) => numeric(a.x) - numeric(b.x));
-  }
-  const notes = [];
-  if (capped) notes.push("top " + points.length + " of " + num(capped) + " by " + data.series[0].name);
-  if (data.collapsed) notes.push(num(data.collapsed) + " rows summed into their category — group in the query for a cleaner chart");
-  if (chart.series.length > SERIES_CAP) notes.push("first " + SERIES_CAP + " series shown");
-  note.textContent = notes.join(" · ");
-
-  const svg = el("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H,
-    style: "display:block", role: "img" });
-  svg.appendChild(el("rect", { x: 0, y: 0, width: W, height: H, fill: ink.surface }));
-  const draw = type === "bar" ? drawHorizontal : type === "line" ? drawLine
-    : type === "scatter" ? drawScatter : drawColumn;
-  draw(svg, { W, H, ink, data, points, stacked: chart.stacked && data.series.length > 1 });
-  host.appendChild(svg);
-}
-function emptyMessage(text) {
-  const d = document.createElement("div");
-  d.className = "chartempty";
-  d.textContent = text;
-  return d;
-}
-/** A single number is a hero figure; a one-bar bar chart is not a chart. */
-function heroFigure(data, ink) {
-  const d = document.createElement("div");
-  d.className = "chartsolo";
-  const v = document.createElement("div");
-  v.className = "herofig";
-  v.textContent = fmtValue(data.points[0].ys[0], data.series[0].spec);
-  const l = document.createElement("div");
-  l.className = "herolab";
-  const same = data.xcol === data.series[0];
-  l.textContent = same ? data.series[0].name : data.series[0].name + " · " + data.points[0].label;
-  d.appendChild(v);
-  d.appendChild(l);
-  return d;
-}
-
-/* ---------------------------------------------------------- axes & grid */
-function measureText(text, size) { return String(text).length * size * 0.58; }
-
-function yAxis(svg, ink, lo, hi, plot, spec, horizontal) {
-  const { ticks } = niceTicks(lo, hi, horizontal ? 5 : 5);
-  const scale = (v) => (horizontal
-    ? plot.x + (v - lo) / (hi - lo) * plot.w
-    : plot.y + plot.h - (v - lo) / (hi - lo) * plot.h);
-  for (const t of ticks) {
-    const p = scale(t);
-    if (horizontal) {
-      svg.appendChild(el("line", { x1: p, y1: plot.y, x2: p, y2: plot.y + plot.h,
-        stroke: ink.grid, "stroke-width": 1 }));
-      svg.appendChild(svgText(p, plot.y + plot.h + 14, tickLabel(t, spec),
-        { fill: ink.dim, "font-size": 10, "text-anchor": "middle", "font-family": "ui-monospace,monospace" }));
-    } else {
-      svg.appendChild(el("line", { x1: plot.x, y1: p, x2: plot.x + plot.w, y2: p,
-        stroke: ink.grid, "stroke-width": 1 }));
-      svg.appendChild(svgText(plot.x - 7, p + 3.5, tickLabel(t, spec),
-        { fill: ink.dim, "font-size": 10, "text-anchor": "end", "font-family": "ui-monospace,monospace" }));
-    }
-  }
-  return scale;
-}
-function domainOf(points, fromZero) {
-  let lo = Infinity, hi = -Infinity;
-  for (const p of points) for (const v of p.ys) { if (v === null) continue; if (v < lo) lo = v; if (v > hi) hi = v; }
-  if (!isFinite(lo)) { lo = 0; hi = 1; }
-  if (fromZero) { lo = Math.min(0, lo); hi = Math.max(0, hi); }
-  if (lo === hi) { hi = lo + (Math.abs(lo) || 1); }
-  return [lo, hi];
-}
-function stackDomain(points) {
-  let lo = 0, hi = 0;
-  for (const p of points) {
-    let pos = 0, neg = 0;
-    for (const v of p.ys) { if (v === null) continue; if (v >= 0) pos += v; else neg += v; }
-    if (pos > hi) hi = pos;
-    if (neg < lo) lo = neg;
-  }
-  if (lo === hi) hi = lo + 1;
-  return [lo, hi];
-}
-
-/* ------------------------------------------------------------- columns */
-function drawColumn(svg, ctx) {
-  const { W, H, ink, data, points, stacked } = ctx;
-  const n = data.series.length;
-  const labelSize = 10;
-  const maxLabel = points.reduce((a, p) => Math.max(a, measureText(p.label, labelSize)), 0);
-  const slot = (W - 60) / Math.max(1, points.length);
-  const rotate = maxLabel > slot - 6;
-  const bottom = rotate ? Math.min(90, maxLabel + 16) : 26;
-  const [lo, hi] = stacked ? stackDomain(points) : domainOf(points, true);
-  const left = 14 + measureText(tickLabel(hi, data.series[0].spec), 10);
-  const plot = { x: left, y: 12, w: W - left - 12, h: H - 12 - bottom };
-  const scale = yAxis(svg, ink, lo, hi, plot, data.series[0].spec, false);
-  svg.appendChild(el("line", { x1: plot.x, y1: scale(Math.max(lo, Math.min(hi, 0))),
-    x2: plot.x + plot.w, y2: scale(Math.max(lo, Math.min(hi, 0))), stroke: ink.grid, "stroke-width": 1 }));
-
-  const band = plot.w / points.length;
-  const inner = Math.min(24 * (stacked ? 1 : n) + (stacked ? 0 : (n - 1) * 2), band * 0.72);
-  const barW = stacked ? inner : Math.max(2, (inner - (n - 1) * 2) / n);
-  points.forEach((p, pi) => {
-    const cx = plot.x + band * (pi + 0.5);
-    if (stacked) {
-      let up = 0, down = 0;
-      p.ys.forEach((v, si) => {
-        if (v === null) return;
-        const base = v >= 0 ? up : down;
-        const y0 = scale(base), y1 = scale(base + v);
-        if (v >= 0) up += v; else down += v;
-        const top = Math.min(y0, y1), h = Math.max(0, Math.abs(y1 - y0) - 2);   /* 2px surface gap */
-        if (h <= 0) return;
-        svg.appendChild(markRect(barPath(cx - barW / 2, top, barW, h, si === 0 ? 4 : 0),
-          ink.series[si % SERIES_CAP], p, si, data));
-      });
-    } else {
-      p.ys.forEach((v, si) => {
-        if (v === null) return;
-        const zero = scale(Math.max(lo, Math.min(hi, 0)));
-        const y = scale(v);
-        const x = cx - inner / 2 + si * (barW + 2);
-        const top = Math.min(zero, y), h = Math.max(1, Math.abs(zero - y));
-        svg.appendChild(markRect(barPath(x, top, barW, h, 4), ink.series[si % SERIES_CAP], p, si, data));
-      });
-    }
-    const t = svgText(cx, plot.y + plot.h + (rotate ? 12 : 16), p.label, {
-      fill: ink.dim, "font-size": labelSize, "font-family": "ui-monospace,monospace",
-      "text-anchor": rotate ? "end" : "middle",
-    });
-    if (rotate) t.setAttribute("transform", "rotate(-40 " + cx + " " + (plot.y + plot.h + 12) + ")");
-    svg.appendChild(t);
-  });
-}
-function markRect(d, fill, point, si, data) {
-  const p = el("path", { d, fill, class: "mark" });
-  p.addEventListener("pointerenter", (e) => showChartTip(e, point, data, si));
-  p.addEventListener("pointerleave", hideChartTip);
-  return p;
-}
-
-/* --------------------------------------------------------- horizontal */
-function drawHorizontal(svg, ctx) {
-  const { W, H, ink, data, points, stacked } = ctx;
-  const n = data.series.length;
-  const maxLabel = points.reduce((a, p) => Math.max(a, measureText(p.label, 10)), 0);
-  const left = Math.min(190, maxLabel + 10);
-  const plot = { x: left, y: 10, w: W - left - 16, h: H - 10 - 26 };
-  const [lo, hi] = stacked ? stackDomain(points) : domainOf(points, true);
-  const scale = yAxis(svg, ink, lo, hi, plot, data.series[0].spec, true);
-  const band = plot.h / points.length;
-  const inner = Math.min(24 * (stacked ? 1 : n) + (stacked ? 0 : (n - 1) * 2), band * 0.72);
-  const barH = stacked ? inner : Math.max(2, (inner - (n - 1) * 2) / n);
-  points.forEach((p, pi) => {
-    const cy = plot.y + band * (pi + 0.5);
-    if (stacked) {
-      let up = 0;
-      p.ys.forEach((v, si) => {
-        if (v === null) return;
-        const x0 = scale(up), x1 = scale(up + v);
-        up += v;
-        const x = Math.min(x0, x1), w = Math.max(0, Math.abs(x1 - x0) - 2);
-        if (w <= 0) return;
-        svg.appendChild(markRect(barPathH(x, cy - barH / 2, w, barH, si === 0 ? 4 : 0),
-          ink.series[si % SERIES_CAP], p, si, data));
-      });
-    } else {
-      p.ys.forEach((v, si) => {
-        if (v === null) return;
-        const zero = scale(Math.max(lo, Math.min(hi, 0)));
-        const x1 = scale(v);
-        const y = cy - inner / 2 + si * (barH + 2);
-        svg.appendChild(markRect(barPathH(Math.min(zero, x1), y, Math.max(1, Math.abs(x1 - zero)), barH, 4),
-          ink.series[si % SERIES_CAP], p, si, data));
-      });
-    }
-    svg.appendChild(svgText(left - 6, cy + 3.5, p.label, {
-      fill: ink.dim, "font-size": 10, "text-anchor": "end", "font-family": "ui-monospace,monospace" }));
-  });
-}
-
-/* -------------------------------------------------------------- lines */
-function drawLine(svg, ctx) {
-  const { W, H, ink, data, points } = ctx;
-  const [lo, hi] = domainOf(points, false);
-  const left = 14 + measureText(tickLabel(hi, data.series[0].spec), 10);
-  const plot = { x: left, y: 12, w: W - left - 14, h: H - 12 - 28 };
-  const yScale = yAxis(svg, ink, lo, hi, plot, data.series[0].spec, false);
-  const numericX = data.temporal || data.numericX;
-  const xs = points.map((p, i) => (numericX ? numeric(p.x) : i));
-  const xLo = Math.min.apply(null, xs), xHi = Math.max.apply(null, xs);
-  const xScale = (v) => plot.x + (xHi === xLo ? plot.w / 2 : (v - xLo) / (xHi - xLo) * plot.w);
-
-  const { ticks } = niceTicks(xLo, xHi, Math.max(2, Math.min(6, Math.floor(plot.w / 110))));
-  for (const t of (numericX ? ticks : xs.filter((_, i) => i % Math.ceil(xs.length / 6) === 0))) {
-    const px = xScale(t);
-    svg.appendChild(svgText(px, plot.y + plot.h + 16,
-      numericX ? tickLabel(t, data.xcol.spec) : points[xs.indexOf(t)].label,
-      { fill: ink.dim, "font-size": 10, "text-anchor": "middle", "font-family": "ui-monospace,monospace" }));
-  }
-  data.series.forEach((s, si) => {
-    let d = "", open = false;
-    points.forEach((p, i) => {
-      const v = p.ys[si];
-      if (v === null) { open = false; return; }
-      const px = xScale(xs[i]), py = yScale(v);
-      d += (open ? "L" : "M") + px.toFixed(1) + "," + py.toFixed(1);
-      open = true;
-    });
-    if (d) {
-      svg.appendChild(el("path", { d, fill: "none", stroke: ink.series[si % SERIES_CAP],
-        "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
-    }
-    if (points.length <= 60) {
-      points.forEach((p, i) => {
-        if (p.ys[si] === null) return;
-        svg.appendChild(el("circle", { cx: xScale(xs[i]), cy: yScale(p.ys[si]), r: 4,
-          fill: ink.series[si % SERIES_CAP], stroke: ink.surface, "stroke-width": 2 }));
-      });
-    }
-  });
-  crosshairLayer(svg, plot, points, xs, xScale, data, ink);
-}
-/** The reader aims at an x, never at a 2px line. */
-function crosshairLayer(svg, plot, points, xs, xScale, data, ink) {
-  const line = el("line", { x1: 0, y1: plot.y, x2: 0, y2: plot.y + plot.h,
-    stroke: ink.faint, "stroke-width": 1, visibility: "hidden" });
-  svg.appendChild(line);
-  const hit = el("rect", { x: plot.x, y: plot.y, width: plot.w, height: plot.h, fill: "transparent" });
-  hit.addEventListener("pointermove", (e) => {
-    const box = svg.getBoundingClientRect();
-    const px = e.clientX - box.left;
-    let best = 0, bestD = Infinity;
-    for (let i = 0; i < xs.length; i++) {
-      const d = Math.abs(xScale(xs[i]) - px);
-      if (d < bestD) { bestD = d; best = i; }
-    }
-    line.setAttribute("x1", xScale(xs[best]));
-    line.setAttribute("x2", xScale(xs[best]));
-    line.setAttribute("visibility", "visible");
-    showChartTip(e, points[best], data, -1);
-  });
-  hit.addEventListener("pointerleave", () => { line.setAttribute("visibility", "hidden"); hideChartTip(); });
-  svg.appendChild(hit);
-}
-
-/* ------------------------------------------------------------ scatter */
-function drawScatter(svg, ctx) {
-  const { W, H, ink, data, points } = ctx;
-  const [lo, hi] = domainOf(points, false);
-  const left = 14 + measureText(tickLabel(hi, data.series[0].spec), 10);
-  const plot = { x: left, y: 12, w: W - left - 14, h: H - 12 - 28 };
-  const yScale = yAxis(svg, ink, lo, hi, plot, data.series[0].spec, false);
-  const numericX = data.temporal || data.numericX;
-  const xs = points.map((p, i) => (numericX ? numeric(p.x) : i));
-  const xLo = Math.min.apply(null, xs), xHi = Math.max.apply(null, xs);
-  const xScale = (v) => plot.x + (xHi === xLo ? plot.w / 2 : (v - xLo) / (xHi - xLo) * plot.w);
-  const { ticks } = niceTicks(xLo, xHi, Math.max(2, Math.min(6, Math.floor(plot.w / 110))));
-  for (const t of ticks) {
-    svg.appendChild(svgText(xScale(t), plot.y + plot.h + 16, tickLabel(t, data.xcol.spec),
-      { fill: ink.dim, "font-size": 10, "text-anchor": "middle", "font-family": "ui-monospace,monospace" }));
-  }
-  data.series.forEach((s, si) => {
-    points.forEach((p, i) => {
-      if (p.ys[si] === null) return;
-      const dot = el("circle", { cx: xScale(xs[i]), cy: yScale(p.ys[si]), r: 4,
-        fill: ink.series[si % SERIES_CAP], stroke: ink.surface, "stroke-width": 2 });
-      svg.appendChild(dot);
-    });
-  });
-  /* dots are pinpoints; let the pointer be nearest rather than dead-centre */
-  const hit = el("rect", { x: plot.x, y: plot.y, width: plot.w, height: plot.h, fill: "transparent" });
-  hit.addEventListener("pointermove", (e) => {
-    const box = svg.getBoundingClientRect();
-    const px = e.clientX - box.left, py = e.clientY - box.top;
-    let best = -1, bestD = Infinity, bestS = 0;
-    points.forEach((p, i) => {
-      p.ys.forEach((v, si) => {
-        if (v === null) return;
-        const dx = xScale(xs[i]) - px, dy = yScale(v) - py;
-        const d = dx * dx + dy * dy;
-        if (d < bestD) { bestD = d; best = i; bestS = si; }
-      });
-    });
-    if (best >= 0 && bestD < 40 * 40) showChartTip(e, points[best], data, bestS);
-    else hideChartTip();
-  });
-  hit.addEventListener("pointerleave", hideChartTip);
-  svg.appendChild(hit);
-}
-
-/* ------------------------------------------------------ legend & tooltip */
-function renderChartLegend(data, ink) {
-  const box = $("chartlegend");
-  box.textContent = "";
-  if (data.series.length < 2) return;        /* one series needs no legend box */
-  const line = chart.type === "line";
-  data.series.forEach((s, si) => {
-    const item = document.createElement("span");
-    item.className = "lgi";
-    const key = document.createElement("i");
-    key.style.background = ink.series[si % SERIES_CAP];
-    if (line) key.className = "lgline";
-    const name = document.createElement("span");
-    name.textContent = s.name;
-    item.appendChild(key);
-    item.appendChild(name);
-    box.appendChild(item);
-  });
-}
-function showChartTip(e, point, data, si) {
-  const tip = $("charttip");
-  const ink = chartInk();
-  tip.textContent = "";
-  const head = document.createElement("div");
-  head.className = "ttcat";
-  head.textContent = data.xcol.name + " " + point.label;
-  tip.appendChild(head);
-  data.series.forEach((s, i) => {
-    if (si >= 0 && i !== si && data.series.length > 1 && chart.type !== "line") return;
-    const row = document.createElement("div");
-    row.className = "ttrow";
-    const key = document.createElement("i");
-    key.style.background = ink.series[i % SERIES_CAP];
-    const val = document.createElement("b");
-    val.textContent = point.ys[i] === null ? "—" : fmtValue(point.ys[i], s.spec);
-    const nm = document.createElement("span");
-    nm.textContent = s.name;
-    row.appendChild(key);
-    row.appendChild(val);
-    row.appendChild(nm);
-    tip.appendChild(row);
-  });
-  tip.hidden = false;
-  const w = tip.offsetWidth, h = tip.offsetHeight;
-  tip.style.left = Math.max(6, Math.min(e.clientX + 14, window.innerWidth - w - 6)) + "px";
-  tip.style.top = Math.max(6, Math.min(e.clientY - h - 10, window.innerHeight - h - 6)) + "px";
-}
-function hideChartTip() { $("charttip").hidden = true; }
-
-/* --------------------------------------------------------------- panel */
-function renderChartControls() {
-  const view = state.view;
-  if (!view) return;
-  const opt = (i, c, sel) => "<option value='" + i + "'" + (sel ? " selected" : "") + ">" +
-    esc(c.name) + "</option>";
-  let xs = "";
-  view.cols.forEach((c, i) => { xs += opt(i, c, i === chart.x); });
-  let sers = "";
-  const nums = numericCols(view);
-  if (!nums.length) sers = "<span class='muted'>no numeric column to measure</span>";
-  for (const i of nums) {
-    if (i === chart.x) continue;
-    const on = chart.series.indexOf(i) >= 0;
-    sers += "<label class='cser'><input type='checkbox' data-ser='" + i + "'" + (on ? " checked" : "") +
-      "><span>" + esc(view.cols[i].name) + "</span></label>";
-  }
-  const types = [["auto", "auto"], ["column", "column"], ["bar", "bar"], ["line", "line"], ["scatter", "scatter"]];
-  $("chartbar").innerHTML =
-    "<span class='qtitle'>CHART</span>" +
-    "<label class='pinfo'>x <select id='chartx'>" + xs + "</select></label>" +
-    "<span class='psep'></span><span class='pinfo'>y " + sers + "</span>" +
-    "<span class='psep'></span><span class='seg' id='charttype'>" +
-    types.map(([v, l]) => "<button data-t='" + v + "'" + (chart.type === v ? " class='on'" : "") + ">" +
-      l + "</button>").join("") + "</span>" +
-    "<label class='pinfo'><input type='checkbox' id='chartstack'" + (chart.stacked ? " checked" : "") +
-    "> stacked</label>" +
-    "<span class='grow'></span><span id='chartnote' class='muted'></span>" +
-    "<button id='chartsvg' title='Download this chart as SVG'>SVG</button>";
-  $("chartx").onchange = (e) => { chart.x = +e.target.value; chart.series = chart.series.filter((i) => i !== chart.x); renderChartControls(); renderChart(); };
-  $("charttype").onclick = (e) => {
-    const b = e.target.closest("button[data-t]");
-    if (!b) return;
-    chart.type = b.dataset.t;
-    renderChartControls();
-    renderChart();
-  };
-  $("chartstack").onchange = (e) => { chart.stacked = e.target.checked; renderChart(); };
-  $("chartbar").querySelectorAll("input[data-ser]").forEach((cb) => {
-    cb.onchange = () => {
-      const i = +cb.dataset.ser;
-      if (cb.checked) { if (chart.series.indexOf(i) < 0) chart.series.push(i); }
-      else chart.series = chart.series.filter((x) => x !== i);
-      chart.series.sort((a, b) => a - b);
-      renderChart();
-    };
-  });
-  $("chartsvg").onclick = () => {
-    const svg = $("chartbody").querySelector("svg");
-    if (!svg) return;
-    const text = '<?xml version="1.0" encoding="UTF-8"?>\n' +
-      svg.outerHTML.replace("<svg", '<svg xmlns="' + SVGNS + '"');
-    download([text], "image/svg+xml;charset=utf-8", exportName("svg"));
-  };
-}
-function showChart(on) {
-  chart.on = on;
-  if (on && diff.on) showDiff(false);
-  $("chartwrap").hidden = !on;
-  $("gridwrap").hidden = on || !state.view;
-  $("toggleChart").textContent = on ? "Table" : "Chart";
-  if (on) {
-    if (chart.x < 0 && state.view) chartDefaults(state.view);
-    renderChartControls();
-    renderChart();
-  }
 }
 
 /* ------------------------------------------------------- cell inspector */
@@ -4206,8 +3587,8 @@ function renderMeta() {
       "<td title='" + esc([...a.enc].join(", ")) + "'>" + esc([...a.enc].join(", ")) + "</td>" +
       "<td class='n'>" + num(a.values) + "</td>" +
       "<td class='n'>" + (a.statNulls ? num(a.nulls) : "-") + "</td>" +
-      "<td class='n'>" + bytesHuman(a.comp) + "</td>" +
       "<td class='n'>" + bytesHuman(a.uncomp) + "</td>" +
+      "<td class='n'>" + bytesHuman(a.comp) + "</td>" +
       "<td class='n'>" + (a.uncomp ? (a.comp / a.uncomp * 100).toFixed(0) + "%" : "-") + "</td>" +
       "<td title='" + esc(String(mn)) + "'>" + (mn == null ? "<span class='muted'>-</span>" : esc(mn)) + "</td>" +
       "<td title='" + esc(String(mx)) + "'>" + (mx == null ? "<span class='muted'>-</span>" : esc(mx)) + "</td></tr>";
@@ -4215,7 +3596,7 @@ function renderMeta() {
   cards.push("<div class='mcard wide'><h3>columns <span class='muted'>&middot; sizes summed over every row group, " +
     "min/max from the first row group's statistics</span></h3><div class='scrollx'><table class='kvt'>" +
     "<tr><th>path</th><th>physical</th><th>logical</th><th>codec</th><th>encodings</th><th>values</th>" +
-    "<th>nulls</th><th>compressed</th><th>uncompressed</th><th>ratio</th><th>min</th><th>max</th></tr>" +
+    "<th>nulls</th><th>uncompressed</th><th>compressed</th><th>ratio</th><th>min</th><th>max</th></tr>" +
     colRows + "</table></div></div>");
 
   let pg = "";
@@ -4282,7 +3663,7 @@ const AGG_BY_NAME = { COUNT: "COUNT", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "
 let qid = 0;
 
 function newQuery() {
-  return { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], metrics: [], limit: null };
+  return { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], groupMode: "", metrics: [], limit: null };
 }
 
 /* -------------------------------------------------------- value parsing */
@@ -4421,24 +3802,41 @@ function buildComparator(sorts, cols) {
 }
 
 /* ------------------------------------------------------------ aggregates */
-/* a group key joins its parts with \u0001 and writes null as \u0000, so no
+/* a group key joins its parts with U+0001 and writes null as U+0000, so no
    two group values can collide by running into each other */
 const keyPart = (v) => (v === null || v === undefined ? "\u0000" : typeof v === "object" ? JSON.stringify(v) : String(v));
 
-function aggregate(q, cols, index, n) {
-  const gcis = q.groupBy;
-  const metrics = q.metrics.filter((m) => cols[m.ci]);
-  const gRows = gcis.map((ci) => cols[ci].rows);
-  const mRows = metrics.map((m) => cols[m.ci].rows);
-  const mKeys = metrics.map((m) => sortKey(cols[m.ci].spec));
-  const mSpecs = metrics.map((m) => cols[m.ci].spec);
+/* the group-by positions to scan for, one array per subtotal row: ROLLUP
+   drops columns from the right one at a time down to the grand total, CUBE
+   is every subset of them. Both start with the full set, so a plain
+   GROUP BY is just the one-set list a groupMode of "" produces. */
+const CUBE_MAX_COLS = 8;
+function groupingSets(k, mode) {
+  const full = Array.from({ length: k }, (_, i) => i);
+  if (mode === "ROLLUP") {
+    const sets = [];
+    for (let i = k; i >= 0; i--) sets.push(full.slice(0, i));
+    return sets;
+  }
+  if (mode === "CUBE" && k <= CUBE_MAX_COLS) {
+    const sets = [];
+    for (let mask = (1 << k) - 1; mask >= 0; mask--) {
+      const s = [];
+      for (let b = 0; b < k; b++) if (mask & (1 << b)) s.push(b);
+      sets.push(s);
+    }
+    return sets;
+  }
+  return [full];
+}
+
+function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n) {
   const groups = new Map();
   const total = index ? index.length : n;
-
   for (let i = 0; i < total; i++) {
     const r = index ? index[i] : i;
     let key = "";
-    for (let g = 0; g < gRows.length; g++) key += keyPart(gRows[g][r]) + "\u0001";
+    for (const g of positions) key += keyPart(gRows[g][r]) + "\u0001";
     let acc = groups.get(key);
     if (!acc) {
       acc = { row: r, m: metrics.map(() => ({ n: 0, sum: 0, c: 0, min: null, max: null, set: null })) };
@@ -4470,33 +3868,157 @@ function aggregate(q, cols, index, n) {
       }
     }
   }
+  return groups;
+}
+function metricValue(m, kind) {
+  if (kind === "COUNT") return m.n;
+  if (kind === "COUNT_DISTINCT") return m.set ? m.set.size : 0;
+  if (kind === "SUM") return m.n ? m.sum + m.c : null;
+  if (kind === "AVG") return m.n ? (m.sum + m.c) / m.n : null;
+  if (kind === "MIN") return m.min;
+  if (kind === "MAX") return m.max;
+  return null;
+}
+const AGG_COUNT_SPEC = { kind: "number", label: "count", physical: "INT64", convert: (v) => v };
+function metricSpec(m, cols) {
+  const src = cols[m.ci];
+  const isCount = m.agg === "COUNT" || m.agg === "COUNT_DISTINCT";
+  const keeps = m.agg === "MIN" || m.agg === "MAX";
+  return isCount ? AGG_COUNT_SPEC : keeps ? src.spec : { kind: "number", label: m.agg.toLowerCase(), physical: src.spec.physical, convert: (v) => v };
+}
+function metricName(m, cols) { return m.alias || AGG_SHORT[m.agg] + "(" + cols[m.ci].name + ")"; }
+
+function aggregate(q, cols, index, n) {
+  const gcis = q.groupBy;
+  if (q.groupMode === "PIVOT" && gcis.length >= 1) return pivotTable(q, cols, index, n);
+
+  const metrics = q.metrics.filter((m) => cols[m.ci]);
+  const gRows = gcis.map((ci) => cols[ci].rows);
+  const mRows = metrics.map((m) => cols[m.ci].rows);
+  const mKeys = metrics.map((m) => sortKey(cols[m.ci].spec));
+  const mSpecs = metrics.map((m) => cols[m.ci].spec);
 
   const outCols = [];
   for (const ci of gcis) outCols.push({ name: cols[ci].name, spec: cols[ci].spec, leaf: cols[ci].leaf, rows: [] });
-  const countSpec = { kind: "number", label: "count", physical: "INT64", convert: (v) => v };
-  for (const m of metrics) {
-    const src = cols[m.ci];
-    const isCount = m.agg === "COUNT" || m.agg === "COUNT_DISTINCT";
-    const keeps = m.agg === "MIN" || m.agg === "MAX";
-    outCols.push({
-      name: m.alias || AGG_SHORT[m.agg] + "(" + src.name + ")",
-      spec: isCount ? countSpec : keeps ? src.spec : { kind: "number", label: m.agg.toLowerCase(), physical: src.spec.physical, convert: (v) => v },
-      rows: [],
-    });
+  for (const m of metrics) outCols.push({ name: metricName(m, cols), spec: metricSpec(m, cols), rows: [] });
+
+  /* every grouping set is a full pass over the rows: SUM could be re-added
+     across a finer group's already-summed rows, but AVG, MIN/MAX and
+     COUNT(DISTINCT) cannot be derived from an already-aggregated subtotal,
+     so each set scans fresh rather than rolling up the previous one */
+  for (const positions of groupingSets(gcis.length, q.groupMode)) {
+    const groups = scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n);
+    for (const acc of groups.values()) {
+      let k = 0;
+      /* a column this grouping set dropped shows null, the same as SQL's own
+         ROLLUP/CUBE -- indistinguishable from a real null there, which is
+         the one ambiguity the standard has too */
+      for (let g = 0; g < gcis.length; g++) {
+        outCols[k++].rows.push(positions.indexOf(g) >= 0 ? cols[gcis[g]].rows[acc.row] : null);
+      }
+      for (let m = 0; m < metrics.length; m++) outCols[k++].rows.push(metricValue(acc.m[m], metrics[m].agg));
+    }
   }
+  return outCols;
+}
+
+/* ------------------------------------------------------------- pivot */
+/* Excel-style reshape: the last GROUP BY column's own distinct values
+   become new output columns instead of a row of their own, and every
+   other grouped column stays a row dimension. A cell nothing matched is
+   null, same as an unfilled cell in a spreadsheet pivot. Past
+   PIVOT_MAX_COLS distinct values, the rest fold into one "(other)"
+   column rather than being dropped -- every row is still accounted for. */
+const PIVOT_MAX_COLS = 50;
+function mergeAcc(target, acc, metrics, mKeys, mSpecs) {
+  for (let mi = 0; mi < metrics.length; mi++) {
+    const a = acc.m[mi], o = target[mi], kind = metrics[mi].agg;
+    o.n += a.n;
+    if (kind === "SUM" || kind === "AVG") {
+      const x = a.n ? a.sum + a.c : NaN;
+      if (x === x) {
+        const t = o.sum + x;
+        o.c += Math.abs(o.sum) >= Math.abs(x) ? (o.sum - t) + x : (x - t) + o.sum;
+        o.sum = t;
+      }
+    } else if (kind === "COUNT_DISTINCT") {
+      if (a.set) { if (!o.set) o.set = new Set(); for (const v of a.set) o.set.add(v); }
+    } else if (kind === "MIN" || kind === "MAX") {
+      const cmpLess = mKeys[mi]
+        ? (x, y) => lessThan(x, y)
+        : (x, y) => String(textOf(x, mSpecs[mi])) < String(textOf(y, mSpecs[mi]));
+      if (a.min !== null && (o.min === null || cmpLess(a.min, o.min))) o.min = a.min;
+      if (a.max !== null && (o.max === null || cmpLess(o.max, a.max))) o.max = a.max;
+    }
+  }
+}
+function pivotTable(q, cols, index, n) {
+  const gcis = q.groupBy;
+  const rowCis = gcis.slice(0, -1);
+  const pivotCi = gcis[gcis.length - 1];
+  const pivotSpec = cols[pivotCi].spec;
+  const declared = q.metrics.filter((m) => cols[m.ci]);
+  /* an empty METRICS zone still needs something in each cell, so pivot
+     falls back to COUNT of the pivoted column, the way a fresh Excel
+     pivot defaults its Values area to Count */
+  const metrics = declared.length ? declared : [{ id: "n", ci: pivotCi, agg: "COUNT", alias: "" }];
+
+  const gRows = gcis.map((ci) => cols[ci].rows);
+  const mRows = metrics.map((m) => cols[m.ci].rows);
+  const mKeys = metrics.map((m) => sortKey(cols[m.ci].spec));
+  const mSpecs = metrics.map((m) => cols[m.ci].spec);
+  const positions = gcis.map((_, i) => i);
+  const groups = scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n);
+
+  const rowOrder = [];
+  const rowIndex = new Map();     /* rowKey -> { dims, cells: Map(pivotKey -> acc), other } */
+  const pivotOrder = [];
+  const pivotIndex = new Map();   /* pivotKey -> raw pivot value */
+  let overflow = false;
+
   for (const acc of groups.values()) {
+    let rk = "";
+    for (const ci of rowCis) rk += keyPart(cols[ci].rows[acc.row]) + "\u0001";
+    let rec = rowIndex.get(rk);
+    if (!rec) {
+      rec = { dims: rowCis.map((ci) => cols[ci].rows[acc.row]), cells: new Map(), other: null };
+      rowIndex.set(rk, rec);
+      rowOrder.push(rk);
+    }
+    const pv = cols[pivotCi].rows[acc.row];
+    const pk = keyPart(pv);
+    let known = pivotIndex.has(pk);
+    if (!known && pivotOrder.length < PIVOT_MAX_COLS) { pivotIndex.set(pk, pv); pivotOrder.push(pk); known = true; }
+    if (known) rec.cells.set(pk, acc);
+    else {
+      overflow = true;
+      if (!rec.other) rec.other = metrics.map(() => ({ n: 0, sum: 0, c: 0, min: null, max: null, set: null }));
+      mergeAcc(rec.other, acc, metrics, mKeys, mSpecs);
+    }
+  }
+
+  const outCols = [];
+  for (const ci of rowCis) outCols.push({ name: cols[ci].name, spec: cols[ci].spec, leaf: cols[ci].leaf, rows: [] });
+  const pivotCols = [];   /* { pk, mi } in output order, parallel to outCols past the row dims */
+  const addPivotGroup = (pk, label) => {
+    for (let mi = 0; mi < metrics.length; mi++) {
+      const name = metrics.length > 1 ? label + " · " + metricName(metrics[mi], cols) : label;
+      outCols.push({ name, spec: metricSpec(metrics[mi], cols), rows: [] });
+      pivotCols.push({ pk, mi });
+    }
+  };
+  for (const pk of pivotOrder) addPivotGroup(pk, pk === "\u0000" ? "(null)" : textOf(pivotIndex.get(pk), pivotSpec));
+  if (overflow) addPivotGroup(null, "(other)");
+
+  for (const rk of rowOrder) {
+    const rec = rowIndex.get(rk);
     let k = 0;
-    for (const ci of gcis) outCols[k++].rows.push(cols[ci].rows[acc.row]);
-    for (let m = 0; m < metrics.length; m++) {
-      const a = acc.m[m], kind = metrics[m].agg;
-      let v = null;
-      if (kind === "COUNT") v = a.n;
-      else if (kind === "COUNT_DISTINCT") v = a.set ? a.set.size : 0;
-      else if (kind === "SUM") v = a.n ? a.sum + a.c : null;
-      else if (kind === "AVG") v = a.n ? (a.sum + a.c) / a.n : null;
-      else if (kind === "MIN") v = a.min;
-      else if (kind === "MAX") v = a.max;
-      outCols[k++].rows.push(v);
+    for (let i = 0; i < rowCis.length; i++) outCols[k++].rows.push(rec.dims[i]);
+    for (const { pk, mi } of pivotCols) {
+      let bucket = null;
+      if (pk === null) bucket = rec.other ? rec.other[mi] : null;
+      else { const acc = rec.cells.get(pk); bucket = acc ? acc.m[mi] : null; }
+      outCols[k++].rows.push(bucket ? metricValue(bucket, metrics[mi].agg) : null);
     }
   }
   return outCols;
@@ -4570,6 +4092,13 @@ function runQuery() {
 }
 /** Which output column a sort clause means in aggregate mode, or -1. */
 function aggSortIndex(q, s) {
+  if (q.groupMode === "PIVOT" && q.groupBy.length >= 1) {
+    /* a pivoted column's values became new output columns, and a metric
+       fans out across all of them, so only the row dimensions that are
+       still plain output columns can be ordered on */
+    if (s.mid) return -1;
+    return q.groupBy.slice(0, -1).indexOf(s.ci);
+  }
   if (s.mid) {
     const m = q.metrics.findIndex((x) => x.id === s.mid);
     return m >= 0 ? q.groupBy.length + m : -1;
@@ -4699,7 +4228,8 @@ function querySql() {
     lines.push((i === 0 ? "WHERE " : "  " + (f.linker || "AND") + " ") + clause);
   });
   if (q.mode === "agg" && q.groupBy.length) {
-    lines.push("GROUP BY " + q.groupBy.map((ci) => sqlIdent(cols[ci].name)).join(", "));
+    const gnames = q.groupBy.map((ci) => sqlIdent(cols[ci].name)).join(", ");
+    lines.push("GROUP BY " + (q.groupMode ? q.groupMode + "(" + gnames + ")" : gnames));
   }
   const agg = q.mode === "agg" && (q.groupBy.length || q.metrics.length);
   const order = [];
@@ -4819,7 +4349,7 @@ function parseSql(text, cols) {
     return -1;
   };
 
-  const q = { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], metrics: [], limit: null };
+  const q = { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], groupMode: "", metrics: [], limit: null };
   let starSelect = false;
   const selectAggs = [];      /* {ci, agg, alias, tok} */
   const selectPlain = [];     /* {ci, tok} */
@@ -4981,6 +4511,11 @@ function parseSql(text, cols) {
   if (isKw("GROUP")) {
     step();
     if (!eatKw("BY")) fail("expected BY after GROUP");
+    const gfnTok = peek();
+    const gfn = gfnTok.t === "name" ? gfnTok.v.toUpperCase() : "";
+    const wrapped = (gfn === "ROLLUP" || gfn === "CUBE" || gfn === "PIVOT") &&
+      tokAt(p + 1) && tokAt(p + 1).t === "op" && tokAt(p + 1).v === "(";
+    if (wrapped) { q.groupMode = gfn; step(); step(); }
     for (;;) {
       const t = peek();
       if (t.t !== "name") { fail("expected a column in GROUP BY", t); break; }
@@ -4989,6 +4524,7 @@ function parseSql(text, cols) {
       if (ci >= 0 && q.groupBy.indexOf(ci) < 0) q.groupBy.push(ci);
       if (!eatOp(",")) break;
     }
+    if (wrapped && !eatOp(")")) fail("expected ) to close " + gfn + "(...)");
   }
   if (isKw("HAVING")) fail("HAVING is not supported; filter before grouping with WHERE");
 
@@ -5101,10 +4637,19 @@ function renderQueryColumns() {
   $("qcols").innerHTML = html;
 }
 
-function zone(id, label, hint, body, empty) {
-  return "<div class='qzone'><div class='qzlabel'>" + label + "</div>" +
+function zone(id, label, hint, body, empty, extra) {
+  return "<div class='qzone'><div class='qzlabel" + (extra ? " qzl-flex" : "") + "'>" + label +
+    (extra ? "<span class='grow'></span>" + extra : "") + "</div>" +
     "<div class='qdrop" + (empty ? " empty" : "") + "' data-zone='" + id + "'>" +
     (empty ? "<span class='qhint'>" + hint + "</span>" : body) + "</div></div>";
+}
+const GROUP_MODES = [["", "flat"], ["PIVOT", "pivot"], ["ROLLUP", "rollup"], ["CUBE", "cube"]];
+function groupModeCtl(q) {
+  if (q.groupBy.length < 1) return "";
+  return "<span class='gmode' title=\"pivot turns the last column's own values into new output columns, Excel-style. rollup and cube add subtotal rows instead: rollup nests by position (a, then a+b, then the grand total), cube adds every combination. Either way the dropped column shows as null, same as SQL's own ROLLUP/CUBE.\">" +
+    GROUP_MODES.filter(([v]) => v !== "CUBE" || q.groupBy.length <= CUBE_MAX_COLS).map(([v, l]) =>
+      "<button class='" + (q.groupMode === v ? "on" : "") + "' data-act='groupmode' data-v='" + v + "'>" + l + "</button>"
+    ).join("") + "</span>";
 }
 const chip = (text, act, id) => "<span class='qchip'>" + esc(text) +
   "<button class='qx' data-act='" + act + "' data-id='" + id + "'>×</button></span>";
@@ -5121,7 +4666,10 @@ function renderZones() {
       q.select.map((ci) => chip(nameOf(ci), "rm-select", ci)).join(""), q.select.length === 0));
   } else {
     parts.push(zone("groupBy", "GROUP BY", "Drop columns to group by",
-      q.groupBy.map((ci) => chip(nameOf(ci), "rm-group", ci)).join(""), q.groupBy.length === 0));
+      q.groupBy.map((ci, i) => chip(nameOf(ci) +
+        (q.groupMode === "PIVOT" && i === q.groupBy.length - 1 ? " ⇒ columns" : ""),
+        "rm-group", ci)).join(""), q.groupBy.length === 0,
+      groupModeCtl(q)));
     parts.push(zone("metrics", "METRICS", "Drop a column to aggregate it",
       q.metrics.map((m) => {
         let btns = "";
@@ -5236,7 +4784,10 @@ function addToZone(zoneId, ci) {
   const q = state.query;
   switch (zoneId) {
     case "select": if (q.select.indexOf(ci) < 0) q.select.push(ci); break;
-    case "groupBy": if (q.groupBy.indexOf(ci) < 0) q.groupBy.push(ci); break;
+    case "groupBy":
+      if (q.groupBy.indexOf(ci) < 0) q.groupBy.push(ci);
+      if (q.groupMode === "CUBE" && q.groupBy.length > CUBE_MAX_COLS) q.groupMode = "ROLLUP";
+      break;
     case "metrics": q.metrics.push({ id: "m" + ++qid, ci, agg: "COUNT", alias: "" }); break;
     case "where": q.filters.push({ id: "f" + ++qid, ci, pred: "eq", value: "", valueTo: "", linker: "AND" }); break;
     case "sort": if (!q.sort.some((s) => s.ci === ci)) q.sort.push({ id: "s" + ++qid, ci, dir: "ASC" }); break;
@@ -5285,7 +4836,11 @@ function initQuery() {
     const q = state.query, id = b.dataset.id;
     switch (b.dataset.act) {
       case "rm-select": q.select = q.select.filter((ci) => ci !== +id); break;
-      case "rm-group": q.groupBy = q.groupBy.filter((ci) => ci !== +id); break;
+      case "rm-group":
+        q.groupBy = q.groupBy.filter((ci) => ci !== +id);
+        if (!q.groupBy.length) q.groupMode = "";
+        break;
+      case "groupmode": q.groupMode = b.dataset.v; break;
       case "rm-metric": q.metrics = q.metrics.filter((m) => m.id !== id); break;
       case "rm-filter": q.filters = q.filters.filter((f) => f.id !== id); break;
       case "rm-sort": q.sort = q.sort.filter((s) => s.id !== id); break;
@@ -5296,6 +4851,11 @@ function initQuery() {
       default: return;
     }
     renderQuery();
+    /* flat/pivot/rollup/cube reshapes a result already on screen, so it
+       reruns immediately rather than waiting for another press of Run --
+       every other zone edit still needs one, since those build up a new
+       query rather than just changing how this one is presented */
+    if (b.dataset.act === "groupmode" && q.active) runQuery();
   });
   /* typing must not re-render, or the input would lose focus mid-word */
   $("qzones").addEventListener("input", (e) => {
@@ -6395,9 +5955,8 @@ function renderDiff() {
 
 function showDiff(on) {
   diff.on = on;
-  if (on && typeof chart === "object" && chart.on) showChart(false);
   $("diffwrap").hidden = !on;
-  $("gridwrap").hidden = on || (typeof chart === "object" && chart.on) || !state.view;
+  $("gridwrap").hidden = on || !state.view;
   $("pager").hidden = on || !state.view;
   $("toggleDiff").textContent = on ? "Table" : "Diff";
   if (on) renderDiff(); else renderPager();
@@ -6552,7 +6111,6 @@ function applyTheme(name) {
   if (name === "auto") root.removeAttribute("data-theme");
   else root.setAttribute("data-theme", name);
   $("theme").textContent = name;
-  if (chart.on) renderChart();                 /* dark steps are chosen, not flipped */
   /* file:// pages may refuse storage entirely; the choice just won't persist */
   try { localStorage.setItem("paris-parquet-theme", name); } catch (e) { /* fine */ }
 }
@@ -6691,8 +6249,6 @@ async function openEntries(entries, label) {
     $("more").hidden = true;
     $("all").hidden = true;
     $("toggleCols").hidden = true;
-    $("toggleChart").hidden = true;
-    $("chartwrap").hidden = true;
     $("toggleDiff").hidden = true;
     $("toggleDiff").textContent = "Diff";
     $("diffwrap").hidden = true;
@@ -6718,7 +6274,6 @@ function updateButtons() {
   $("toggleMeta").hidden = !t;
   $("toggleQuery").hidden = !t;
   $("toggleCols").hidden = !t;
-  $("toggleChart").hidden = !t;
   $("toggleDiff").hidden = !t;
   if (t && $("toggleQuery").textContent === "Query" && $("query").hidden) {
     $("query").hidden = false;
@@ -6831,12 +6386,17 @@ function init() {
   window.addEventListener("resize", () => {
     const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--metah"));
     if (cur > 0) metaHeight(cur); else renderRows(true);
-    if (chart.on) renderChart();
   });
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-  document.addEventListener("dragover", (e) => { stop(e); document.body.classList.add("dragging"); });
+  const isFileDrag = (e) => e.dataTransfer && Array.prototype.includes.call(e.dataTransfer.types || [], "Files");
+  document.addEventListener("dragover", (e) => {
+    if (!isFileDrag(e)) return;
+    stop(e);
+    document.body.classList.add("dragging");
+  });
   document.addEventListener("dragleave", (e) => { if (e.relatedTarget === null) document.body.classList.remove("dragging"); });
   document.addEventListener("drop", async (e) => {
+    if (!isFileDrag(e)) return;
     stop(e);
     document.body.classList.remove("dragging");
     /* dropped onto the diff panel, it is the other side rather than a new file */
@@ -6868,7 +6428,7 @@ if (typeof document === "undefined" && typeof self !== "undefined" && typeof imp
 const HOST = typeof window !== "undefined" ? window : (typeof self !== "undefined" ? self : null);
 if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
   hivePartition, isParquetPath, entriesFromFiles,
-  runQuery, querySql, parseSql, sqlTokenize, adoptSql, chart, chartData, chartDefaults, niceTicks,
+  runQuery, querySql, parseSql, sqlTokenize, adoptSql,
   baseView, setView, compileFilter, aggregate, exportParts, viewValue,
   displayCols, newDisplay, refreshView,
   diff, schemaDiff, datasetShape, columnStats, rowDiff, suggestKey, cellEq, cellKey, colShape,

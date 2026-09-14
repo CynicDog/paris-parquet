@@ -114,12 +114,6 @@ else bad("grid did not come back");
 if (await page.isVisible("#pager")) ok("the pager comes back with it");
 else bad("pager stayed hidden");
 
-/* chart and diff take turns rather than stacking */
-await page.click("#toggleDiff");
-await page.click("#toggleChart");
-if (await page.isHidden("#diffwrap") && await page.isVisible("#chartwrap")) ok("charting closes the diff");
-else bad("chart and diff both visible");
-
 /* a partitioned folder, keyed on its partition columns: those carry a NUL in
    their internal key, which must survive the trip through the chip markup */
 const hive = path.join(dir, "..", "folders", "hive");
@@ -144,8 +138,6 @@ if (/matched on \((?=[^)]*year)(?=[^)]*month)(?=[^)]*\bid\b)/.test(hiveTally) &&
 } else bad("hive tally: " + hiveTally);
 
 if (shot) {
-  await page.click("#toggleChart");
-  await page.click("#toggleDiff");
   await page.click("[data-dact='run']").catch(() => {});
   await idle();
   await page.screenshot({ path: shot });

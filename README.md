@@ -50,6 +50,18 @@ or OR (AND binds tighter, as in SQL). Aggregates are `COUNT`,
 `COUNT(DISTINCT)`, `SUM`, `AVG`, `MIN` and `MAX`. Results replace the grid, and
 the summary cards above recompute over them.
 
+`GROUP BY` one or more columns and a **flat / pivot / rollup / cube** toggle
+appears above the zone. Pivot reshapes the result the way Excel's pivot table
+does: the last grouped column's own values become new output columns instead
+of a row of their own, everything before it stays a row dimension, and a
+metric becomes the cell values — `region, category` pivots into one row per
+region with a column per category. Rollup and cube add rows instead of
+reshaping into columns: rollup nests subtotals by position — a, then a+b,
+then the grand total — cube adds every combination of the grouped columns.
+The column a subtotal row drops shows as `null`, the same as SQL's own
+`ROLLUP`/`CUBE` (and the same ambiguity with a real null in that column, if
+the data has one).
+
 The SQL beside the zones is **editable, and edits flow back**. Type a query and
 the zones rearrange themselves to match; drag a chip and the text rewrites
 itself. It is checked against the file's own schema as you type: unknown
@@ -80,17 +92,6 @@ in signed order, text outside ASCII where parquet's byte order and JavaScript's
 disagree. Those cost time, never the answer. A scanned table holds only the
 rows that could match, so the metadata bar says so, and Reset reads the file
 again the ordinary way.
-
-**Chart** in the header draws the current result instead of tabulating it —
-column, horizontal bar, line or scatter, picked automatically from the data (a
-date dimension gets a line and a time axis) or chosen by hand. Pick the axis,
-tick the series, stack them. Every mark carries a tooltip; lines get a crosshair
-that snaps to the nearest x and reads out every series at once. One category and
-one measure is a number, not a chart, so it renders as one. There is never a
-second y-axis: two measures of different scale get series toggles, not a scale
-that invents a correlation. The colours are a validated categorical order with
-its own steps for dark mode, and a series keeps its colour when its neighbours
-are switched off. The chart downloads as SVG.
 
 **Columns** in the header opens a picker: search by name or type, hide what you
 do not need, pin a column so it stays at the left edge while you scroll
