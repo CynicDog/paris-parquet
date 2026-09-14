@@ -2,3 +2,4 @@
 *.parquet
 *.expect.json
 node_modules/
+__pycache__/
