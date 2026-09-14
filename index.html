@@ -1,0 +1,2149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>paris-parquet</title>
+<style>
+:root{
+  --bg:#fbfbfa; --panel:#fff; --ink:#1c1c1a; --dim:#6b6b66; --faint:#9a9a94;
+  --line:#e2e2dd; --line2:#efefea; --accent:#2f6fdd; --accent-soft:#e8f0fd;
+  --num:#1a6b4a; --str:#8a4b1f; --bool:#7a3fa0; --time:#1d5f8a; --bin:#6b6b66;
+  --warn:#b3541e; --err:#b32020; --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#9b9d9f; --faint:#6e7073;
+    --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a;
+    --num:#6fd0a3; --str:#e0a06a; --bool:#c59cf0; --time:#7cc4ef; --bin:#9b9d9f;
+    --warn:#e09a5e; --err:#f08a8a;
+  }
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  display:flex;flex-direction:column;overflow:hidden}
+
+/* ---------- header ---------- */
+header{display:flex;align-items:center;gap:14px;padding:8px 14px;border-bottom:1px solid var(--line);
+  background:var(--panel);flex:none;overflow:hidden}
+h1{font:600 13px/1 var(--mono);margin:0;letter-spacing:.02em;white-space:nowrap;flex:none}
+h1 span{color:var(--faint);font-weight:400}
+.grow{flex:1}
+button,label.btn{font:inherit;font-size:12px;padding:4px 10px;border:1px solid var(--line);border-radius:5px;
+  background:var(--panel);color:var(--ink);cursor:pointer;white-space:nowrap;flex:none}
+button:hover,label.btn:hover{border-color:var(--accent);color:var(--accent)}
+button:disabled{opacity:.45;cursor:default;border-color:var(--line);color:var(--dim)}
+input[type=file]{display:none}
+#fileline{font:11px/1.4 var(--mono);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52vw}
+#fileline b{color:var(--ink);font-weight:600}
+
+/* ---------- drop zone / states ---------- */
+#stage{flex:1;display:flex;flex-direction:column;min-height:0;position:relative}
+#drop{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--dim);text-align:center;padding:30px}
+#drop .big{font:500 15px/1.4 var(--mono);color:var(--ink)}
+#drop .hint{font-size:12px;max-width:44em;color:var(--faint)}
+body.dragging #drop{background:var(--accent-soft);outline:2px dashed var(--accent);outline-offset:-14px}
+#err{margin:14px;padding:10px 12px;border:1px solid var(--err);border-radius:6px;color:var(--err);
+  font:12px/1.5 var(--mono);white-space:pre-wrap;background:var(--panel)}
+#busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:color-mix(in srgb,var(--bg) 80%,transparent);font:12px var(--mono);color:var(--dim);z-index:30}
+
+/* ---------- grid ---------- */
+#gridwrap{flex:1;overflow:auto;min-height:0;position:relative}
+table.grid{border-collapse:separate;border-spacing:0;table-layout:fixed;width:max-content;font:12px/1.4 var(--mono)}
+table.grid th,table.grid td{border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);
+  padding:0 7px;text-align:left;vertical-align:top;overflow:hidden;background:var(--panel)}
+table.grid thead th{position:sticky;background:var(--panel);z-index:3}
+tr.r-name th{top:0;z-index:4;border-bottom:1px solid var(--line);padding:5px 7px}
+tr.r-sum th{top:var(--nameh,28px);z-index:4;border-bottom:2px solid var(--line);padding:5px 7px;height:116px}
+table.grid th.rownum,table.grid td.rownum{position:sticky;left:0;z-index:2;width:62px;min-width:62px;
+  text-align:right;color:var(--faint);border-right:1px solid var(--line);font-size:11px}
+tr.r-name th.rownum,tr.r-sum th.rownum{z-index:6}
+tbody td{height:22px;line-height:22px;padding-top:0;padding-bottom:0;white-space:nowrap;text-overflow:ellipsis}
+tbody tr:hover td{background:var(--accent-soft)}
+td.pad{height:auto;padding:0;border:0}
+
+.cname{font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctype{display:block;color:var(--faint);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-number{color:var(--num)} .t-string{color:var(--str)} .t-bool{color:var(--bool)}
+.t-temporal{color:var(--time)} .t-binary{color:var(--bin)} .t-nested{color:var(--dim)}
+table.grid td.v-number{text-align:right}
+td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var(--dim)}
+.null{color:var(--faint);font-style:italic}
+
+/* ---------- summary cards ---------- */
+.sum{font-size:10.5px;line-height:1.35;color:var(--dim);display:flex;flex-direction:column;gap:2px;height:106px;overflow:hidden}
+.sum .kv{display:flex;justify-content:space-between;gap:6px}
+.sum .kv span:last-child{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sum .lab{color:var(--faint)}
+.nullbar{height:4px;background:var(--line2);border-radius:2px;overflow:hidden;display:flex}
+.nullbar i{display:block;height:100%}
+.nullbar i.v{background:var(--accent)} .nullbar i.n{background:var(--line)}
+.hist{display:flex;align-items:flex-end;gap:1px;height:26px;margin-top:1px}
+.hist i{flex:1;background:var(--accent);opacity:.65;min-height:1px;border-radius:1px 1px 0 0}
+.hist i:hover{opacity:1}
+.top{display:flex;flex-direction:column;gap:1px}
+.top .row{position:relative;display:flex;justify-content:space-between;gap:6px;padding:0 3px;border-radius:2px;overflow:hidden}
+.top .row i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);opacity:.16}
+.top .row span{position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top .row span.c{color:var(--faint);flex:none}
+.bools{display:flex;height:12px;border-radius:2px;overflow:hidden;font-size:9px;color:#fff;line-height:12px}
+.bools i{display:block;text-align:center;overflow:hidden}
+.bools i.t{background:var(--bool)} .bools i.f{background:var(--dim)} .bools i.n{background:var(--line)}
+
+/* ---------- footer / metadata ---------- */
+#meta{flex:none;max-height:42vh;overflow:auto;border-top:1px solid var(--line);background:var(--panel)}
+#meta.collapsed{max-height:none;overflow:visible}
+#meta.collapsed .mbody{display:none}
+.mbar{display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid var(--line2);
+  position:sticky;top:0;background:var(--panel);z-index:2;font:11px var(--mono);color:var(--dim);flex-wrap:wrap}
+#meta.collapsed .mbar{border-bottom:0}
+.mbar .tag{border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--ink)}
+.mbar .tag b{color:var(--accent);font-weight:600}
+.mbody{padding:4px 14px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:2px 22px;align-items:start}
+.mcard{padding:8px 0;min-width:0}
+.mcard h3{font:600 11px/1 var(--mono);margin:0 0 6px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+table.kvt{border-collapse:collapse;width:100%;font:11px/1.5 var(--mono);table-layout:fixed}
+table.kvt td,table.kvt th{padding:1px 6px 1px 0;text-align:left;vertical-align:top;
+  border-bottom:1px solid var(--line2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+table.kvt th{color:var(--faint);font-weight:400}
+table.kvt td.k{color:var(--faint);width:40%}
+table.kvt td.n{text-align:right}
+table.kvt tr:hover td{background:var(--accent-soft)}
+.wide{grid-column:1/-1}
+.scrollx{overflow-x:auto}
+.tree{font:11px/1.55 var(--mono);white-space:pre;overflow-x:auto}
+.tree .nm{color:var(--ink)} .tree .ty{color:var(--accent)} .tree .rp{color:var(--faint)}
+details>summary{cursor:pointer;font:11px var(--mono);color:var(--dim);padding:3px 0;list-style:none}
+details>summary::before{content:"▸ ";color:var(--faint)}
+details[open]>summary::before{content:"▾ "}
+.muted{color:var(--faint)}
+.warnbox{border:1px solid var(--warn);color:var(--warn);border-radius:5px;padding:6px 9px;margin:8px 0;font:11px/1.5 var(--mono)}
+</style>
+</head>
+<body>
+<header>
+  <h1>paris-parquet <span>· single-file parquet viewer</span></h1>
+  <label class="btn" for="picker">Open .parquet</label>
+  <input type="file" id="picker" accept=".parquet,.pq,application/octet-stream">
+  <div id="fileline"></div>
+  <div class="grow"></div>
+  <button id="more" hidden>Load more rows</button>
+  <button id="all" hidden>Load all</button>
+  <button id="toggleMeta" hidden>Hide metadata</button>
+</header>
+
+<div id="stage">
+  <div id="drop">
+    <div class="big">Drop a .parquet file here</div>
+    <div class="hint">Everything runs in this page: no server, no install, no network.
+      The file never leaves your machine.</div>
+  </div>
+  <div id="gridwrap" hidden><table class="grid" id="grid"></table></div>
+  <div id="busy" hidden>reading…</div>
+</div>
+
+<div id="meta" hidden>
+  <div class="mbar" id="mbar"></div>
+  <div class="mbody" id="mbody"></div>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================
+   paris-parquet — a self-contained parquet reader + viewer.
+   No dependencies: thrift, snappy, lz4, zstd, gzip and every parquet
+   encoding below are decoded in this file.
+   ===================================================================== */
+
+/* ---------------------------------------------------------------- bytes */
+const utf8 = new TextDecoder("utf-8");
+
+class Cursor {
+  constructor(bytes, pos) {
+    this.b = bytes;
+    this.p = pos || 0;
+    this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  }
+  byte() { return this.b[this.p++]; }
+  bytes(n) { const s = this.b.subarray(this.p, this.p + n); this.p += n; return s; }
+  /** unsigned LEB128; uses float math so values above 2^31 stay correct */
+  uvarint() {
+    let shift = 1, out = 0, b;
+    do { b = this.b[this.p++]; out += (b & 0x7f) * shift; shift *= 128; } while (b & 0x80);
+    return out;
+  }
+  zigzag() { const v = this.uvarint(); return v % 2 ? -(v + 1) / 2 : v / 2; }
+}
+
+/* --------------------------------------------------- thrift compact read */
+const TSTOP = 0, TTRUE = 1, TFALSE = 2, TBYTE = 3, TI16 = 4, TI32 = 5, TI64 = 6,
+      TDOUBLE = 7, TBINARY = 8, TLIST = 9, TSET = 10, TMAP = 11, TSTRUCT = 12;
+
+/** Reads a thrift-compact struct into a plain object keyed by field id. */
+function thriftStruct(c) {
+  const out = {};
+  let last = 0;
+  for (;;) {
+    const head = c.byte();
+    const type = head & 0x0f;
+    if (type === TSTOP) return out;
+    const delta = head >> 4;
+    const id = delta ? last + delta : c.zigzag();
+    last = id;
+    out[id] = thriftValue(c, type);
+  }
+}
+function thriftValue(c, type) {
+  switch (type) {
+    case TTRUE: return true;
+    case TFALSE: return false;
+    case TBYTE: return (c.byte() << 24) >> 24;
+    case TI16: case TI32: case TI64: return c.zigzag();
+    case TDOUBLE: { const v = c.view.getFloat64(c.p, true); c.p += 8; return v; }
+    case TBINARY: return c.bytes(c.uvarint());
+    case TLIST: case TSET: {
+      const head = c.byte();
+      const et = head & 0x0f;
+      let n = head >> 4;
+      if (n === 15) n = c.uvarint();
+      const arr = new Array(n);
+      for (let i = 0; i < n; i++) arr[i] = thriftValue(c, et);
+      return arr;
+    }
+    case TMAP: {
+      const n = c.uvarint();
+      if (n === 0) return new Map();
+      const kt = c.byte(), vt = kt & 0x0f, ktype = kt >> 4;
+      const m = new Map();
+      for (let i = 0; i < n; i++) m.set(thriftValue(c, ktype), thriftValue(c, vt));
+      return m;
+    }
+    case TSTRUCT: return thriftStruct(c);
+    default: throw new Error("thrift: unknown field type " + type);
+  }
+}
+const str = (v) => (v == null ? null : utf8.decode(v));
+
+/* ------------------------------------------------------------- constants */
+const PTYPE = ["BOOLEAN", "INT32", "INT64", "INT96", "FLOAT", "DOUBLE", "BYTE_ARRAY", "FIXED_LEN_BYTE_ARRAY"];
+const REP = ["REQUIRED", "OPTIONAL", "REPEATED"];
+const CODEC = ["UNCOMPRESSED", "SNAPPY", "GZIP", "LZO", "BROTLI", "LZ4", "ZSTD", "LZ4_RAW"];
+const ENC = { 0: "PLAIN", 1: "GROUP_VAR_INT", 2: "PLAIN_DICTIONARY", 3: "RLE", 4: "BIT_PACKED",
+  5: "DELTA_BINARY_PACKED", 6: "DELTA_LENGTH_BYTE_ARRAY", 7: "DELTA_BYTE_ARRAY", 8: "RLE_DICTIONARY",
+  9: "BYTE_STREAM_SPLIT" };
+const PAGE_TYPE = ["DATA_PAGE", "INDEX_PAGE", "DICTIONARY_PAGE", "DATA_PAGE_V2"];
+const CONVERTED = ["UTF8", "MAP", "MAP_KEY_VALUE", "LIST", "ENUM", "DECIMAL", "DATE", "TIME_MILLIS",
+  "TIME_MICROS", "TIMESTAMP_MILLIS", "TIMESTAMP_MICROS", "UINT_8", "UINT_16", "UINT_32", "UINT_64",
+  "INT_8", "INT_16", "INT_32", "INT_64", "JSON", "BSON", "INTERVAL"];
+const UNIT = { 1: "MILLIS", 2: "MICROS", 3: "NANOS" };
+const LOGICAL = { 1: "STRING", 2: "MAP", 3: "LIST", 4: "ENUM", 5: "DECIMAL", 6: "DATE", 7: "TIME",
+  8: "TIMESTAMP", 10: "INTEGER", 11: "NULL", 12: "JSON", 13: "BSON", 14: "UUID", 15: "FLOAT16",
+  16: "VARIANT", 17: "GEOMETRY", 18: "GEOGRAPHY" };
+
+/* ------------------------------------------------------- schema handling */
+/** Decodes SchemaElement.logicalType (a thrift union) into something usable. */
+function logicalType(raw) {
+  if (!raw) return null;
+  for (const k in raw) {
+    const id = +k, name = LOGICAL[id], body = raw[k] || {};
+    if (!name) continue;
+    const lt = { name };
+    if (id === 5) { lt.scale = body[1] || 0; lt.precision = body[2] || 0; }
+    if (id === 7 || id === 8) {
+      lt.utc = body[1] === true;
+      lt.unit = body[2] ? UNIT[+Object.keys(body[2])[0]] : "MILLIS";
+    }
+    if (id === 10) { lt.bits = body[1] || 64; lt.signed = body[2] !== false; }
+    return lt;
+  }
+  return null;
+}
+
+const annotation = (n) => (n && (n.logical ? n.logical.name : n.converted)) || null;
+/**
+ * LIST and MAP wrap their values in two extra schema levels (`list.element`,
+ * `key_value.value`). Those names are noise in a column header, so they are
+ * dropped from the displayed path.
+ */
+function synthetic(node) {
+  const parent = node.parent;
+  if (!parent) return false;
+  const up = annotation(parent);
+  if (node.rep === "REPEATED" && (up === "LIST" || up === "MAP" || up === "MAP_KEY_VALUE")) return true;
+  return parent.rep === "REPEATED" && parent.children.length === 1 && annotation(parent.parent) === "LIST";
+}
+
+/** Rebuilds the flat schema list into a tree; returns {root, leaves}. */
+function buildSchema(elements) {
+  const nodes = elements.map((e, i) => ({
+    index: i,
+    name: str(e[4]) || "",
+    type: e[1] == null ? null : PTYPE[e[1]],
+    typeLength: e[2] == null ? null : e[2],
+    rep: e[3] == null ? (i === 0 ? "REQUIRED" : "REQUIRED") : REP[e[3]],
+    numChildren: e[5] || 0,
+    converted: e[6] == null ? null : CONVERTED[e[6]],
+    scale: e[7] == null ? null : e[7],
+    precision: e[8] == null ? null : e[8],
+    fieldId: e[9] == null ? null : e[9],
+    logical: logicalType(e[10]),
+    children: [],
+    path: [],
+    maxDef: 0,
+    maxRep: 0,
+  }));
+  let i = 0;
+  const take = (node, path, maxDef, maxRep) => {
+    node.path = path;
+    node.maxDef = maxDef;
+    node.maxRep = maxRep;
+    for (let k = 0; k < node.numChildren; k++) {
+      const child = nodes[++i];
+      if (!child) throw new Error("schema: truncated (missing children)");
+      child.parent = node;
+      node.children.push(child);
+      take(child, path.concat(child.name),
+        maxDef + (child.rep === "REQUIRED" ? 0 : 1),
+        maxRep + (child.rep === "REPEATED" ? 1 : 0));
+    }
+  };
+  const root = nodes[0];
+  if (!root) throw new Error("schema: empty");
+  take(root, [], 0, 0);
+  const leaves = nodes.filter((n) => n.numChildren === 0 && n !== root);
+  for (const leaf of leaves) {
+    const chain = [];
+    for (let n = leaf; n && n !== root; n = n.parent) chain.unshift(n);
+    leaf.chain = chain;
+    leaf.label = chain.filter((n) => !synthetic(n)).map((n) => n.name).join(".") || leaf.name;
+  }
+  /* if stripping the wrappers made two columns look alike, keep the real paths */
+  const seen = new Map();
+  for (const leaf of leaves) seen.set(leaf.label, (seen.get(leaf.label) || 0) + 1);
+  for (const leaf of leaves) if (seen.get(leaf.label) > 1) leaf.label = leaf.path.join(".");
+  return { root, nodes, leaves };
+}
+
+/* ------------------------------------------------------- footer / header */
+const MAGIC = [0x50, 0x41, 0x52, 0x31];          // "PAR1"
+const MAGIC_ENC = [0x50, 0x41, 0x52, 0x45];      // "PARE" (encrypted footer)
+const eq4 = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
+
+async function readFooter(src) {
+  if (src.size < 12) throw new Error("Not a parquet file: only " + src.size + " bytes.");
+  const head = await src.read(0, 4);
+  const tail = await src.read(src.size - 8, src.size);
+  const endMagic = tail.subarray(4, 8);
+  const encryptedFooter = eq4(endMagic, MAGIC_ENC);
+  if (!eq4(endMagic, MAGIC) && !encryptedFooter) {
+    throw new Error('Not a parquet file: the last 4 bytes are not "PAR1" (found "' +
+      [...endMagic].map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : ".")).join("") + '").');
+  }
+  if (!eq4(head, MAGIC) && !eq4(head, MAGIC_ENC)) throw new Error('Not a parquet file: missing "PAR1" header.');
+  if (encryptedFooter) {
+    throw new Error("This file has an encrypted footer (PARE).\n" +
+      "paris-parquet cannot decrypt it — no keys, no crypto material, nothing to ask.");
+  }
+  const len = new DataView(tail.buffer, tail.byteOffset, 4).getUint32(0, true);
+  const start = src.size - 8 - len;
+  if (start < 4) throw new Error("Corrupt footer: metadata length " + len + " does not fit the file.");
+  const buf = await src.read(start, src.size - 8);
+  const meta = thriftStruct(new Cursor(buf, 0));
+  return parseFileMetadata(meta, len);
+}
+
+function parseFileMetadata(m, footerLen) {
+  const schema = buildSchema(m[2] || []);
+  const enc = m[8] ? { algorithm: m[8][1] ? "AES_GCM_V1" : m[8][2] ? "AES_GCM_CTR_V1" : "UNKNOWN" } : null;
+  return {
+    version: m[1] ?? null,
+    schema,
+    numRows: m[3] ?? 0,
+    rowGroups: (m[4] || []).map(parseRowGroup),
+    keyValue: (m[5] || []).map((kv) => ({ key: str(kv[1]), value: str(kv[2]) })),
+    createdBy: str(m[6]),
+    columnOrders: m[7] || null,
+    encryption: enc,
+    footerSigned: !!m[9],
+    footerLength: footerLen,
+  };
+}
+function parseRowGroup(g) {
+  return {
+    columns: (g[1] || []).map(parseColumnChunk),
+    totalByteSize: g[2] ?? 0,
+    numRows: g[3] ?? 0,
+    fileOffset: g[5] ?? null,
+    totalCompressedSize: g[6] ?? null,
+    ordinal: g[7] ?? null,
+  };
+}
+function parseColumnChunk(c) {
+  const md = c[3];
+  return {
+    filePath: str(c[1]),
+    fileOffset: c[2] ?? 0,
+    columnIndexOffset: c[6] ?? null,
+    offsetIndexOffset: c[4] ?? null,
+    cryptoMetadata: c[8] ? true : false,
+    encryptedMetadata: c[9] ? true : false,
+    meta: md ? {
+      type: PTYPE[md[1]],
+      encodings: (md[2] || []).map((e) => ENC[e] || "ENC_" + e),
+      path: (md[3] || []).map(str),
+      codec: CODEC[md[4]] ?? "CODEC_" + md[4],
+      numValues: md[5] ?? 0,
+      totalUncompressedSize: md[6] ?? 0,
+      totalCompressedSize: md[7] ?? 0,
+      dataPageOffset: md[9] ?? 0,
+      indexPageOffset: md[10] ?? null,
+      dictionaryPageOffset: md[11] ?? null,
+      statistics: md[12] ? parseStatistics(md[12]) : null,
+      encodingStats: (md[13] || []).map((s) => ({
+        pageType: PAGE_TYPE[s[1]] || "?", encoding: ENC[s[2]] || "?", count: s[3] || 0 })),
+      bloomFilterOffset: md[14] ?? null,
+    } : null,
+  };
+}
+function parseStatistics(s) {
+  return {
+    max: s[1] ?? null, min: s[2] ?? null,
+    nullCount: s[3] ?? null, distinctCount: s[4] ?? null,
+    maxValue: s[5] ?? null, minValue: s[6] ?? null,
+  };
+}
+
+/* ======================================================================
+   Decompression
+   ====================================================================== */
+
+/* -------------------------------------------------------------- snappy */
+function snappyDecompress(src, expected) {
+  let p = 0, shift = 0, len = 0, b;
+  do { b = src[p++]; len += (b & 0x7f) * Math.pow(2, shift); shift += 7; } while (b & 0x80);
+  const out = new Uint8Array(expected != null ? expected : len);
+  let o = 0;
+  while (p < src.length) {
+    const tag = src[p++];
+    switch (tag & 3) {
+      case 0: {                                   // literal
+        let n = tag >> 2;
+        if (n >= 60) {
+          const extra = n - 59;
+          n = 0;
+          for (let i = 0; i < extra; i++) n |= src[p + i] << (8 * i);
+          p += extra;
+        }
+        n = n + 1;
+        out.set(src.subarray(p, p + n), o);
+        p += n; o += n;
+        break;
+      }
+      case 1: {                                   // copy, 1-byte offset
+        const n = 4 + ((tag >> 2) & 7);
+        const off = ((tag >> 5) << 8) | src[p++];
+        o = snappyCopy(out, o, off, n);
+        break;
+      }
+      case 2: {                                   // copy, 2-byte offset
+        const n = (tag >> 2) + 1;
+        const off = src[p] | (src[p + 1] << 8); p += 2;
+        o = snappyCopy(out, o, off, n);
+        break;
+      }
+      default: {                                  // copy, 4-byte offset
+        const n = (tag >> 2) + 1;
+        const off = (src[p] | (src[p + 1] << 8) | (src[p + 2] << 16) | (src[p + 3] << 24)) >>> 0; p += 4;
+        o = snappyCopy(out, o, off, n);
+      }
+    }
+  }
+  return out;
+}
+function snappyCopy(out, o, off, n) {
+  if (off <= 0 || off > o) throw new Error("snappy: bad copy offset " + off);
+  let s = o - off;
+  for (let i = 0; i < n; i++) out[o++] = out[s++];
+  return o;
+}
+
+/* ----------------------------------------------------------- lz4 block */
+function lz4BlockDecompress(src, expected) {
+  const out = new Uint8Array(expected);
+  let p = 0, o = 0;
+  while (p < src.length) {
+    const token = src[p++];
+    let lit = token >> 4;
+    if (lit === 15) { let b; do { b = src[p++]; lit += b; } while (b === 255); }
+    for (let i = 0; i < lit; i++) out[o++] = src[p++];
+    if (p >= src.length) break;
+    const off = src[p] | (src[p + 1] << 8); p += 2;
+    let n = (token & 15) + 4;
+    if ((token & 15) === 15) { let b; do { b = src[p++]; n += b; } while (b === 255); }
+    if (off <= 0 || off > o) throw new Error("lz4: bad match offset " + off);
+    let s = o - off;
+    for (let i = 0; i < n; i++) out[o++] = out[s++];
+  }
+  return out;
+}
+/** Hadoop-framed LZ4 (codec LZ4): repeated [u32 be rawLen][u32 be compLen][block]. */
+function lz4HadoopDecompress(src, expected) {
+  try {
+    const out = new Uint8Array(expected);
+    const dv = new DataView(src.buffer, src.byteOffset, src.byteLength);
+    let p = 0, o = 0;
+    while (p + 8 <= src.length && o < expected) {
+      const raw = dv.getUint32(p, false), comp = dv.getUint32(p + 4, false);
+      p += 8;
+      if (comp > src.length - p || raw > expected - o) throw new Error("frame");
+      out.set(lz4BlockDecompress(src.subarray(p, p + comp), raw), o);
+      p += comp; o += raw;
+    }
+    if (o === expected) return out;
+    throw new Error("frame");
+  } catch (e) {
+    return lz4BlockDecompress(src, expected);   // some writers emit a bare block
+  }
+}
+
+/* ----------------------------------------------- gzip (browser builtin) */
+async function inflate(src, format) {
+  const ds = new DecompressionStream(format);
+  const stream = new Blob([src]).stream().pipeThrough(ds);
+  const chunks = [];
+  let total = 0;
+  const reader = stream.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value); total += value.length;
+  }
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return out;
+}
+async function gzipDecompress(src) {
+  try { return await inflate(src, "gzip"); }
+  catch (e) { try { return await inflate(src, "deflate"); } catch (e2) { return await inflate(src, "deflate-raw"); } }
+}
+
+/* ======================================================================
+   zstd  (RFC 8878) — raw frames, no dictionary
+   ====================================================================== */
+const POW2 = new Float64Array(64);
+for (let i = 0; i < 64; i++) POW2[i] = Math.pow(2, i);
+const highbit = (x) => 31 - Math.clz32(x);
+
+/** Backwards, MSB-first bit reader. zstd streams end with a marker bit. */
+class BackBits {
+  constructor(b, start, end) {
+    let p = end - 1;
+    while (p >= start && b[p] === 0) p--;
+    if (p < start) throw new Error("zstd: empty bitstream");
+    const hb = highbit(b[p]);
+    this.b = b; this.start = start;
+    this.acc = b[p] & ((1 << hb) - 1);
+    this.nbits = hb;
+    this.pos = p - 1;
+    this.used = 0;
+    this.total = (p - start) * 8 + hb;
+  }
+  fill() {
+    while (this.nbits <= 45) {
+      const byte = this.pos >= this.start ? this.b[this.pos] : 0;
+      this.pos--;
+      this.acc = this.acc * 256 + byte;
+      this.nbits += 8;
+    }
+  }
+  peek(n) { if (n === 0) return 0; if (this.nbits < n) this.fill(); return Math.floor(this.acc / POW2[this.nbits - n]); }
+  skip(n) {
+    if (n === 0) return;
+    if (this.nbits < n) this.fill();
+    const v = Math.floor(this.acc / POW2[this.nbits - n]);
+    this.nbits -= n;
+    this.acc -= v * POW2[this.nbits];
+    this.used += n;
+  }
+  bits(n) { const v = this.peek(n); this.skip(n); return v; }
+  get over() { return this.used > this.total; }
+}
+
+/** Reads an FSE table description (normalized counts). */
+function fseReadNCount(b, off, end, maxSV, maxLog) {
+  const pad = new Uint8Array(end - off + 8);
+  pad.set(b.subarray(off, end));
+  const rd32 = (p) => ((pad[p] | (pad[p + 1] << 8) | (pad[p + 2] << 16) | (pad[p + 3] << 24)) >>> 0);
+  let bitPos = 0;
+  const peek = (n) => (rd32(bitPos >> 3) >>> (bitPos & 7)) & ((1 << n) - 1);
+  const accLog = peek(4) + 5;
+  bitPos += 4;
+  if (accLog > maxLog) throw new Error("zstd: FSE accuracy log " + accLog + " > " + maxLog);
+  const norm = new Int16Array(maxSV + 1);
+  let remaining = (1 << accLog) + 1, threshold = 1 << accLog, nbBits = accLog + 1;
+  let charnum = 0, previous0 = false;
+  for (;;) {
+    if (previous0) {
+      let rep = peek(2); bitPos += 2;
+      while (rep === 3) { charnum += 3; rep = peek(2); bitPos += 2; }
+      charnum += rep;
+      if (charnum > maxSV) break;
+    }
+    const max = (2 * threshold - 1) - remaining;
+    const bs = peek(Math.min(nbBits, 24));
+    let count;
+    if ((bs & (threshold - 1)) < max) { count = bs & (threshold - 1); bitPos += nbBits - 1; }
+    else {
+      count = bs & (2 * threshold - 1);
+      if (count >= threshold) count -= max;
+      bitPos += nbBits;
+    }
+    count--;
+    remaining -= count < 0 ? 1 : count;
+    norm[charnum++] = count;
+    previous0 = count === 0;
+    if (remaining < threshold) {
+      if (remaining <= 1) break;
+      nbBits = highbit(remaining) + 1;
+      threshold = 1 << (nbBits - 1);
+    }
+    if (charnum > maxSV) break;
+  }
+  if (remaining !== 1) throw new Error("zstd: corrupt FSE table description");
+  return { norm, maxSymbol: charnum - 1, accLog, used: (bitPos + 7) >> 3 };
+}
+
+/** Builds an FSE decoding table from normalized counts. */
+function fseBuildTable(norm, maxSymbol, accLog) {
+  const size = 1 << accLog, mask = size - 1;
+  const tableSymbol = new Uint8Array(size);
+  const next = new Int32Array(maxSymbol + 1);
+  let high = size - 1;
+  for (let s = 0; s <= maxSymbol; s++) {
+    if (norm[s] === -1) { tableSymbol[high--] = s; next[s] = 1; }
+    else next[s] = norm[s];
+  }
+  const step = (size >> 1) + (size >> 3) + 3;
+  let pos = 0;
+  for (let s = 0; s <= maxSymbol; s++) {
+    for (let i = 0, n = norm[s]; i < n; i++) {
+      tableSymbol[pos] = s;
+      do { pos = (pos + step) & mask; } while (pos > high);
+    }
+  }
+  const symbols = new Uint8Array(size), nbBits = new Uint8Array(size), newState = new Uint16Array(size);
+  for (let u = 0; u < size; u++) {
+    const s = tableSymbol[u];
+    const ns = next[s]++;
+    const nb = accLog - highbit(ns);
+    symbols[u] = s; nbBits[u] = nb; newState[u] = (ns << nb) - size;
+  }
+  return { symbols, nbBits, newState, accLog };
+}
+function fseRleTable(symbol) {
+  return { symbols: Uint8Array.of(symbol), nbBits: Uint8Array.of(0), newState: Uint16Array.of(0), accLog: 0 };
+}
+
+/** FSE-decompresses the huffman weight stream (two interleaved states). */
+function fseDecompressWeights(b, off, size) {
+  const hdr = fseReadNCount(b, off, off + size, 255, 6);
+  const dt = fseBuildTable(hdr.norm, hdr.maxSymbol, hdr.accLog);
+  const br = new BackBits(b, off + hdr.used, off + size);
+  let s1 = br.bits(dt.accLog), s2 = br.bits(dt.accLog);
+  const out = [];
+  for (;;) {
+    out.push(dt.symbols[s1]);
+    s1 = dt.newState[s1] + br.bits(dt.nbBits[s1]);
+    if (br.over) { out.push(dt.symbols[s2]); break; }
+    out.push(dt.symbols[s2]);
+    s2 = dt.newState[s2] + br.bits(dt.nbBits[s2]);
+    if (br.over) { out.push(dt.symbols[s1]); break; }
+    if (out.length > 255) throw new Error("zstd: too many huffman weights");
+  }
+  return out;
+}
+
+/** Reads a huffman table description, returns {symbol[], nbBits[], maxBits, used}. */
+function hufReadTable(b, off) {
+  const iSize = b[off];
+  let weights, used;
+  if (iSize >= 128) {
+    const n = iSize - 127;
+    weights = new Array(n);
+    for (let i = 0; i < n; i += 2) {
+      weights[i] = b[off + 1 + (i >> 1)] >> 4;
+      if (i + 1 < n) weights[i + 1] = b[off + 1 + (i >> 1)] & 15;
+    }
+    used = 1 + ((n + 1) >> 1);
+  } else {
+    weights = fseDecompressWeights(b, off + 1, iSize);
+    used = 1 + iSize;
+  }
+  let total = 0;
+  for (const w of weights) { if (w > 12) throw new Error("zstd: bad huffman weight"); total += (1 << w) >> 1; }
+  if (total === 0) throw new Error("zstd: empty huffman table");
+  const maxBits = highbit(total) + 1;
+  const rest = (1 << maxBits) - total;
+  if (rest !== (1 << highbit(rest))) throw new Error("zstd: corrupt huffman weights");
+  weights.push(highbit(rest) + 1);
+
+  const size = 1 << maxBits;
+  const symbol = new Uint8Array(size), nbBits = new Uint8Array(size);
+  const rankCount = new Int32Array(maxBits + 2);
+  for (const w of weights) if (w > 0) rankCount[maxBits + 1 - w]++;
+  const rankIdx = new Int32Array(maxBits + 2);
+  rankIdx[maxBits] = 0;
+  for (let i = maxBits; i >= 1; i--) rankIdx[i - 1] = rankIdx[i] + rankCount[i] * (1 << (maxBits - i));
+  for (let s = 0; s < weights.length; s++) {
+    const w = weights[s];
+    if (!w) continue;
+    const bits = maxBits + 1 - w;
+    const len = 1 << (maxBits - bits);
+    const at = rankIdx[bits];
+    symbol.fill(s, at, at + len);
+    nbBits.fill(bits, at, at + len);
+    rankIdx[bits] += len;
+  }
+  return { symbol, nbBits, maxBits, used };
+}
+
+function hufDecodeStream(table, b, start, end, out, o, count) {
+  const br = new BackBits(b, start, end);
+  const { symbol, nbBits, maxBits } = table;
+  for (let i = 0; i < count; i++) {
+    const s = br.peek(maxBits);
+    out[o++] = symbol[s];
+    br.skip(nbBits[s]);
+  }
+  return o;
+}
+
+/* predefined sequence tables (from the zstd spec) */
+const LL_BITS = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,2,2,3,3,4,6,7,8,9,10,11,12,13,14,15,16];
+const LL_BASE = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,18,20,22,24,28,32,40,48,64,128,256,512,
+  1024,2048,4096,8192,16384,32768,65536];
+const LL_DEFAULT = [4,3,2,2,2,2,2,2,2,2,2,2,2,1,1,1,2,2,2,2,2,2,2,2,2,3,2,1,1,1,1,1,-1,-1,-1,-1];
+const ML_BITS = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  1,1,1,1,2,2,3,3,4,4,5,7,8,9,10,11,12,13,14,15,16];
+const ML_BASE = [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,
+  33,34,35,37,39,41,43,47,51,59,67,83,99,131,259,515,1027,2051,4099,8195,16387,32771,65539];
+const ML_DEFAULT = [1,4,3,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+  1,1,1,1,1,1,1,1,1,1,1,1,1,1,-1,-1,-1,-1,-1,-1,-1];
+const OF_DEFAULT = [1,1,1,1,1,1,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,-1,-1,-1,-1,-1];
+const OF_BASE = [0, 1];
+for (let c = 2; c <= 31; c++) OF_BASE[c] = Math.pow(2, c) - 3;
+
+let LL_PRE = null, ML_PRE = null, OF_PRE = null;
+function predefined() {
+  if (!LL_PRE) {
+    LL_PRE = fseBuildTable(LL_DEFAULT, 35, 6);
+    ML_PRE = fseBuildTable(ML_DEFAULT, 52, 6);
+    OF_PRE = fseBuildTable(OF_DEFAULT, 28, 5);
+  }
+}
+
+/** Decompresses a zstd frame stream. Returns a Uint8Array. */
+function zstdDecompress(src, expected) {
+  predefined();
+  let out = new Uint8Array(expected > 0 ? expected : Math.max(1024, src.length * 4));
+  let o = 0;
+  const grow = (need) => {
+    if (o + need <= out.length) return;
+    let cap = out.length || 1024;
+    while (cap < o + need) cap *= 2;
+    const bigger = new Uint8Array(cap);
+    bigger.set(out.subarray(0, o));
+    out = bigger;
+  };
+  let p = 0;
+  while (p < src.length) {
+    const magic = (src[p] | (src[p + 1] << 8) | (src[p + 2] << 16) | (src[p + 3] << 24)) >>> 0;
+    if (magic >= 0x184d2a50 && magic <= 0x184d2a5f) {            // skippable frame
+      const len = (src[p + 4] | (src[p + 5] << 8) | (src[p + 6] << 16) | (src[p + 7] << 24)) >>> 0;
+      p += 8 + len;
+      continue;
+    }
+    if (magic !== 0xfd2fb528) {
+      if (p === 0) throw new Error("zstd: bad magic 0x" + magic.toString(16));
+      break;                                                    // trailing junk
+    }
+    p = zstdFrame(src, p + 4, grow, () => out, (n) => { o = n; }, () => o);
+  }
+  return out.subarray(0, o);
+}
+
+function zstdFrame(src, p, grow, getOut, setO, getO) {
+  const fhd = src[p++];
+  const fcsFlag = fhd >> 6, singleSegment = (fhd >> 5) & 1, checksum = (fhd >> 2) & 1, dictFlag = fhd & 3;
+  if ((fhd >> 3) & 1) throw new Error("zstd: reserved frame header bit set");
+  if (!singleSegment) p++;                                       // window descriptor
+  p += [0, 1, 2, 4][dictFlag];                                   // dictionary id
+  const fcsSize = fcsFlag === 0 ? (singleSegment ? 1 : 0) : [0, 2, 4, 8][fcsFlag];
+  p += fcsSize;
+  if (dictFlag) throw new Error("zstd: dictionary-compressed frames are not supported");
+
+  let huf = null;                                                // shared across blocks
+  let prevLL = null, prevML = null, prevOF = null;
+  const reps = [1, 4, 8];
+  let literals = new Uint8Array(0);
+
+  for (;;) {
+    const h = src[p] | (src[p + 1] << 8) | (src[p + 2] << 16);
+    p += 3;
+    const last = h & 1, type = (h >> 1) & 3, size = h >> 3;
+    if (type === 0) {                                            // raw
+      grow(size);
+      const out = getOut(); let o = getO();
+      out.set(src.subarray(p, p + size), o);
+      setO(o + size); p += size;
+    } else if (type === 1) {                                     // rle
+      grow(size);
+      const out = getOut(); let o = getO();
+      out.fill(src[p], o, o + size);
+      setO(o + size); p += 1;
+    } else if (type === 2) {
+      const blockEnd = p + size;
+      /* ---- literals section ---- */
+      const lh = src[p];
+      const ltype = lh & 3, lfmt = (lh >> 2) & 3;
+      let regen = 0, comp = 0, streams = 1, lp = p;
+      if (ltype === 0 || ltype === 1) {
+        if (lfmt === 1) { regen = ((src[lp] | (src[lp + 1] << 8)) >>> 4) & 0xfff; lp += 2; }
+        else if (lfmt === 3) { regen = ((src[lp] | (src[lp + 1] << 8) | (src[lp + 2] << 16)) >>> 4) & 0xfffff; lp += 3; }
+        else { regen = lh >> 3; lp += 1; }
+        literals = new Uint8Array(regen);
+        if (ltype === 0) { literals.set(src.subarray(lp, lp + regen)); lp += regen; }
+        else { literals.fill(src[lp]); lp += 1; }
+      } else {
+        const w = (src[lp] | (src[lp + 1] << 8) | (src[lp + 2] << 16) | (src[lp + 3] << 24) | 0) >>> 0;
+        const w5 = src[lp + 4];
+        if (lfmt === 0 || lfmt === 1) {
+          regen = (w >>> 4) & 0x3ff; comp = (w >>> 14) & 0x3ff; lp += 3;
+          streams = lfmt === 0 ? 1 : 4;
+        } else if (lfmt === 2) {
+          regen = (w >>> 4) & 0x3fff; comp = (w >>> 18) & 0x3fff; lp += 4;
+          streams = 4;
+        } else {
+          regen = (w >>> 4) & 0x3ffff;
+          comp = ((w >>> 22) & 0x3ff) + (w5 * 1024); lp += 5;
+          streams = 4;
+        }
+        const sectionEnd = lp + comp;
+        if (ltype === 2) {
+          huf = hufReadTable(src, lp);
+          lp += huf.used;
+        } else if (!huf) throw new Error("zstd: treeless literals without a huffman table");
+        literals = new Uint8Array(regen);
+        if (streams === 1) {
+          hufDecodeStream(huf, src, lp, sectionEnd, literals, 0, regen);
+        } else {
+          const s1 = src[lp] | (src[lp + 1] << 8);
+          const s2 = src[lp + 2] | (src[lp + 3] << 8);
+          const s3 = src[lp + 4] | (src[lp + 5] << 8);
+          let q = lp + 6;
+          const seg = (regen + 3) >> 2;
+          const sizes = [s1, s2, s3, sectionEnd - (q + s1 + s2 + s3)];
+          let outPos = 0;
+          for (let i = 0; i < 4; i++) {
+            const n = i === 3 ? regen - 3 * seg : seg;
+            outPos = hufDecodeStream(huf, src, q, q + sizes[i], literals, outPos, n);
+            q += sizes[i];
+          }
+        }
+        lp = sectionEnd;
+      }
+
+      /* ---- sequences section ---- */
+      let nbSeq = 0;
+      if (lp < blockEnd) {
+        const b0 = src[lp++];
+        if (b0 < 128) nbSeq = b0;
+        else if (b0 < 255) { nbSeq = ((b0 - 128) << 8) + src[lp++]; }
+        else { nbSeq = (src[lp] | (src[lp + 1] << 8)) + 0x7f00; lp += 2; }
+      }
+      let litPos = 0;
+      if (nbSeq === 0) {
+        grow(literals.length);
+        const out = getOut(); const o = getO();
+        out.set(literals, o); setO(o + literals.length);
+        p = blockEnd;
+        if (last) break; else continue;
+      }
+      const modes = src[lp++];
+      const pick = (mode, pre, prev, maxSV, maxLog) => {
+        if (mode === 0) return { t: pre, keep: pre };
+        if (mode === 1) { const t = fseRleTable(src[lp++]); return { t, keep: t }; }
+        if (mode === 2) {
+          const hdr = fseReadNCount(src, lp, blockEnd, maxSV, maxLog);
+          lp += hdr.used;
+          const t = fseBuildTable(hdr.norm, hdr.maxSymbol, hdr.accLog);
+          return { t, keep: t };
+        }
+        if (!prev) throw new Error("zstd: repeat mode without a previous table");
+        return { t: prev, keep: prev };
+      };
+      const a = pick(modes >> 6, LL_PRE, prevLL, 35, 9); prevLL = a.keep;
+      const b = pick((modes >> 4) & 3, OF_PRE, prevOF, 31, 8); prevOF = b.keep;
+      const c = pick((modes >> 2) & 3, ML_PRE, prevML, 52, 9); prevML = c.keep;
+      const LL = a.t, OF = b.t, ML = c.t;
+
+      const br = new BackBits(src, lp, blockEnd);
+      let llState = br.bits(LL.accLog), ofState = br.bits(OF.accLog), mlState = br.bits(ML.accLog);
+
+      for (let n = 0; n < nbSeq; n++) {
+        const llCode = LL.symbols[llState], mlCode = ML.symbols[mlState], ofCode = OF.symbols[ofState];
+        const ofBits = ofCode;
+        let matchLength = ML_BASE[mlCode], litLength = LL_BASE[llCode];
+        let offset;
+        if (ofBits > 1) {
+          offset = OF_BASE[ofCode] + br.bits(ofBits);
+          reps[2] = reps[1]; reps[1] = reps[0]; reps[0] = offset;
+        } else {
+          const ll0 = litLength === 0 ? 1 : 0;
+          if (ofBits === 0) {
+            offset = reps[ll0];
+            reps[1] = reps[ll0 ? 0 : 1];
+            reps[0] = offset;
+          } else {
+            const sel = 1 + ll0 + br.bits(1);
+            const temp = sel === 3 ? reps[0] - 1 : reps[sel];
+            if (sel !== 1) reps[2] = reps[1];
+            reps[1] = reps[0];
+            reps[0] = offset = temp;
+          }
+        }
+        matchLength += br.bits(ML_BITS[mlCode]);
+        litLength += br.bits(LL_BITS[llCode]);
+        if (n < nbSeq - 1) {
+          llState = LL.newState[llState] + br.bits(LL.nbBits[llState]);
+          mlState = ML.newState[mlState] + br.bits(ML.nbBits[mlState]);
+          ofState = OF.newState[ofState] + br.bits(OF.nbBits[ofState]);
+        }
+        /* ---- execute ---- */
+        grow(litLength + matchLength);
+        const out = getOut(); let o = getO();
+        for (let i = 0; i < litLength; i++) out[o++] = literals[litPos++];
+        if (offset <= 0 || offset > o) throw new Error("zstd: bad match offset " + offset);
+        let s = o - offset;
+        for (let i = 0; i < matchLength; i++) out[o++] = out[s++];
+        setO(o);
+      }
+      /* ---- trailing literals ---- */
+      const rest = literals.length - litPos;
+      if (rest > 0) {
+        grow(rest);
+        const out = getOut(); const o = getO();
+        out.set(literals.subarray(litPos), o);
+        setO(o + rest);
+      }
+      p = blockEnd;
+    } else {
+      throw new Error("zstd: reserved block type");
+    }
+    if (last) break;
+  }
+  if (checksum) p += 4;
+  return p;
+}
+
+/* ------------------------------------------------------- codec dispatch */
+async function decompress(codec, src, uncompressedSize) {
+  switch (codec) {
+    case "UNCOMPRESSED": return src;
+    case "SNAPPY": return snappyDecompress(src, uncompressedSize);
+    case "GZIP": return await gzipDecompress(src);
+    case "ZSTD": return zstdDecompress(src, uncompressedSize);
+    case "LZ4_RAW": return lz4BlockDecompress(src, uncompressedSize);
+    case "LZ4": return lz4HadoopDecompress(src, uncompressedSize);
+    case "BROTLI":
+      try { return await inflate(src, "brotli"); }
+      catch (e) { throw new Error("BROTLI pages need a brotli decoder this browser does not expose."); }
+    default:
+      throw new Error("Unsupported compression codec: " + codec + ".");
+  }
+}
+
+/* ======================================================================
+   Parquet encodings
+   ====================================================================== */
+const bitWidth = (max) => (max === 0 ? 0 : 32 - Math.clz32(max));
+const u32le = (b, p) => (b[p] | (b[p + 1] << 8) | (b[p + 2] << 16) | (b[p + 3] << 24)) >>> 0;
+
+/** RLE / bit-packing hybrid (parquet's level + dictionary-index encoding). */
+function rleHybrid(b, pos, end, width, count, out) {
+  out = out || new Int32Array(count);
+  let n = 0;
+  const byteWidth = (width + 7) >> 3;
+  while (n < count && pos < end) {
+    let shift = 1, header = 0, by;
+    do { by = b[pos++]; header += (by & 0x7f) * shift; shift *= 128; } while (by & 0x80);
+    if (header & 1) {
+      const groups = header >> 1;
+      const runBytes = groups * width;
+      let bp = pos, buf = 0, bits = 0;
+      for (let g = 0; g < groups; g++) {
+        for (let i = 0; i < 8; i++) {
+          while (bits < width) { buf += b[bp++] * POW2[bits]; bits += 8; }
+          const v = buf % POW2[width];
+          buf = (buf - v) / POW2[width];
+          bits -= width;
+          if (n < count) out[n++] = v;
+        }
+        if (n >= count) break;
+      }
+      pos += runBytes;
+    } else {
+      const run = header >> 1;
+      let v = 0;
+      for (let i = 0; i < byteWidth; i++) v += b[pos + i] * POW2[8 * i];
+      pos += byteWidth;
+      const stop = Math.min(count, n + run);
+      while (n < stop) out[n++] = v;
+    }
+  }
+  return out;
+}
+
+/** Legacy BIT_PACKED level encoding: MSB-first, no run headers. */
+function bitPackedLegacy(b, pos, end, width, count) {
+  const out = new Int32Array(count);
+  if (width === 0) return out;
+  let buf = 0, bits = 0, n = 0, p = pos;
+  while (n < count && (p < end || bits >= width)) {
+    while (bits < width && p < end) { buf = buf * 256 + b[p++]; bits += 8; }
+    if (bits < width) break;
+    const v = Math.floor(buf / POW2[bits - width]);
+    bits -= width;
+    buf -= v * POW2[bits];
+    out[n++] = v;
+  }
+  return out;
+}
+
+/** PLAIN. Appends `count` physical values to `out`. */
+function decodePlain(b, pos, end, type, count, typeLength, out) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  switch (type) {
+    case "BOOLEAN":
+      for (let i = 0; i < count; i++) out.push(((b[pos + (i >> 3)] >> (i & 7)) & 1) === 1);
+      return pos + ((count + 7) >> 3);
+    case "INT32":
+      for (let i = 0; i < count; i++) out.push(dv.getInt32(pos + i * 4, true));
+      return pos + count * 4;
+    case "INT64":
+      for (let i = 0; i < count; i++) {
+        const v = dv.getBigInt64(pos + i * 8, true);
+        out.push(v >= -9007199254740991n && v <= 9007199254740991n ? Number(v) : v);
+      }
+      return pos + count * 8;
+    case "INT96":
+      for (let i = 0; i < count; i++) {
+        const p = pos + i * 12;
+        const nanos = dv.getBigUint64(p, true);
+        const julian = dv.getUint32(p + 8, true);
+        out.push({ int96: true, julian, nanos });
+      }
+      return pos + count * 12;
+    case "FLOAT":
+      for (let i = 0; i < count; i++) out.push(dv.getFloat32(pos + i * 4, true));
+      return pos + count * 4;
+    case "DOUBLE":
+      for (let i = 0; i < count; i++) out.push(dv.getFloat64(pos + i * 8, true));
+      return pos + count * 8;
+    case "BYTE_ARRAY":
+      for (let i = 0; i < count; i++) {
+        const len = u32le(b, pos); pos += 4;
+        out.push(b.subarray(pos, pos + len)); pos += len;
+      }
+      return pos;
+    case "FIXED_LEN_BYTE_ARRAY":
+      for (let i = 0; i < count; i++) { out.push(b.subarray(pos, pos + typeLength)); pos += typeLength; }
+      return pos;
+    default: throw new Error("PLAIN: unsupported type " + type);
+  }
+}
+
+/** DELTA_BINARY_PACKED. Returns {values, pos}; int64 accumulates in BigInt. */
+function deltaBinaryPacked(b, pos, end, count, big) {
+  const rv = () => { let shift = 1, v = 0, by; do { by = b[pos++]; v += (by & 0x7f) * shift; shift *= 128; } while (by & 0x80); return v; };
+  const zz = () => { const v = rv(); return v % 2 ? -(v + 1) / 2 : v / 2; };
+  const blockSize = rv(), miniPerBlock = rv(), total = rv();
+  let first = zz();
+  const perMini = blockSize / miniPerBlock;
+  const out = [];
+  let cur = big ? BigInt(first) : first;
+  out.push(cur);
+  while (out.length < total) {
+    const minDelta = big ? BigInt(zz()) : zz();
+    const widths = [];
+    for (let i = 0; i < miniPerBlock; i++) widths.push(b[pos++]);
+    for (let m = 0; m < miniPerBlock && out.length < total; m++) {
+      const w = widths[m];
+      if (w === 0) {
+        for (let i = 0; i < perMini && out.length < total; i++) {
+          cur = big ? cur + minDelta : cur + minDelta;
+          out.push(cur);
+        }
+        continue;
+      }
+      let bp = pos, buf = 0, bits = 0;
+      for (let i = 0; i < perMini; i++) {
+        let d;
+        if (w <= 32) {
+          while (bits < w) { buf += b[bp++] * POW2[bits]; bits += 8; }
+          d = buf % POW2[w];
+          buf = (buf - d) / POW2[w];
+          bits -= w;
+          if (big) d = BigInt(d);
+        } else {
+          let lo, hi;
+          while (bits < 32) { buf += b[bp++] * POW2[bits]; bits += 8; }
+          lo = buf % POW2[32]; buf = (buf - lo) / POW2[32]; bits -= 32;
+          const rest = w - 32;
+          while (bits < rest) { buf += b[bp++] * POW2[bits]; bits += 8; }
+          hi = buf % POW2[rest]; buf = (buf - hi) / POW2[rest]; bits -= rest;
+          d = big ? BigInt(lo) + (BigInt(hi) << 32n) : lo + hi * POW2[32];
+        }
+        if (out.length < total) { cur = cur + minDelta + d; out.push(cur); }
+      }
+      pos += Math.ceil(perMini * w / 8);
+    }
+  }
+  if (big) {
+    for (let i = 0; i < out.length; i++) {
+      const v = out[i];
+      if (v >= -9007199254740991n && v <= 9007199254740991n) out[i] = Number(v);
+    }
+  }
+  return { values: out, pos };
+}
+
+/** BYTE_STREAM_SPLIT: k independent byte streams, one per byte position. */
+function byteStreamSplit(b, pos, count, width, type, out) {
+  const buf = new Uint8Array(count * width);
+  for (let j = 0; j < width; j++) {
+    const base = pos + j * count;
+    for (let i = 0; i < count; i++) buf[i * width + j] = b[base + i];
+  }
+  const dv = new DataView(buf.buffer);
+  for (let i = 0; i < count; i++) {
+    switch (type) {
+      case "FLOAT": out.push(dv.getFloat32(i * 4, true)); break;
+      case "DOUBLE": out.push(dv.getFloat64(i * 8, true)); break;
+      case "INT32": out.push(dv.getInt32(i * 4, true)); break;
+      case "INT64": {
+        const v = dv.getBigInt64(i * 8, true);
+        out.push(v >= -9007199254740991n && v <= 9007199254740991n ? Number(v) : v);
+        break;
+      }
+      default: out.push(buf.subarray(i * width, i * width + width));
+    }
+  }
+  return pos + count * width;
+}
+
+/** Decodes one page's value section into physical values. */
+function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out) {
+  switch (enc) {
+    case "PLAIN":
+      decodePlain(b, pos, end, type, count, typeLength, out);
+      return;
+    case "RLE": {                       // boolean data pages
+      const len = u32le(b, pos);
+      const idx = rleHybrid(b, pos + 4, pos + 4 + len, 1, count);
+      for (let i = 0; i < count; i++) out.push(idx[i] === 1);
+      return;
+    }
+    case "PLAIN_DICTIONARY":
+    case "RLE_DICTIONARY": {
+      if (!dict) throw new Error("dictionary page missing for a dictionary-encoded page");
+      const w = b[pos];
+      const idx = rleHybrid(b, pos + 1, end, w, count);
+      for (let i = 0; i < count; i++) out.push(dict[idx[i]]);
+      return;
+    }
+    case "DELTA_BINARY_PACKED": {
+      const r = deltaBinaryPacked(b, pos, end, count, type === "INT64");
+      for (let i = 0; i < count; i++) out.push(r.values[i]);
+      return;
+    }
+    case "DELTA_LENGTH_BYTE_ARRAY": {
+      const r = deltaBinaryPacked(b, pos, end, count, false);
+      let p = r.pos;
+      for (let i = 0; i < count; i++) { const n = r.values[i]; out.push(b.subarray(p, p + n)); p += n; }
+      return;
+    }
+    case "DELTA_BYTE_ARRAY": {
+      const pre = deltaBinaryPacked(b, pos, end, count, false);
+      const suf = deltaBinaryPacked(b, pre.pos, end, count, false);
+      let p = suf.pos;
+      let prev = new Uint8Array(0);
+      for (let i = 0; i < count; i++) {
+        const pl = pre.values[i], sl = suf.values[i];
+        const v = new Uint8Array(pl + sl);
+        v.set(prev.subarray(0, pl));
+        v.set(b.subarray(p, p + sl), pl);
+        p += sl;
+        out.push(v);
+        prev = v;
+      }
+      return;
+    }
+    case "BYTE_STREAM_SPLIT": {
+      const w = type === "FLOAT" || type === "INT32" ? 4 : type === "DOUBLE" || type === "INT64" ? 8
+        : type === "FIXED_LEN_BYTE_ARRAY" ? typeLength : 0;
+      if (!w) throw new Error("BYTE_STREAM_SPLIT: unsupported type " + type);
+      byteStreamSplit(b, pos, count, w, type, out);
+      return;
+    }
+    default:
+      throw new Error("Unsupported encoding: " + enc + ".");
+  }
+}
+
+/* ======================================================================
+   Column chunk reader
+   ====================================================================== */
+async function readColumnChunk(src, chunk, leaf) {
+  const m = chunk.meta;
+  if (!m) throw new Error("column chunk has no metadata (encrypted?)");
+  let start = m.dataPageOffset;
+  if (m.dictionaryPageOffset != null && m.dictionaryPageOffset > 0 && m.dictionaryPageOffset < start) {
+    start = m.dictionaryPageOffset;
+  }
+  const end = Math.min(src.size, start + m.totalCompressedSize);
+  const buf = await src.read(start, end);
+
+  const maxDef = leaf.maxDef, maxRep = leaf.maxRep;
+  const defW = bitWidth(maxDef), repW = bitWidth(maxRep);
+  const values = [];
+  const defs = maxDef > 0 ? [] : null;
+  const reps = maxRep > 0 ? [] : null;
+  let dict = null;
+  let pos = 0, seen = 0;
+
+  while (pos < buf.length && seen < m.numValues) {
+    const c = new Cursor(buf, pos);
+    const h = thriftStruct(c);
+    const dataStart = c.p;
+    const compSize = h[3] | 0, uncompSize = h[2] | 0;
+    const ptype = PAGE_TYPE[h[1]];
+    const raw = buf.subarray(dataStart, dataStart + compSize);
+    pos = dataStart + compSize;
+
+    if (ptype === "DICTIONARY_PAGE") {
+      const dh = h[7] || {};
+      const page = await decompress(m.codec, raw, uncompSize);
+      dict = [];
+      decodePlain(page, 0, page.length, m.type, dh[1] | 0, leaf.typeLength, dict);
+      continue;
+    }
+    if (ptype === "INDEX_PAGE") continue;
+
+    if (ptype === "DATA_PAGE") {
+      const dh = h[5];
+      if (!dh) throw new Error("data page without a v1 header");
+      const n = dh[1] | 0;
+      const page = await decompress(m.codec, raw, uncompSize);
+      let p = 0;
+      if (maxRep > 0) {
+        const len = u32le(page, p); p += 4;
+        pushLevels(reps, page, p, p + len, repW, n, ENC[dh[4]]);
+        p += len;
+      }
+      let nonNull = n;
+      if (maxDef > 0) {
+        const len = u32le(page, p); p += 4;
+        const lv = pushLevels(defs, page, p, p + len, defW, n, ENC[dh[3]]);
+        p += len;
+        nonNull = 0;
+        for (let i = 0; i < n; i++) if (lv[i] === maxDef) nonNull++;
+      }
+      if (nonNull > 0) decodeValues(ENC[dh[2]], page, p, page.length, m.type, nonNull, leaf.typeLength, dict, values);
+      seen += n;
+      continue;
+    }
+    if (ptype === "DATA_PAGE_V2") {
+      const dh = h[8];
+      if (!dh) throw new Error("v2 data page without a v2 header");
+      const n = dh[1] | 0, nulls = dh[2] | 0;
+      const defLen = dh[5] | 0, repLen = dh[6] | 0;
+      const compressed = dh[7] !== false;
+      if (maxRep > 0) pushLevels(reps, raw, 0, repLen, repW, n, "RLE");
+      if (maxDef > 0) pushLevels(defs, raw, repLen, repLen + defLen, defW, n, "RLE");
+      const body = raw.subarray(repLen + defLen);
+      const page = compressed ? await decompress(m.codec, body, uncompSize - repLen - defLen) : body;
+      if (n - nulls > 0) decodeValues(ENC[dh[4]], page, 0, page.length, m.type, n - nulls, leaf.typeLength, dict, values);
+      seen += n;
+      continue;
+    }
+    throw new Error("unknown page type " + h[1]);
+  }
+  return { values, defs, reps, count: seen };
+}
+
+function pushLevels(sink, b, pos, end, width, count, enc) {
+  let lv;
+  if (width === 0) lv = new Int32Array(count);
+  else if (enc === "BIT_PACKED") lv = bitPackedLegacy(b, pos, end, width, count);
+  else lv = rleHybrid(b, pos, end, width, count);
+  if (sink) for (let i = 0; i < count; i++) sink.push(lv[i]);
+  return lv;
+}
+
+/* ----------------------------------------------------- record assembly */
+/**
+ * Turns (values, definition levels, repetition levels) back into one value
+ * per row, nesting arrays wherever the path repeats.
+ */
+function assemble(leaf, values, defs, reps, convert) {
+  const maxDef = leaf.maxDef, maxRep = leaf.maxRep;
+  if (maxRep === 0) {
+    if (maxDef === 0) return values.map(convert);
+    const rows = new Array(defs.length);
+    let vi = 0;
+    for (let i = 0; i < defs.length; i++) rows[i] = defs[i] === maxDef ? convert(values[vi++]) : null;
+    return rows;
+  }
+  const chain = leaf.chain;
+  const rows = [];
+  let i = 0, vi = 0;
+  const n = defs ? defs.length : values.length;
+
+  const readNode = (j, ancDef, ancRep) => {
+    const node = chain[j];
+    const isLeaf = j === chain.length - 1;
+    const myDef = ancDef + (node.rep === "REQUIRED" ? 0 : 1);
+    const myRep = ancRep + (node.rep === "REPEATED" ? 1 : 0);
+    if (node.rep === "REPEATED") {
+      if (defs[i] < myDef) { i++; return defs[i - 1] < ancDef ? null : []; }
+      const arr = [];
+      do {
+        arr.push(isLeaf ? takeLeaf(myDef) : readNode(j + 1, myDef, myRep));
+      } while (i < n && reps[i] >= myRep);
+      return arr;
+    }
+    if (defs[i] < myDef) { i++; return null; }
+    return isLeaf ? takeLeaf(myDef) : readNode(j + 1, myDef, myRep);
+  };
+  const takeLeaf = (myDef) => {
+    const v = defs[i] >= myDef ? convert(values[vi++]) : null;
+    i++;
+    return v;
+  };
+  while (i < n) rows.push(readNode(0, 0, 0));
+  return rows;
+}
+
+/* ======================================================================
+   Physical values -> display values
+   ====================================================================== */
+const JULIAN_EPOCH = 2440588;                       // 1970-01-01
+function beBigInt(bytes) {
+  let v = 0n;
+  for (let i = 0; i < bytes.length; i++) v = (v << 8n) | BigInt(bytes[i]);
+  if (bytes.length && (bytes[0] & 0x80)) v -= 1n << BigInt(bytes.length * 8);
+  return v;
+}
+function decimalString(v, scale) {
+  const neg = v < 0n;
+  let s = (neg ? -v : v).toString();
+  if (scale > 0) {
+    while (s.length <= scale) s = "0" + s;
+    s = s.slice(0, s.length - scale) + "." + s.slice(s.length - scale);
+  }
+  return (neg ? "-" : "") + s;
+}
+function float16(b) {
+  const h = b[0] | (b[1] << 8);
+  const sign = h >> 15 ? -1 : 1, exp = (h >> 10) & 31, man = h & 1023;
+  if (exp === 0) return sign * Math.pow(2, -14) * (man / 1024);
+  if (exp === 31) return man ? NaN : sign * Infinity;
+  return sign * Math.pow(2, exp - 15) * (1 + man / 1024);
+}
+const HEX = [];
+for (let i = 0; i < 256; i++) HEX[i] = i.toString(16).padStart(2, "0");
+function hex(b, max) {
+  let s = "";
+  const n = Math.min(b.length, max == null ? b.length : max);
+  for (let i = 0; i < n; i++) s += HEX[b[i]];
+  return s + (n < b.length ? "…" : "");
+}
+function uuidString(b) {
+  const h = hex(b);
+  return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20, 32);
+}
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/;
+/** True when a type-less BYTE_ARRAY column really holds text. */
+function looksUtf8(values) {
+  let checked = 0;
+  for (let i = 0; i < values.length && checked < 64; i++) {
+    const v = values[i];
+    if (!(v instanceof Uint8Array)) return false;
+    if (v.length === 0) continue;
+    let s;
+    try { s = strictUtf8.decode(v); } catch (e) { return false; }
+    if (CONTROL.test(s)) return false;
+    checked++;
+  }
+  return checked > 0;
+}
+
+/**
+ * Epoch/time values arrive as an integer count of `unit`. Nanoseconds are
+ * divided down in BigInt first: 2024 in nanoseconds needs more than 53 bits,
+ * so dividing after the cast to double would lose the microseconds.
+ */
+function toMillis(unit) {
+  if (unit === "MILLIS") return (v) => Number(v);
+  if (unit === "MICROS") return (v) => Number(v) / 1e3;
+  return (v) => (typeof v === "bigint" ? Number(v / 1000n) / 1e3 : Number(v) / 1e6);
+}
+
+/** Works out how a leaf column should be interpreted and displayed. */
+function typeSpec(leaf) {
+  const t = leaf.type, lt = leaf.logical, ct = leaf.converted;
+  const ln = lt ? lt.name : null;
+  const nested = leaf.maxRep > 0;
+  const wrap = (spec) => {
+    spec.physical = t;
+    spec.nested = nested;
+    if (nested) { spec.elementKind = spec.kind; spec.kind = "nested"; spec.label = listLabel(leaf, spec.label); }
+    return spec;
+  };
+  const scale = (lt && lt.scale != null) ? lt.scale : (leaf.scale || 0);
+  const prec = (lt && lt.precision != null) ? lt.precision : (leaf.precision || 0);
+
+  if (ln === "DECIMAL" || ct === "DECIMAL") {
+    const label = "decimal(" + prec + "," + scale + ")";
+    if (t === "INT32" || t === "INT64") {
+      return wrap({ kind: "number", label, convert: (v) => decimalString(BigInt(v), scale), decimal: true });
+    }
+    return wrap({ kind: "number", label, convert: (v) => decimalString(beBigInt(v), scale), decimal: true });
+  }
+  if (ln === "DATE" || ct === "DATE") {
+    return wrap({ kind: "temporal", sub: "date", label: "date", convert: (v) => v * 86400000 });
+  }
+  if (ln === "TIME" || ct === "TIME_MILLIS" || ct === "TIME_MICROS") {
+    const unit = ln === "TIME" ? lt.unit : (ct === "TIME_MILLIS" ? "MILLIS" : "MICROS");
+    return wrap({ kind: "temporal", sub: "time", label: "time[" + unit.toLowerCase() + "]",
+      convert: toMillis(unit) });
+  }
+  if (ln === "TIMESTAMP" || ct === "TIMESTAMP_MILLIS" || ct === "TIMESTAMP_MICROS") {
+    const unit = ln === "TIMESTAMP" ? lt.unit : (ct === "TIMESTAMP_MILLIS" ? "MILLIS" : "MICROS");
+    const utc = ln === "TIMESTAMP" ? lt.utc : true;
+    return wrap({ kind: "temporal", sub: "timestamp", utc,
+      label: "timestamp[" + unit.toLowerCase() + (utc ? ", UTC" : "") + "]",
+      convert: toMillis(unit) });
+  }
+  if (t === "INT96") {
+    /* int96 has no UTC flag of its own; writers disagree, so no Z is shown */
+    return wrap({ kind: "temporal", sub: "timestamp", utc: false, label: "int96 timestamp",
+      convert: (v) => (v.julian - JULIAN_EPOCH) * 86400000 + Number(v.nanos) / 1e6 });
+  }
+  if (ln === "UUID") return wrap({ kind: "string", label: "uuid", convert: uuidString });
+  if (ln === "FLOAT16") return wrap({ kind: "number", label: "float16", convert: float16 });
+  if (ct === "INTERVAL") {
+    return wrap({ kind: "string", label: "interval", convert: (v) => {
+      const dv = new DataView(v.buffer, v.byteOffset, v.byteLength);
+      return dv.getUint32(0, true) + "mo " + dv.getUint32(4, true) + "d " + dv.getUint32(8, true) + "ms";
+    } });
+  }
+  if (ln === "STRING" || ln === "ENUM" || ln === "JSON" || ct === "UTF8" || ct === "ENUM" || ct === "JSON") {
+    const label = ln === "JSON" || ct === "JSON" ? "json" : ln === "ENUM" || ct === "ENUM" ? "enum" : "string";
+    return wrap({ kind: "string", label, convert: (v) => utf8.decode(v) });
+  }
+  if (t === "BOOLEAN") return wrap({ kind: "bool", label: "boolean", convert: (v) => v });
+  if (ln === "INTEGER" || (ct && /^(U?INT)_/.test(ct))) {
+    const bits = ln === "INTEGER" ? lt.bits : +ct.replace(/^\D+/, "");
+    const signed = ln === "INTEGER" ? lt.signed : ct.startsWith("INT");
+    const label = (signed ? "int" : "uint") + bits;
+    if (!signed) {
+      if (bits <= 32) {
+        const mask = (1 << bits) - 1;
+        return wrap({ kind: "number", label,
+          convert: bits === 32 ? (v) => Number(v) >>> 0 : (v) => Number(v) & mask });
+      }
+      return wrap({ kind: "number", label, convert: (v) => {
+        const b = BigInt.asUintN(64, BigInt(v));
+        return b <= 9007199254740991n ? Number(b) : b;
+      } });
+    }
+    return wrap({ kind: "number", label, convert: (v) => v });
+  }
+  if (t === "INT32" || t === "INT64" || t === "FLOAT" || t === "DOUBLE") {
+    const label = t === "INT32" ? "int32" : t === "INT64" ? "int64" : t === "FLOAT" ? "float" : "double";
+    return wrap({ kind: "number", label, convert: (v) => v });
+  }
+  /* bytes: decided by sniffing real values later */
+  const label = t === "FIXED_LEN_BYTE_ARRAY" ? "fixed[" + leaf.typeLength + "]" : "binary";
+  return wrap({ kind: "binary", label, convert: (v) => v, maybeUtf8: true });
+}
+function listLabel(leaf, inner) {
+  let s = inner;
+  for (let i = leaf.chain.length - 1; i >= 0; i--) if (leaf.chain[i].rep === "REPEATED") s = "list<" + s + ">";
+  return s;
+}
+
+/* ======================================================================
+   Display formatting
+   ====================================================================== */
+const pad2 = (n) => (n < 10 ? "0" + n : "" + n);
+function fmtDatePart(ms) {
+  const d = new Date(ms);
+  return d.getUTCFullYear() + "-" + pad2(d.getUTCMonth() + 1) + "-" + pad2(d.getUTCDate());
+}
+function fmtTimePart(ms) {
+  const t = ((ms % 86400000) + 86400000) % 86400000;
+  const h = Math.floor(t / 3600000), m = Math.floor(t / 60000) % 60, s = Math.floor(t / 1000) % 60;
+  const frac = t - Math.floor(t / 1000) * 1000;
+  let out = pad2(h) + ":" + pad2(m) + ":" + pad2(s);
+  if (frac > 0) {
+    /* milliseconds with up to microsecond resolution, trailing zeros dropped */
+    const f = frac.toFixed(3).replace(".", "").padStart(6, "0").replace(/0+$/, "");
+    if (f) out += "." + f;
+  }
+  return out;
+}
+function fmtTemporal(ms, spec) {
+  if (!isFinite(ms)) return String(ms);
+  if (spec.sub === "date") return fmtDatePart(ms);
+  if (spec.sub === "time") return fmtTimePart(ms);
+  return fmtDatePart(ms) + " " + fmtTimePart(ms) + (spec.utc ? "Z" : "");
+}
+function fmtNumber(v) {
+  if (typeof v === "bigint") return v.toString();
+  if (typeof v === "string") return v;
+  if (!isFinite(v)) return String(v);
+  return String(v);
+}
+function fmtValue(v, spec) {
+  if (v === null || v === undefined) return null;
+  switch (spec.kind) {
+    case "number": return fmtNumber(v);
+    case "bool": return v ? "true" : "false";
+    case "temporal": return fmtTemporal(v, spec);
+    case "string": return v;
+    case "binary": return v instanceof Uint8Array ? hex(v, 24) : String(v);
+    default: return jsonish(v, spec);
+  }
+}
+function jsonish(v, spec) {
+  const inner = spec.elementKind ? { kind: spec.elementKind, sub: spec.sub, utc: spec.utc } : spec;
+  const walk = (x) => {
+    if (x === null || x === undefined) return null;
+    if (Array.isArray(x)) return x.map(walk);
+    if (inner.kind === "bool") return x === true;
+    if (inner.kind === "number" && typeof x === "number") return x;
+    return fmtValue(x, inner);
+  };
+  try { return JSON.stringify(walk(v)); } catch (e) { return String(v); }
+}
+
+/* ======================================================================
+   Column summaries
+   ====================================================================== */
+const BINS = 24;
+function numeric(v) {
+  if (v === null || v === undefined) return NaN;
+  if (typeof v === "bigint") return Number(v);
+  if (typeof v === "string") return parseFloat(v);
+  return typeof v === "number" ? v : NaN;
+}
+/** a < b, falling back to exact integer order when both land on one double. */
+function lessThan(a, b) {
+  const x = numeric(a), y = numeric(b);
+  if (x !== y) return x < y;
+  if (typeof a === "bigint" || typeof b === "bigint") {
+    try { return BigInt(a) < BigInt(b); } catch (e) { return false; }
+  }
+  return false;
+}
+function summarize(col) {
+  const rows = col.rows, spec = col.spec;
+  const n = rows.length;
+  let nulls = 0;
+  for (let i = 0; i < n; i++) if (rows[i] === null || rows[i] === undefined) nulls++;
+  const s = { n, nulls, kind: spec.kind };
+
+  if (spec.kind === "bool") {
+    let t = 0, f = 0;
+    for (const v of rows) { if (v === true) t++; else if (v === false) f++; }
+    s.trues = t; s.falses = f;
+    return s;
+  }
+  if (spec.kind === "number" || spec.kind === "temporal") {
+    let min = Infinity, max = -Infinity, sum = 0, cnt = 0, nan = 0;
+    let lo = null, hi = null;
+    for (let i = 0; i < n; i++) {
+      const v = rows[i];
+      if (v === null || v === undefined) continue;
+      const x = numeric(v);
+      if (!isFinite(x)) { nan++; continue; }
+      if (lo === null || lessThan(v, lo)) lo = v;
+      if (hi === null || lessThan(hi, v)) hi = v;
+      if (x < min) min = x;
+      if (x > max) max = x;
+      sum += x; cnt++;
+    }
+    s.count = cnt; s.nonFinite = nan;
+    if (cnt) {
+      s.min = min; s.max = max; s.mean = sum / cnt;
+      const hist = new Int32Array(BINS);
+      const span = max - min;
+      for (let i = 0; i < n; i++) {
+        const v = rows[i];
+        if (v === null || v === undefined) continue;
+        const x = numeric(v);
+        if (!isFinite(x)) continue;
+        const b = span > 0 ? Math.min(BINS - 1, Math.floor((x - min) / span * BINS)) : 0;
+        hist[b]++;
+      }
+      s.hist = hist;
+      /* the text comes from the stored value, so decimals and int64 stay exact */
+      s.minText = fmtValue(lo, spec);
+      s.maxText = fmtValue(hi, spec);
+      s.meanText = spec.kind === "temporal" ? fmtTemporal(s.mean, spec)
+        : (Number.isInteger(s.mean) ? String(s.mean) : s.mean.toPrecision(6).replace(/0+$/, "").replace(/\.$/, ""));
+    }
+    return s;
+  }
+  /* string / binary / nested */
+  const counts = new Map();
+  let distinctCapped = false;
+  let minLen = Infinity, maxLen = -Infinity, sumLen = 0, cnt = 0;
+  for (let i = 0; i < n; i++) {
+    const v = rows[i];
+    if (v === null || v === undefined) continue;
+    cnt++;
+    let key, len;
+    if (spec.kind === "string") { key = v; len = v.length; }
+    else if (spec.kind === "binary") { key = null; len = v instanceof Uint8Array ? v.length : 0; }
+    else { key = null; len = Array.isArray(v) ? v.length : 0; }
+    if (len < minLen) minLen = len;
+    if (len > maxLen) maxLen = len;
+    sumLen += len;
+    if (key !== null) {
+      if (counts.size < 4096 || counts.has(key)) counts.set(key, (counts.get(key) || 0) + 1);
+      else distinctCapped = true;
+    }
+  }
+  s.count = cnt;
+  if (cnt) { s.minLen = minLen; s.maxLen = maxLen; s.meanLen = sumLen / cnt; }
+  if (counts.size) {
+    s.distinct = counts.size;
+    s.distinctCapped = distinctCapped;
+    s.top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+  }
+  if (spec.kind === "nested") {
+    let empties = 0;
+    for (const v of rows) if (Array.isArray(v) && v.length === 0) empties++;
+    s.empties = empties;
+  }
+  return s;
+}
+
+/* ======================================================================
+   Reading a table
+   ====================================================================== */
+function fileSource(file) {
+  return {
+    size: file.size,
+    name: file.name,
+    async read(start, end) { return new Uint8Array(await file.slice(start, end).arrayBuffer()); },
+  };
+}
+
+function newTable(meta) {
+  const cols = meta.schema.leaves.map((leaf) => ({
+    leaf,
+    name: leaf.label || leaf.path.join("."),
+    spec: typeSpec(leaf),
+    rows: [],
+    sniffed: false,
+  }));
+  return { meta, cols, nextGroup: 0, rowsLoaded: 0, groupsLoaded: 0, truncated: meta.rowGroups.length > 0 };
+}
+
+/** Reads row groups into the table until `maxRows` more rows have been added. */
+async function loadMore(src, table, maxRows, onProgress) {
+  const meta = table.meta;
+  let added = 0;
+  while (table.nextGroup < meta.rowGroups.length && added < maxRows) {
+    const rg = meta.rowGroups[table.nextGroup];
+    const byPath = new Map();
+    rg.columns.forEach((c, i) => { if (c.meta) byPath.set(c.meta.path.join(" "), i); });
+    for (let ci = 0; ci < table.cols.length; ci++) {
+      const col = table.cols[ci];
+      const key = col.leaf.path.join(" ");
+      const idx = byPath.has(key) ? byPath.get(key) : ci;
+      const chunk = rg.columns[idx];
+      if (!chunk) throw new Error("row group " + table.nextGroup + " has no chunk for " + col.name);
+      if (chunk.filePath) {
+        throw new Error("Column " + col.name + " lives in a separate file (" + chunk.filePath +
+          "). paris-parquet reads one self-contained file at a time.");
+      }
+      if (chunk.encryptedMetadata || chunk.cryptoMetadata) throw new Error("Column " + col.name + " is encrypted.");
+      const raw = await readColumnChunk(src, chunk, col.leaf);
+      if (!col.sniffed && raw.values.length) {
+        col.sniffed = true;
+        if (col.spec.maybeUtf8 && looksUtf8(raw.values)) {
+          if (col.spec.nested) col.spec.elementKind = "string"; else col.spec.kind = "string";
+          col.spec.label = col.spec.label + " (utf-8)";
+          col.spec.convert = (v) => utf8.decode(v);
+        }
+      }
+      const rows = assemble(col.leaf, raw.values, raw.defs, raw.reps, col.spec.convert);
+      for (let i = 0; i < rows.length; i++) col.rows.push(rows[i]);
+      if (onProgress) onProgress(table.nextGroup, ci, table.cols.length);
+    }
+    added += rg.numRows;
+    table.rowsLoaded += rg.numRows;
+    table.nextGroup++;
+    table.groupsLoaded++;
+  }
+  table.truncated = table.nextGroup < meta.rowGroups.length;
+  for (const col of table.cols) col.summary = summarize(col);
+  return added;
+}
+
+/* ======================================================================
+   Rendering
+   ====================================================================== */
+const $ = (id) => document.getElementById(id);
+const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ESCAPES[c]);
+const num = (n) => (n == null ? "-" : Number(n).toLocaleString("en-US"));
+function bytesHuman(n) {
+  if (n == null) return "-";
+  if (n < 1024) return n + " B";
+  const u = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (v < 10 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : Math.round(v)) + " " + u[i];
+}
+const pct = (a, b) => (b ? (a / b * 100).toFixed(a / b >= 0.1 || a === 0 ? 0 : 1) + "%" : "0%");
+
+const COL_W = 178, ROW_H = 22;
+const state = { src: null, meta: null, table: null, first: 0 };
+
+function summaryCard(col) {
+  const s = col.summary, spec = col.spec;
+  if (!s) return "";
+  const out = [];
+  const kv = (k, v) => '<div class="kv"><span class="lab">' + k + "</span><span>" + v + "</span></div>";
+  out.push(kv("nulls", s.nulls ? num(s.nulls) + " &middot; " + pct(s.nulls, s.n) : "0"));
+  const valid = s.n - s.nulls;
+  out.push('<div class="nullbar"><i class="v" style="width:' + (s.n ? valid / s.n * 100 : 0) +
+    '%"></i><i class="n" style="width:' + (s.n ? s.nulls / s.n * 100 : 0) + '%"></i></div>');
+
+  if (spec.kind === "bool") {
+    const t = s.trues, f = s.falses, tot = s.n || 1;
+    out.push('<div class="bools"><i class="t" style="width:' + (t / tot * 100) + '%">' + (t / tot > 0.14 ? t : "") +
+      '</i><i class="f" style="width:' + (f / tot * 100) + '%">' + (f / tot > 0.14 ? f : "") +
+      '</i><i class="n" style="width:' + (s.nulls / tot * 100) + '%"></i></div>');
+    out.push(kv("true", num(t) + " &middot; " + pct(t, tot)));
+    out.push(kv("false", num(f) + " &middot; " + pct(f, tot)));
+  } else if (spec.kind === "number" || spec.kind === "temporal") {
+    if (!s.count) { out.push(kv("values", "0")); }
+    else {
+      out.push(kv("min", esc(s.minText)));
+      out.push(kv("max", esc(s.maxText)));
+      out.push(kv(spec.kind === "temporal" ? "mid" : "mean", esc(s.meanText)));
+      if (s.max > s.min) {                       /* a constant column has no shape to draw */
+        let peak = 1;
+        for (const h of s.hist) if (h > peak) peak = h;
+        let bars = "";
+        for (let i = 0; i < s.hist.length; i++) {
+          bars += '<i style="height:' + Math.max(3, s.hist[i] / peak * 100) + '%" title="' + s.hist[i] + '"></i>';
+        }
+        out.push('<div class="hist">' + bars + "</div>");
+      }
+      if (s.nonFinite) out.push(kv("nan/inf", num(s.nonFinite)));
+    }
+  } else if (spec.kind === "string") {
+    out.push(kv("distinct", (s.distinctCapped ? "&ge;" : "") + num(s.distinct || 0)));
+    if (s.top) {
+      let rows = "";
+      const top = s.top[0] ? s.top[0][1] : 1;
+      for (const pair of s.top) {
+        const v = pair[0], c = pair[1];
+        rows += '<div class="row" title="' + esc(v) + '"><i style="width:' + (c / top * 100) + '%"></i>' +
+          "<span>" + (v === "" ? '<em class="null">(empty)</em>' : esc(v)) + '</span><span class="c">' +
+          num(c) + "</span></div>";
+      }
+      out.push('<div class="top">' + rows + "</div>");
+    }
+    out.push(kv("length", s.count ? s.minLen + "-" + s.maxLen : "-"));
+  } else if (spec.kind === "nested") {
+    out.push(kv("empty", num(s.empties || 0)));
+    out.push(kv("length", s.count ? s.minLen + "-" + s.maxLen : "-"));
+    out.push(kv("avg length", s.count ? s.meanLen.toFixed(2) : "-"));
+  } else {
+    out.push(kv("size", s.count ? bytesHuman(s.minLen) + " - " + bytesHuman(s.maxLen) : "-"));
+    out.push(kv("avg size", s.count ? bytesHuman(Math.round(s.meanLen)) : "-"));
+  }
+  return '<div class="sum">' + out.join("") + "</div>";
+}
+
+function renderGrid() {
+  const table = state.table;
+  const grid = $("grid");
+  const cols = table.cols;
+  let html = "<colgroup><col style='width:62px'>";
+  for (let i = 0; i < cols.length; i++) html += "<col style='width:" + COL_W + "px'>";
+  html += "</colgroup><thead><tr class='r-name'><th class='rownum'>#</th>";
+  for (const c of cols) {
+    const title = c.leaf.path.join(".") + "  -  " + c.spec.label + " (" + c.spec.physical +
+      ", " + c.leaf.rep.toLowerCase() + ")";
+    html += "<th title='" + esc(title) + "'><span class='cname'>" + esc(c.name) +
+      "</span><span class='ctype t-" + c.spec.kind + "'>" + esc(c.spec.label) +
+      (c.leaf.rep === "OPTIONAL" && !c.spec.nested ? "?" : "") + "</span></th>";
+  }
+  html += "</tr><tr class='r-sum'><th class='rownum'></th>";
+  for (const c of cols) html += "<th>" + summaryCard(c) + "</th>";
+  html += "</tr></thead><tbody id='tbody'></tbody>";
+  grid.innerHTML = html;
+  $("gridwrap").hidden = false;
+  $("drop").hidden = true;
+  const nameRow = grid.querySelector("tr.r-name");
+  document.documentElement.style.setProperty("--nameh", nameRow.offsetHeight + "px");
+  state.first = -1;
+  renderRows(true);
+}
+
+function renderRows(force) {
+  const table = state.table;
+  if (!table) return;
+  const wrap = $("gridwrap"), body = $("tbody");
+  if (!body) return;
+  const head = wrap.querySelector("thead").offsetHeight;
+  const total = table.rowsLoaded;
+  const viewport = wrap.clientHeight;
+  const scroll = Math.max(0, wrap.scrollTop - head);
+  const visible = Math.ceil(viewport / ROW_H) + 12;
+  let first = Math.max(0, Math.floor(scroll / ROW_H) - 6);
+  if (first + visible > total) first = Math.max(0, total - visible);
+  if (!force && first === state.first) return;
+  state.first = first;
+  const last = Math.min(total, first + visible);
+  const cols = table.cols;
+  const span = cols.length + 1;
+  const parts = [];
+  if (first > 0) {
+    parts.push("<tr><td class='pad' colspan='" + span + "' style='height:" + first * ROW_H + "px'></td></tr>");
+  }
+  for (let r = first; r < last; r++) {
+    parts.push("<tr><td class='rownum'>" + (r + 1) + "</td>");
+    for (let ci = 0; ci < cols.length; ci++) {
+      const col = cols[ci];
+      const v = col.rows[r];
+      if (v === null || v === undefined) { parts.push("<td class='null'>null</td>"); continue; }
+      let text = fmtValue(v, col.spec);
+      if (text.length > 300) text = text.slice(0, 300) + "...";
+      parts.push("<td class='v-" + col.spec.kind + "' title='" + esc(text) + "'>" + esc(text) + "</td>");
+    }
+    parts.push("</tr>");
+  }
+  if (last < total) {
+    parts.push("<tr><td class='pad' colspan='" + span + "' style='height:" + (total - last) * ROW_H + "px'></td></tr>");
+  }
+  body.innerHTML = parts.join("");
+}
+
+/* ------------------------------------------------------------ metadata */
+function statValue(bytes, leaf, spec) {
+  if (!bytes || !bytes.length) return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let raw;
+  switch (leaf.type) {
+    case "BOOLEAN": raw = bytes[0] === 1; break;
+    case "INT32": raw = dv.getInt32(0, true); break;
+    case "INT64": {
+      const v = dv.getBigInt64(0, true);
+      raw = (v >= -9007199254740991n && v <= 9007199254740991n) ? Number(v) : v;
+      break;
+    }
+    case "FLOAT": raw = dv.getFloat32(0, true); break;
+    case "DOUBLE": raw = dv.getFloat64(0, true); break;
+    case "INT96": raw = { int96: true, nanos: dv.getBigUint64(0, true), julian: dv.getUint32(8, true) }; break;
+    default: raw = bytes;
+  }
+  try {
+    const elem = spec.nested ? Object.assign({}, spec, { kind: spec.elementKind }) : spec;
+    const t = fmtValue(spec.convert(raw), elem);
+    return t == null ? null : (t.length > 60 ? t.slice(0, 60) + "..." : t);
+  } catch (e) { return hex(bytes, 16); }
+}
+
+function schemaTree(meta) {
+  const lines = [];
+  const walk = (node, depth) => {
+    if (depth > 0) {
+      const bits = [];
+      bits.push(node.type ? node.type + (node.typeLength ? "(" + node.typeLength + ")" : "") : "group");
+      const lt = node.logical ? node.logical.name : node.converted;
+      if (lt) bits.push(lt.toLowerCase());
+      lines.push("  ".repeat(depth - 1) + "<span class='rp'>" + node.rep.toLowerCase().padEnd(8) +
+        "</span> <span class='nm'>" + esc(node.name) + "</span> <span class='ty'>" + esc(bits.join(" ")) + "</span>");
+    }
+    for (const c of node.children) walk(c, depth + 1);
+  };
+  walk(meta.schema.root, 0);
+  return "<div class='tree'>" + lines.join("\n") + "</div>";
+}
+
+function renderMeta() {
+  const meta = state.meta, table = state.table, src = state.src;
+  const leaves = meta.schema.leaves;
+  const agg = leaves.map(() => ({ comp: 0, uncomp: 0, values: 0, nulls: 0, statNulls: false,
+    enc: new Set(), codec: new Set() }));
+  let totalComp = 0, totalUncomp = 0;
+  for (const rg of meta.rowGroups) {
+    rg.columns.forEach((c, i) => {
+      if (!c.meta || i >= agg.length) return;
+      const a = agg[i];
+      a.comp += c.meta.totalCompressedSize;
+      a.uncomp += c.meta.totalUncompressedSize;
+      a.values += c.meta.numValues;
+      if (c.meta.statistics && c.meta.statistics.nullCount != null) {
+        a.nulls += c.meta.statistics.nullCount;
+        a.statNulls = true;
+      }
+      for (const e of c.meta.encodings) a.enc.add(e);
+      a.codec.add(c.meta.codec);
+      totalComp += c.meta.totalCompressedSize;
+      totalUncomp += c.meta.totalUncompressedSize;
+    });
+  }
+  const codecs = new Set(), encs = new Set();
+  for (const a of agg) { for (const c of a.codec) codecs.add(c); for (const e of a.enc) encs.add(e); }
+
+  $("mbar").innerHTML = [
+    "<span class='tag'>rows <b>" + num(meta.numRows) + "</b></span>",
+    table.truncated ? "<span class='tag'>read so far <b>" + num(table.rowsLoaded) +
+      "</b> rows &mdash; summaries cover these</span>" : "",
+    "<span class='tag'>columns <b>" + num(leaves.length) + "</b></span>",
+    "<span class='tag'>row groups <b>" + num(meta.rowGroups.length) + "</b></span>",
+    "<span class='tag'>file <b>" + bytesHuman(src.size) + "</b></span>",
+    "<span class='tag'>compression <b>" + esc([...codecs].join(", ") || "-") + "</b></span>",
+    "<span class='tag'>encryption <b>" + (meta.encryption ? esc(meta.encryption.algorithm) : "none") + "</b></span>",
+    "<span class='tag'>format <b>v" + (meta.version == null ? "?" : meta.version) + "</b></span>",
+    "<span class='muted'>" + esc(meta.createdBy || "unknown writer") + "</span>",
+  ].join("");
+
+  const cards = [];
+  const row = (k, v) => "<tr><td class='k'>" + k + "</td><td>" + v + "</td></tr>";
+  cards.push("<div class='mcard'><h3>file</h3><table class='kvt'>" + [
+    row("name", esc(src.name || "(dropped file)")),
+    row("size", bytesHuman(src.size) + " <span class='muted'>(" + num(src.size) + " B)</span>"),
+    row("rows", num(meta.numRows)),
+    row("columns", num(leaves.length) + " leaf <span class='muted'>/ " +
+      num(meta.schema.nodes.length - 1) + " schema nodes</span>"),
+    row("row groups", num(meta.rowGroups.length)),
+    row("format version", "v" + (meta.version == null ? "?" : meta.version)),
+    row("created by", esc(meta.createdBy || "-")),
+    row("footer size", bytesHuman(meta.footerLength)),
+    row("column data", bytesHuman(totalComp) + " <span class='muted'>from " + bytesHuman(totalUncomp) +
+      (totalUncomp ? ", " + (totalComp / totalUncomp * 100).toFixed(1) + "%" : "") + "</span>"),
+    row("compression", esc([...codecs].join(", ") || "-")),
+    row("encodings", esc([...encs].join(", ") || "-")),
+    row("encryption", meta.encryption ?
+      esc(meta.encryption.algorithm) + " <span class='muted'>(plaintext footer)</span>" : "none"),
+    row("loaded here", num(table.rowsLoaded) + " rows <span class='muted'>in " + num(table.groupsLoaded) +
+      " row group" + (table.groupsLoaded === 1 ? "" : "s") +
+      (table.truncated ? ", more available" : ", complete") + "</span>"),
+  ].join("") + "</table></div>");
+
+  cards.push("<div class='mcard'><h3>schema</h3>" + schemaTree(meta) + "</div>");
+
+  let rgRows = "";
+  meta.rowGroups.forEach((rg, i) => {
+    const off = rg.fileOffset != null ? rg.fileOffset
+      : (rg.columns[0] && rg.columns[0].meta ? rg.columns[0].meta.dataPageOffset : null);
+    rgRows += "<tr><td class='n'>" + i + "</td><td class='n'>" + num(rg.numRows) + "</td><td class='n'>" +
+      bytesHuman(rg.totalCompressedSize != null ? rg.totalCompressedSize : rg.totalByteSize) +
+      "</td><td class='n'>" + bytesHuman(rg.totalByteSize) + "</td><td class='n'>" + num(off) + "</td></tr>";
+  });
+  cards.push("<div class='mcard wide'><h3>row groups</h3><div class='scrollx'><table class='kvt'>" +
+    "<tr><th>#</th><th>rows</th><th>compressed</th><th>uncompressed</th><th>offset</th></tr>" +
+    rgRows + "</table></div></div>");
+
+  let colRows = "";
+  leaves.forEach((leaf, i) => {
+    const a = agg[i];
+    const spec = table.cols[i] ? table.cols[i].spec : typeSpec(leaf);
+    const first = meta.rowGroups[0] && meta.rowGroups[0].columns[i];
+    const st = first && first.meta ? first.meta.statistics : null;
+    const mn = st ? statValue(st.minValue || st.min, leaf, spec) : null;
+    const mx = st ? statValue(st.maxValue || st.max, leaf, spec) : null;
+    const path = leaf.path.join(".");
+    colRows += "<tr><td title='" + esc(path) + "'>" + esc(path) + "</td>" +
+      "<td>" + esc(leaf.type + (leaf.typeLength ? "(" + leaf.typeLength + ")" : "")) + "</td>" +
+      "<td>" + esc(spec.label) + "</td>" +
+      "<td>" + esc([...a.codec].join(",")) + "</td>" +
+      "<td title='" + esc([...a.enc].join(", ")) + "'>" + esc([...a.enc].join(", ")) + "</td>" +
+      "<td class='n'>" + num(a.values) + "</td>" +
+      "<td class='n'>" + (a.statNulls ? num(a.nulls) : "-") + "</td>" +
+      "<td class='n'>" + bytesHuman(a.comp) + "</td>" +
+      "<td class='n'>" + bytesHuman(a.uncomp) + "</td>" +
+      "<td class='n'>" + (a.uncomp ? (a.comp / a.uncomp * 100).toFixed(0) + "%" : "-") + "</td>" +
+      "<td title='" + esc(String(mn)) + "'>" + (mn == null ? "<span class='muted'>-</span>" : esc(mn)) + "</td>" +
+      "<td title='" + esc(String(mx)) + "'>" + (mx == null ? "<span class='muted'>-</span>" : esc(mx)) + "</td></tr>";
+  });
+  cards.push("<div class='mcard wide'><h3>columns <span class='muted'>&middot; sizes summed over every row group, " +
+    "min/max from the first row group's statistics</span></h3><div class='scrollx'><table class='kvt'>" +
+    "<tr><th>path</th><th>physical</th><th>logical</th><th>codec</th><th>encodings</th><th>values</th>" +
+    "<th>nulls</th><th>compressed</th><th>uncompressed</th><th>ratio</th><th>min</th><th>max</th></tr>" +
+    colRows + "</table></div></div>");
+
+  let pg = "";
+  const seen = new Set();
+  meta.rowGroups.forEach((rg) => rg.columns.forEach((c, i) => {
+    if (!c.meta) return;
+    for (const s of c.meta.encodingStats) {
+      const name = leaves[i] ? leaves[i].path.join(".") : String(i);
+      const key = name + "|" + s.pageType + "|" + s.encoding;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pg += "<tr><td>" + esc(name) + "</td><td>" + esc(s.pageType) + "</td><td>" + esc(s.encoding) + "</td></tr>";
+    }
+  }));
+  if (pg) {
+    cards.push("<div class='mcard'><h3>page encodings</h3><details><summary>per column and page type</summary>" +
+      "<table class='kvt'><tr><th>column</th><th>page</th><th>encoding</th></tr>" + pg + "</table></details></div>");
+  }
+
+  if (meta.keyValue.length) {
+    let kvRows = "";
+    for (const kv of meta.keyValue) {
+      const v = kv.value == null ? "" : kv.value;
+      kvRows += "<tr><td class='k' title='" + esc(kv.key) + "'>" + esc(kv.key) + "</td><td title='" +
+        esc(v.slice(0, 2000)) + "'>" + esc(v.length > 160 ? v.slice(0, 160) + "..." : v) +
+        " <span class='muted'>(" + num(v.length) + " chars)</span></td></tr>";
+    }
+    cards.push("<div class='mcard wide'><h3>key/value metadata</h3><div class='scrollx'><table class='kvt'>" +
+      kvRows + "</table></div></div>");
+  }
+  $("mbody").innerHTML = cards.join("");
+  $("meta").hidden = false;
+}
+
+/* ======================================================================
+   Wiring
+   ====================================================================== */
+function showError(e) {
+  const old = $("err");
+  if (old) old.remove();
+  const box = document.createElement("div");
+  box.id = "err";
+  box.textContent = (e && e.message) ? e.message : String(e);
+  $("stage").prepend(box);
+  if (e && e.stack) console.error(e);
+}
+function busy(on, text) {
+  const b = $("busy");
+  b.hidden = !on;
+  if (text) b.textContent = text;
+}
+const FIRST_ROWS = 20000;
+
+async function openFile(file) {
+  const old = $("err");
+  if (old) old.remove();
+  busy(true, "reading footer...");
+  $("fileline").innerHTML = "<b>" + esc(file.name) + "</b> &middot; " + bytesHuman(file.size);
+  try {
+    const src = fileSource(file);
+    const meta = await readFooter(src);
+    const table = newTable(meta);
+    state.src = src; state.meta = meta; state.table = table;
+    busy(true, "decoding " + num(Math.min(meta.numRows, FIRST_ROWS)) + " rows...");
+    await new Promise((r) => setTimeout(r, 0));
+    await loadMore(src, table, FIRST_ROWS);
+    renderGrid();
+    renderMeta();
+    updateButtons();
+    $("fileline").innerHTML = "<b>" + esc(file.name) + "</b> &middot; " + bytesHuman(file.size) + " &middot; " +
+      num(meta.numRows) + " rows x " + num(meta.schema.leaves.length) + " cols &middot; " +
+      num(meta.rowGroups.length) + " row group" + (meta.rowGroups.length === 1 ? "" : "s");
+  } catch (e) {
+    $("gridwrap").hidden = true;
+    $("drop").hidden = false;
+    $("meta").hidden = true;
+    $("more").hidden = true;
+    $("all").hidden = true;
+    $("toggleMeta").hidden = true;
+    showError(e);
+  } finally {
+    busy(false);
+  }
+}
+
+function updateButtons() {
+  const t = state.table;
+  const can = !!(t && t.truncated);
+  $("more").hidden = !can;
+  $("all").hidden = !can;
+  $("toggleMeta").hidden = !t;
+  if (can) {
+    const left = t.meta.numRows - t.rowsLoaded;
+    let next = 0;
+    for (let g = t.nextGroup; g < t.meta.rowGroups.length && next < FIRST_ROWS; g++) {
+      next += t.meta.rowGroups[g].numRows;
+    }
+    $("more").textContent = "Load " + num(next) + " more";
+    $("all").textContent = "Load all " + num(left);
+  }
+}
+async function grow(n) {
+  busy(true, "decoding...");
+  await new Promise((r) => setTimeout(r, 0));
+  try {
+    await loadMore(state.src, state.table, n);
+    renderGrid();
+    renderMeta();
+    updateButtons();
+  } catch (e) { showError(e); } finally { busy(false); }
+}
+
+function init() {
+  $("picker").addEventListener("change", (e) => { if (e.target.files[0]) openFile(e.target.files[0]); });
+  $("more").addEventListener("click", () => grow(FIRST_ROWS));
+  $("all").addEventListener("click", () => grow(Infinity));
+  $("toggleMeta").addEventListener("click", () => {
+    const m = $("meta");
+    m.classList.toggle("collapsed");
+    $("toggleMeta").textContent = m.classList.contains("collapsed") ? "Show metadata" : "Hide metadata";
+  });
+  let raf = 0;
+  $("gridwrap").addEventListener("scroll", () => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => { raf = 0; renderRows(false); });
+  });
+  window.addEventListener("resize", () => renderRows(true));
+  const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+  document.addEventListener("dragover", (e) => { stop(e); document.body.classList.add("dragging"); });
+  document.addEventListener("dragleave", (e) => { if (e.relatedTarget === null) document.body.classList.remove("dragging"); });
+  document.addEventListener("drop", (e) => {
+    stop(e);
+    document.body.classList.remove("dragging");
+    const f = e.dataTransfer.files[0];
+    if (f) openFile(f);
+  });
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+else init();
+
+/* exposed so this file can be driven from a test harness */
+window.PARIS = { readFooter, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
+  zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
+</script>
+</body>
+</html>

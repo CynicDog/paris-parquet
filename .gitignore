@@ -1,0 +1,4 @@
+# fixtures are generated: python3 tools/fixtures.py /tmp/fx
+*.parquet
+*.expect.json
+node_modules/
