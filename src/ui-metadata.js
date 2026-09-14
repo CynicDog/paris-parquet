@@ -54,9 +54,18 @@ export function datasetName(dataset) {
   const cut = first.indexOf("/");
   return cut > 0 ? first.slice(0, cut) + "/" : first;
 }
+/** A joined table has no single footer to describe -- render what it
+    actually is instead of faking one. */
+function renderJoinedMeta(table) {
+  $("mbar").innerHTML = "<span class='tag'>rows <b>" + num(table.rowsLoaded) + "</b></span>" +
+    "<span class='tag'>columns <b>" + num(table.cols.length) + "</b></span>";
+  $("mbody").innerHTML = "<div class='mcard wide'><h3>joined</h3>" +
+    "<div class='dnote'>" + esc(table.joined) + "</div></div>";
+}
 export function renderMeta() {
   const meta = state.meta, table = state.table, src = state.src;
   const dataset = state.dataset;
+  if (table.joined) { renderJoinedMeta(table); return; }
   const leaves = meta.schema.leaves;
   const agg = leaves.map(() => ({ comp: 0, uncomp: 0, values: 0, nulls: 0, statNulls: false,
     enc: new Set(), codec: new Set() }));

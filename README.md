@@ -101,6 +101,23 @@ a sibling without a picker dialog each time.
   changed cells (`old → new`).
 - **swap** flips which file is "open" without re-reading either.
 
+**Join** combines two files into one table on a key — the opened file plus a
+second one you pick, similar to Diff's "choose file B".
+- Inner join on a single equality key, one column per side (they don't need
+  the same name — `region` on one side to `name` on the other is normal).
+  One join at a time; the result replaces the open table, and **Undo**
+  restores the original file exactly, footer metadata included.
+- The smaller file (by row count) is always read fully and hashed; the
+  larger one has its row groups narrowed to the smaller side's key range
+  first, the same pushdown (`clauseCanMatch`/the page index) `Scan file`
+  already uses for a `WHERE` clause — a join against a small lookup table
+  doesn't require reading the whole of the larger file.
+- Once run, the result is an ordinary table: `SELECT`/`WHERE`/`GROUP BY`,
+  rollup/pivot/cube, sort, export all work over it exactly as they would
+  over any opened file, since that's genuinely what it becomes. A column
+  name that collides between the two sides is prefixed (`b_name`) rather
+  than silently overwritten.
+
 **Cell inspector**
 - Click any cell for the full value: string + length, hex/ASCII dump for
   binary, indented JSON for lists/structs/maps.
@@ -131,11 +148,6 @@ resolution.
 
 ## Coming soon
 
-- **Join across multiple parquet files** ([#13](https://github.com/CynicDog/paris-parquet/issues/13))
-  — bring in a second file and query across both on a key, rather than only
-  diffing them. Needs the same pushdown discipline `Scan file` already has
-  for one file: build a hash on the smaller side, push its keys into the
-  larger side's row-group/page skipping, prune columns on both sides.
 - **A memory budget for large files and joins** ([#16](https://github.com/CynicDog/paris-parquet/issues/16))
   — grouping and, eventually, a join's hash table have no size ceiling
   today. Spilling the largest/coldest partition to OPFS (or IndexedDB where
@@ -204,6 +216,7 @@ node tools/browser-push.mjs /tmp/fx/push      # drive the scan, and time it
 node tools/browser-lazy.mjs /tmp/fx/wide.parquet   # only decode what is wanted
 node tools/browser-workers.mjs /tmp/fx/*.parquet   # the other cores agree, cell for cell
 node tools/browser-tree.mjs /tmp/fx/push      # drive the folder tree, both backends, count requests
+node tools/browser-join.mjs                   # drive a join, check pushdown narrowed it, and undo
 ```
 
 - `check.mjs` pulls the `<script>` out of `index.html` and runs it against a

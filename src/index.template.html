@@ -306,6 +306,17 @@ table.dr td.ky{color:var(--accent)}
 .dtally .tag,.bycol .tag{border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--ink)}
 .dtally .tag b,.bycol .tag b{font-weight:600}
 .chips{padding:3px 0 5px}
+
+/* ---------- join ---------- */
+#joinwrap{flex:1;overflow:auto;min-height:0;background:var(--panel)}
+#joinbar{display:flex;align-items:center;gap:9px;padding:6px 14px;border-bottom:1px solid var(--line2);
+  position:sticky;top:0;background:var(--panel);z-index:3;font:11px var(--mono);color:var(--dim);flex-wrap:wrap}
+#joinbar .btn,#joinbar button{padding:1px 8px;font-size:11px}
+#joinbody{padding:10px 14px 18px}
+.jkeys{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font:11px var(--mono);color:var(--dim);padding:6px 0}
+.jkeys select{font:11px var(--mono);background:var(--panel);color:var(--ink);border:1px solid var(--line);
+  border-radius:4px;padding:2px 5px;max-width:220px}
+.jresult{border:1px solid var(--line);border-radius:5px;padding:8px 10px;margin-top:10px;font:11px/1.6 var(--mono)}
 .chip{font:11px var(--mono);border:1px solid var(--line);background:var(--panel);color:var(--dim);
   border-radius:10px;padding:1px 9px;cursor:pointer}
 .chip.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
@@ -371,11 +382,14 @@ details[open]>summary::before{content:"▾ "}
   <input type="file" id="dirpicker" webkitdirectory directory>
   <input type="file" id="bpicker" accept=".parquet,.pq,application/octet-stream" multiple>
   <input type="file" id="bdirpicker" webkitdirectory directory>
+  <input type="file" id="jpicker" accept=".parquet,.pq,application/octet-stream" multiple>
+  <input type="file" id="jdirpicker" webkitdirectory directory>
   <div id="fileline"></div>
   <div class="grow"></div>
   <button id="more" hidden>Load more rows</button>
   <button id="all" hidden>Load all</button>
   <button id="toggleDiff" hidden title="Compare this file with another one">Diff</button>
+  <button id="toggleJoin" hidden title="Join this file with another one on a key">Join</button>
   <button id="toggleCols" hidden>Columns</button>
   <button id="toggleQuery" hidden>Query</button>
   <button id="toggleMeta" hidden>Hide metadata</button>
@@ -390,6 +404,10 @@ details[open]>summary::before{content:"▾ "}
       Nothing leaves your machine.</div>
   </div>
   <div id="gridwrap" hidden><table class="grid" id="grid"></table></div>
+  <div id="joinwrap" hidden>
+    <div id="joinbar"></div>
+    <div id="joinbody"></div>
+  </div>
   <div id="diffwrap" hidden>
     <div id="diffbar"></div>
     <div id="diffbody"></div>

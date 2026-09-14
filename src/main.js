@@ -2,6 +2,7 @@ import { decompress, gzipDecompress, lz4BlockDecompress, snappyDecompress, zstdD
 import { $, fillColumns, groupsLeft, loadMore, readColumnRows, rowsAhead, unfilled } from "./columns.js";
 import { fileSource, hivePartition, isParquetPath, newTable, readDataset } from "./dataset.js";
 import { cellEq, cellKey, colShape, columnStats, datasetShape, diff, initDiff, openCompare, renderDiff, rowDiff, schemaDiff, suggestKey } from "./diff.js";
+import { initJoin, join } from "./join.js";
 import { assemble, intersectRanges, mergeRanges, rangeCount, readColumnChunk, readColumnIndex, readOffsetIndex, readPage, readRowsRanges, unionRanges } from "./encoding.js";
 import { bloomBytes, bloomHas, chunkBounds, clauseCanMatch, clauseGroups, clauseRanges, planReport, planScan, readBloom, showPlan, xxh64 } from "./pushdown.js";
 import { aggregate, compileFilter, newQuery, parseSql, querySql, runQuery, sqlTokenize, toggleSort } from "./query.js";
@@ -192,6 +193,10 @@ export async function openEntries(entries, label) {
     $("toggleDiff").textContent = "Diff";
     $("diffwrap").hidden = true;
     diff.on = false;
+    $("toggleJoin").hidden = true;
+    $("toggleJoin").textContent = "Join";
+    $("joinwrap").hidden = true;
+    join.on = false;
     $("colpick").hidden = true;
     $("toggleMeta").hidden = true;
     showError(e);
@@ -214,6 +219,7 @@ export function updateButtons() {
   $("toggleQuery").hidden = !t;
   $("toggleCols").hidden = !t;
   $("toggleDiff").hidden = !t;
+  $("toggleJoin").hidden = !t;
   if (t && $("toggleQuery").textContent === "Query" && $("query").hidden) {
     $("query").hidden = false;
     $("qgrip").hidden = false;
@@ -243,6 +249,7 @@ export function init() {
   initQuery();
   initPicker();
   initDiff();
+  initJoin();
   initTree();
   $("theme").addEventListener("click", () => {
     applyTheme(THEMES[(THEMES.indexOf($("theme").textContent) + 1) % THEMES.length]);

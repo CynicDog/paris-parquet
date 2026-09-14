@@ -1,5 +1,6 @@
 import { $, fillColumns, loadMore } from "./columns.js";
 import { newTable, readDataset } from "./dataset.js";
+import { join, showJoin } from "./join.js";
 import { FIRST_ROWS, adoptDataset, busy, entriesFromFiles, showError, updateButtons } from "./main.js";
 import { beBigInt, fmtValue, jsonish } from "./types.js";
 import { refreshView } from "./ui-grid.js";
@@ -538,6 +539,7 @@ export function renderDiff() {
 }
 
 export function showDiff(on) {
+  if (on && join.on) showJoin(false);
   diff.on = on;
   $("diffwrap").hidden = !on;
   $("gridwrap").hidden = on || !state.view;
