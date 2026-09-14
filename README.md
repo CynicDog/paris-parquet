@@ -45,6 +45,11 @@ beside the zones and can be copied, but it is a record of the query, not how it
 runs: the engine executes over the columns already decoded in memory. Results
 replace the grid, and the summary cards above recompute over them.
 
+**Columns** in the header opens a picker: search by name or type, hide what you
+do not need, pin a column so it stays at the left edge while you scroll
+sideways, and drag to reorder. Hiding is a display choice only — a hidden
+column stays decoded and can still be filtered, grouped and sorted on.
+
 Click any cell to open it in full: the whole string with its length, a hex and
 ASCII dump for binary, indented JSON for lists, structs and maps, alongside the
 column's full path and type. Escape closes it.

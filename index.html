@@ -134,6 +134,28 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
   word-break:break-word;color:var(--ink)}
 .ibody.null{color:var(--faint);font-style:italic}
 
+/* ---------- column picker ---------- */
+#colpick{position:fixed;z-index:41;width:318px;max-height:70vh;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.18)}
+#cphead .muted{font-size:10px}
+#cphead button{padding:0 6px;font-size:10.5px;line-height:18px;min-width:0}
+.cpsearchwrap{padding:6px 8px;border-bottom:1px solid var(--line2)}
+#cpsearch{width:100%;font:11px var(--mono);background:var(--bg);color:var(--ink);
+  border:1px solid var(--line);border-radius:4px;padding:3px 6px}
+.cplist{overflow:auto;padding:2px 0}
+.cprow{display:flex;align-items:center;gap:6px;padding:2px 8px;font:11px var(--mono);cursor:grab;
+  border-top:1px solid transparent;border-bottom:1px solid transparent}
+.cprow:hover{background:var(--accent-soft)}
+.cprow.pinned{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.cprow.dropbefore{border-top-color:var(--accent)}
+.cprow.dropafter{border-bottom-color:var(--accent)}
+.cprow input[type=checkbox]{accent-color:var(--accent);margin:0}
+.cpname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.cpname.off{color:var(--faint);text-decoration:line-through}
+.cppin{font-size:9.5px;padding:0 5px;border:1px solid var(--line);border-radius:3px;background:var(--panel);
+  color:var(--faint);min-width:0;line-height:15px}
+.cppin.on{background:var(--accent);border-color:var(--accent);color:#fff}
+
 /* ---------- query builder ---------- */
 #query{flex:none;height:var(--queryh,258px);display:flex;flex-direction:column;overflow:hidden;
   border-top:1px solid var(--line);background:var(--panel)}
@@ -234,6 +256,7 @@ details[open]>summary::before{content:"▾ "}
   <div class="grow"></div>
   <button id="more" hidden>Load more rows</button>
   <button id="all" hidden>Load all</button>
+  <button id="toggleCols" hidden>Columns</button>
   <button id="toggleQuery" hidden>Query</button>
   <button id="toggleMeta" hidden>Hide metadata</button>
   <button id="theme" title="Colour theme: follow the browser, or force light or dark">auto</button>
@@ -251,6 +274,11 @@ details[open]>summary::before{content:"▾ "}
 </div>
 
 <div id="inspect" hidden></div>
+<div id="colpick" hidden>
+  <div class="ihead" id="cphead"></div>
+  <div class="cpsearchwrap"><input id="cpsearch" placeholder="search name or type"></div>
+  <div class="cplist" id="cplist"></div>
+</div>
 <div id="qgrip" hidden title="Drag to resize the query panel"></div>
 <section id="query" hidden>
   <div class="qbar">
@@ -1884,8 +1912,34 @@ const state = { src: null, meta: null, table: null, view: null, page: 0, pageSiz
  * The unfiltered table is a view with no index, so nothing is copied until a
  * query actually reshapes the data.
  */
+/**
+ * Which of the table's columns the grid shows, in what order. Pinned columns
+ * float to the front and stick to the left edge; hidden ones drop out. This is
+ * a display concern only — every column stays decoded and queryable.
+ */
+function newDisplay(cols) {
+  return { order: cols.map((c, i) => i), hidden: new Set(), pinned: new Set() };
+}
+function displayOrder() {
+  const d = state.display;
+  if (!d) return null;
+  const pinned = d.order.filter((ci) => d.pinned.has(ci));
+  const rest = d.order.filter((ci) => !d.pinned.has(ci));
+  return pinned.concat(rest).filter((ci) => !d.hidden.has(ci));
+}
+function displayCols(cols) {
+  const order = displayOrder();
+  if (!order) return cols;
+  const out = [];
+  for (const ci of order) if (cols[ci]) out.push(cols[ci]);
+  return out.length ? out : cols;
+}
+function pinnedCount() {
+  const d = state.display;
+  return d ? d.order.filter((ci) => d.pinned.has(ci) && !d.hidden.has(ci)).length : 0;
+}
 function baseView(table) {
-  return { cols: table.cols, index: null, count: table.rowsLoaded, label: null, agg: false };
+  return { cols: displayCols(table.cols), index: null, count: table.rowsLoaded, label: null, agg: false };
 }
 function viewValue(view, ci, row) {
   const rows = view.cols[ci].rows;
@@ -2137,10 +2191,11 @@ function renderGrid() {
   if (!view) return;
   const grid = $("grid");
   const cols = view.cols;
-  const widths = state.table.widths;
-  if (!widths || widths.length !== cols.length) state.table.widths = cols.map(() => COL_W);
   let html = "<colgroup><col style='width:62px'>";
-  for (let i = 0; i < cols.length; i++) html += "<col style='width:" + state.table.widths[i] + "px'>";
+  for (let i = 0; i < cols.length; i++) {
+    if (!cols[i].width) cols[i].width = COL_W;
+    html += "<col style='width:" + cols[i].width + "px'>";
+  }
   html += "</colgroup><thead><tr class='r-name'><th class='rownum'>#</th>";
   for (let i = 0; i < cols.length; i++) {
     const c = cols[i];
@@ -2161,12 +2216,22 @@ function renderGrid() {
      so a body cell can be a bare <td> - at 40 columns that is the difference
      between a smooth scroll and a stuttering one. */
   let css = "";
+  const pins = pinnedCount();
+  let pinLeft = 62;                                   /* past the row-number column */
   for (let i = 0; i < cols.length; i++) {
     const kind = cols[i].spec.kind;
     const nth = "#grid td:nth-child(" + (i + 2) + ")";
     if (kind === "number") css += nth + "{text-align:right}";
     else if (kind === "bool") css += nth + "{color:var(--bool)}";
     else if (kind === "binary" || kind === "nested") css += nth + "{color:var(--dim)}";
+    if (i < pins) {
+      const n = i + 2;
+      css += "#grid tbody td:nth-child(" + n + "){position:sticky;left:" + pinLeft + "px;z-index:2}";
+      css += "#grid thead th:nth-child(" + n + "){left:" + pinLeft + "px;z-index:5}";
+      css += "#grid tbody td:nth-child(" + n + "),#grid thead th:nth-child(" + n +
+        "){border-right:1px solid var(--line)}";
+      pinLeft += cols[i].width || COL_W;
+    }
   }
   $("colstyle").textContent = css;
 
@@ -2233,6 +2298,117 @@ function renderRows(force) {
   }
   body.innerHTML = parts.join("");
   if (state.inspectAt) closeInspector();
+}
+
+/* -------------------------------------------------------- column picker */
+function refreshView(keepPage) {
+  const page = state.page;
+  if (state.query && state.query.active) runQuery();
+  else setView(baseView(state.table));
+  if (keepPage) { state.page = page; state.first = -1; renderRows(true); renderPager(); }
+}
+function renderPicker() {
+  const table = state.table, d = state.display;
+  if (!table || !d) return;
+  const needle = ($("cpsearch") ? $("cpsearch").value : "").trim().toLowerCase();
+  const order = d.order.filter((ci) => d.pinned.has(ci)).concat(d.order.filter((ci) => !d.pinned.has(ci)));
+  let rows = "";
+  for (const ci of order) {
+    const c = table.cols[ci];
+    if (!c) continue;
+    if (needle && c.name.toLowerCase().indexOf(needle) < 0 && c.spec.label.toLowerCase().indexOf(needle) < 0) continue;
+    const shown = !d.hidden.has(ci), pinned = d.pinned.has(ci);
+    rows += "<div class='cprow" + (pinned ? " pinned" : "") + "' draggable='true' data-ci='" + ci + "'>" +
+      "<span class='qgrab'>∷</span>" +
+      "<input type='checkbox' data-act='cpshow' data-ci='" + ci + "'" + (shown ? " checked" : "") + ">" +
+      "<span class='cpname" + (shown ? "" : " off") + "' title='" + esc(c.name) + "'>" + esc(c.name) + "</span>" +
+      "<span class='qtag t-" + c.spec.kind + "'>" + typeTag(c.spec) + "</span>" +
+      "<button class='cppin" + (pinned ? " on" : "") + "' data-act='cppin' data-ci='" + ci +
+      "' title='" + (pinned ? "Unpin" : "Pin to the left") + "'>pin</button></div>";
+  }
+  const hidden = d.hidden.size;
+  $("cphead").innerHTML = "<b>" + num(table.cols.length - hidden) + " of " + num(table.cols.length) +
+    " columns</b><span class='grow'></span>" +
+    "<button data-act='cpall' title='Show every column'>all</button>" +
+    "<button data-act='cponly' title='Hide all but the first'>none</button>" +
+    "<button data-act='cpclose'>×</button>";
+  $("cplist").innerHTML = rows || "<div class='qhint' style='padding:8px'>no column matches</div>";
+}
+function togglePicker(show) {
+  const el = $("colpick");
+  const open = show === undefined ? el.hidden : show;
+  el.hidden = !open;
+  if (!open) return;
+  renderPicker();
+  const box = $("toggleCols").getBoundingClientRect();
+  el.style.top = box.bottom + 4 + "px";
+  el.style.left = Math.max(8, Math.min(box.left, window.innerWidth - el.offsetWidth - 8)) + "px";
+  $("cpsearch").focus();
+}
+function initPicker() {
+  $("toggleCols").addEventListener("click", () => togglePicker());
+  $("cpsearch").addEventListener("input", renderPicker);
+  const act = (e) => {
+    const el = e.target.closest("[data-act]");
+    if (!el) return;
+    const d = state.display, ci = +el.dataset.ci;
+    switch (el.dataset.act) {
+      case "cpshow": if (d.hidden.has(ci)) d.hidden.delete(ci); else d.hidden.add(ci); break;
+      case "cppin": if (d.pinned.has(ci)) d.pinned.delete(ci); else d.pinned.add(ci); break;
+      case "cpall": d.hidden.clear(); break;
+      case "cponly": {
+        /* leaving everything hidden would be a blank grid, so keep the first */
+        d.hidden = new Set(state.table.cols.map((c, i) => i).filter((i) => i !== displayOrder()[0]));
+        break;
+      }
+      case "cpclose": togglePicker(false); return;
+      default: return;
+    }
+    renderPicker();
+    refreshView(true);
+  };
+  $("cphead").addEventListener("click", act);
+  $("cplist").addEventListener("click", act);
+  $("cplist").addEventListener("change", act);
+  let dragging = null;
+  $("cplist").addEventListener("dragstart", (e) => {
+    const row = e.target.closest(".cprow");
+    if (!row) return;
+    dragging = +row.dataset.ci;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(dragging));
+  });
+  $("cplist").addEventListener("dragover", (e) => {
+    const row = e.target.closest(".cprow");
+    if (!row || dragging === null) return;
+    e.preventDefault();
+    for (const r of $("cplist").children) r.classList.remove("dropafter", "dropbefore");
+    const box = row.getBoundingClientRect();
+    row.classList.add(e.clientY > box.top + box.height / 2 ? "dropafter" : "dropbefore");
+  });
+  $("cplist").addEventListener("drop", (e) => {
+    const row = e.target.closest(".cprow");
+    if (!row || dragging === null) return;
+    e.preventDefault();
+    const target = +row.dataset.ci;
+    const after = e.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2;
+    const d = state.display;
+    d.order = d.order.filter((ci) => ci !== dragging);
+    const at = d.order.indexOf(target);
+    d.order.splice(at < 0 ? d.order.length : at + (after ? 1 : 0), 0, dragging);
+    dragging = null;
+    renderPicker();
+    refreshView(true);
+  });
+  $("cplist").addEventListener("dragend", () => {
+    dragging = null;
+    for (const r of $("cplist").children) r.classList.remove("dropafter", "dropbefore");
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (!$("colpick").hidden && !e.target.closest("#colpick") && !e.target.closest("#toggleCols")) {
+      togglePicker(false);
+    }
+  }, true);
 }
 
 /* ------------------------------------------------------- cell inspector */
@@ -2776,7 +2952,7 @@ function runQuery() {
     if (q.limit != null && q.limit < count) { count = q.limit; for (const c of outCols) c.rows.length = count; }
     view = { cols: outCols, index: null, count, agg: true, label: "grouped" };
   } else {
-    const outCols = q.select.length ? q.select.map((ci) => cols[ci]).filter(Boolean) : cols;
+    const outCols = q.select.length ? q.select.map((ci) => cols[ci]).filter(Boolean) : displayCols(cols);
     if (q.sort.length) {
       if (!index) { index = new Int32Array(n); for (let i = 0; i < n; i++) index[i] = i; }
       index.sort(buildComparator(q.sort, cols));
@@ -3170,10 +3346,10 @@ function queryHeight(px) {
    ====================================================================== */
 /* ---------------------------------------------------------- resizing */
 function columnWidth(index, px) {
-  const table = state.table;
-  if (!table.widths) return;
+  const view = state.view;
+  if (!view || !view.cols[index]) return;
   const w = Math.max(56, Math.round(px));
-  table.widths[index] = w;
+  view.cols[index].width = w;
   const col = $("grid").querySelectorAll("colgroup col")[index + 1];   /* +1: row numbers */
   if (col) col.style.width = w + "px";
 }
@@ -3240,6 +3416,7 @@ async function openFile(file) {
     const meta = await readFooter(src);
     const table = newTable(meta);
     state.src = src; state.meta = meta; state.table = table;
+    state.display = newDisplay(table.cols);
     busy(true, "decoding " + num(Math.min(meta.numRows, FIRST_ROWS)) + " rows...");
     await new Promise((r) => setTimeout(r, 0));
     await loadMore(src, table, FIRST_ROWS);
@@ -3264,6 +3441,8 @@ async function openFile(file) {
     $("mgrip").hidden = true;
     $("more").hidden = true;
     $("all").hidden = true;
+    $("toggleCols").hidden = true;
+    $("colpick").hidden = true;
     $("toggleMeta").hidden = true;
     showError(e);
     /* the footer usually parses even when a page does not, and it is the part
@@ -3283,6 +3462,7 @@ function updateButtons() {
   $("all").hidden = !can;
   $("toggleMeta").hidden = !t;
   $("toggleQuery").hidden = !t;
+  $("toggleCols").hidden = !t;
   if (t && $("toggleQuery").textContent === "Query" && $("query").hidden) {
     $("query").hidden = false;
     $("qgrip").hidden = false;
@@ -3312,6 +3492,7 @@ async function grow(n) {
 function init() {
   applyTheme(storedTheme());
   initQuery();
+  initPicker();
   $("theme").addEventListener("click", () => {
     applyTheme(THEMES[(THEMES.indexOf($("theme").textContent) + 1) % THEMES.length]);
   });
@@ -3349,7 +3530,7 @@ function init() {
     const grip = e.target.closest("i.grip");
     if (!grip) return;
     const index = +grip.dataset.col;
-    const startX = e.clientX, startW = state.table.widths[index];
+    const startX = e.clientX, startW = state.view.cols[index].width || COL_W;
     drag(e, "colsizing", (ev) => {
       state.justResized = true;
       columnWidth(index, startW + ev.clientX - startX);
@@ -3407,6 +3588,7 @@ else init();
 /* exposed so this file can be driven from a test harness */
 window.PARIS = { readFooter, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
   runQuery, querySql, baseView, setView, compileFilter, aggregate, exportParts, viewValue,
+  displayCols, newDisplay, refreshView,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
 </script>
 </body>
