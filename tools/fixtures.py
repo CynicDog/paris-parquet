@@ -235,7 +235,24 @@ def pushdown(root):
     pq.write_table(pa.table({"id": pa.array(range(n), pa.int64()),
                              "maybe": pa.array(col, pa.int64())}),
                    root + "/nulls.parquet", compression="snappy", row_group_size=rg)
-    print("%-28s sorted, shuffled+bloom, nostats, nulls" % "push/")
+    # a page index, with row groups big enough and pages small enough that
+    # narrowing within a row group is worth something
+    pq.write_table(t, root + "/pages.parquet", compression="snappy", row_group_size=100000,
+                   data_page_size=16384, write_page_index=True)
+
+    # the same, as v2 data pages, with a nullable column and a list column
+    # whose pages the index cannot be trusted to split on rows
+    half = n // 2
+    v2 = pa.table({
+        "id": pa.array(range(n), pa.int64()),
+        "maybe": pa.array([None if i % 3 == 0 else i for i in range(n)], pa.int64()),
+        "sku": pa.array(["sku-%06d" % i for i in range(n)]),
+        "tags": pa.array([[str(i % 5)] * (i % 3) for i in range(n)], pa.list_(pa.string())),
+    })
+    pq.write_table(v2, root + "/pages_v2.parquet", compression="zstd", row_group_size=half,
+                   data_page_size=16384, write_page_index=True, data_page_version="2.0")
+
+    print("%-28s sorted, shuffled+bloom, nostats, nulls, pages, pages_v2" % "push/")
 
 
 def main(out):

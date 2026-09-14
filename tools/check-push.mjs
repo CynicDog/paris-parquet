@@ -167,6 +167,71 @@ await both(sorted, "sorted: amt >= 249 (every group holds the full range)",
   (q, ci) => { q.filters = [{ id: "a", ci: ci("amt"), pred: "ge", value: "249", linker: "AND" }]; },
   (p) => (p.kept !== p.total ? `kept ${p.kept} of ${p.total}, expected all of them` : null));
 
+/* ------------------------------------- the page index, inside a row group */
+const pages = path.join(dir, "pages.parquet");
+{
+  const f = await open(pages);
+  const c0 = f.dataset.parts[0].meta.rowGroups[0].columns[0];
+  const locs = await PARIS.readOffsetIndex(f.dataset.parts[0].src, c0);
+  if (!locs) console.log("skip page index checks — this pyarrow did not write one");
+  else ok(`page index: ${locs.length} pages in the first row group of ${f.dataset.parts[0].meta.rowGroups.length}`);
+}
+await both(pages, "pages: id BETWEEN 100 AND 200",
+  (q, ci) => { q.filters = [{ id: "a", ci: ci("id"), pred: "between", value: "100", valueTo: "200", linker: "AND" }]; },
+  (p) => (p.rows > 20000 ? `read ${p.rows} rows; the page index should have cut that far further` : null));
+await both(pages, "pages: id = 150000",
+  (q, ci) => { q.filters = [{ id: "a", ci: ci("id"), pred: "eq", value: "150000", linker: "AND" }]; },
+  (p) => (p.kept !== 1 || p.rows > 20000 ? `kept ${p.kept} groups and ${p.rows} rows for one id` : null));
+await both(pages, "pages: id < 50 OR id > 199950",
+  (q, ci) => {
+    q.filters = [
+      { id: "a", ci: ci("id"), pred: "lt", value: "50", linker: "AND" },
+      { id: "b", ci: ci("id"), pred: "gt", value: "199950", linker: "OR" },
+    ];
+  },
+  (p) => (p.rows > 30000 ? `read ${p.rows} rows for two ends of the file` : null));
+await both(pages, "pages: id > 90000 AND id < 110000 (across the row group edge)",
+  (q, ci) => {
+    q.filters = [
+      { id: "a", ci: ci("id"), pred: "gt", value: "90000", linker: "AND" },
+      { id: "b", ci: ci("id"), pred: "lt", value: "110000", linker: "AND" },
+    ];
+  },
+  (p) => (p.kept !== 2 || p.rows > 60000 ? `kept ${p.kept} groups and ${p.rows} rows` : null));
+/* two columns whose pages do not line up: the rows they agree on are what
+   every column has to come back with */
+await both(pages, "pages: id > 40000 AND sku < 'sku-045000'",
+  (q, ci) => {
+    q.filters = [
+      { id: "a", ci: ci("id"), pred: "gt", value: "40000", linker: "AND" },
+      { id: "b", ci: ci("sku"), pred: "lt", value: "sku-045000", linker: "AND" },
+    ];
+  },
+  (p) => (p.rows > 40000 ? `read ${p.rows} rows where two columns overlap on 5,000` : null));
+await both(pages, "pages: grp = 5 (one value in every page)",
+  (q, ci) => { q.filters = [{ id: "a", ci: ci("grp"), pred: "eq", value: "5", linker: "AND" }]; },
+  (p) => (p.rows !== p.rowsTotal ? `narrowed to ${p.rows} rows for a value every page holds` : null));
+
+/* ----------------------------------- v2 pages, nulls, and a list column that
+   the page index cannot be used to split, all in one row group */
+const pagesV2 = path.join(dir, "pages_v2.parquet");
+await both(pagesV2, "v2 pages: id BETWEEN 1000 AND 1100",
+  (q, ci) => { q.filters = [{ id: "a", ci: ci("id"), pred: "between", value: "1000", valueTo: "1100", linker: "AND" }]; },
+  (p) => (p.rows > 20000 ? `read ${p.rows} rows, so the v2 page index did not narrow` : null));
+await both(pagesV2, "v2 pages: maybe IS NULL AND id < 3000",
+  (q, ci) => {
+    q.filters = [
+      { id: "a", ci: ci("maybe"), pred: "null", value: "", linker: "AND" },
+      { id: "b", ci: ci("id"), pred: "lt", value: "3000", linker: "AND" },
+    ];
+  },
+  (p) => (p.rows > 20000 ? `read ${p.rows} rows` : null));
+/* half the file matches here, so there is little to narrow — what matters is
+   that a list column, whose pages do not split on rows, still lines up */
+await both(pagesV2, "v2 pages: id > 99000 (a list column comes along for the ride)",
+  (q, ci) => { q.filters = [{ id: "a", ci: ci("id"), pred: "gt", value: "99000", linker: "AND" }]; },
+  (p, matched) => (p.rows > matched + 20000 ? `read ${p.rows} rows for ${matched} matching` : null));
+
 /* ------------------------------------------------------------- bloom filters */
 const shuffled = path.join(dir, "shuffled.parquet");
 {
@@ -178,7 +243,7 @@ const shuffled = path.join(dir, "shuffled.parquet");
   } else {
     /* every value really in the first row group has to come back "maybe" */
     const one = await open(shuffled);
-    one.table.plan = new Set(["0:0"]);
+    one.table.plan = new Map([["0:0", null]]);
     await PARIS.loadMore(one.dataset, one.table, Infinity);
     const ids = one.table.cols.find((c) => c.name === "id").rows;
     const data = await PARIS.readBloom(f.dataset.parts[0].src, idChunk);

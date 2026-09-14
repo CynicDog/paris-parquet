@@ -123,6 +123,21 @@ const bstat = await page.$eval("#qstat", (el) => el.textContent.replace(/\s+/g, 
 if (/^1 rows/.test(bstat)) ok("and the one matching row is found: " + bstat);
 else bad("qstat: " + bstat);
 
+/* the page index, narrowing inside a row group */
+await page.goto("file://" + appPath);
+await page.setInputFiles("#picker", path.join(dir, "pages.parquet"));
+await idle();
+await typeSql('SELECT * FROM pages WHERE "id" = 150000');
+await page.click("#qscan");
+await idle();
+const narrow = await page.$eval("#qplan", (el) => el.textContent.replace(/\s+/g, " ").trim());
+console.log("     " + narrow);
+if (/narrowed by page to/.test(narrow)) ok("the page index narrows inside the row group it kept");
+else bad("plan: " + narrow);
+const nstat = await page.$eval("#qstat", (el) => el.textContent.replace(/\s+/g, " ").trim());
+if (/^1 rows from ([1-9],\d{3}|\d{1,4})\b/.test(nstat)) ok("one row found, out of a few thousand read: " + nstat);
+else bad("qstat: " + nstat);
+
 const other = requests.filter((u) => u !== "file://" + appPath);
 console.log("\n     requests: " + requests.length + " total, " + other.length + " for anything but index.html");
 if (!other.length) ok("the page requested nothing but itself");
