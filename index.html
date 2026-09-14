@@ -261,7 +261,9 @@ details[open]>summary::before{content:"▾ "}
 <header>
   <h1>paris-parquet <span>· single-file parquet viewer</span></h1>
   <label class="btn" for="picker">Open .parquet</label>
-  <input type="file" id="picker" accept=".parquet,.pq,application/octet-stream">
+  <input type="file" id="picker" accept=".parquet,.pq,application/octet-stream" multiple>
+  <label class="btn" for="dirpicker" title="Open a folder of parquet files as one table">Open folder</label>
+  <input type="file" id="dirpicker" webkitdirectory directory>
   <div id="fileline"></div>
   <div class="grow"></div>
   <button id="more" hidden>Load more rows</button>
@@ -275,8 +277,9 @@ details[open]>summary::before{content:"▾ "}
 <div id="stage">
   <div id="drop">
     <div class="big">Drop a .parquet file here</div>
-    <div class="hint">Everything runs in this page: no server, no install, no network.
-      The file never leaves your machine.</div>
+    <div class="hint">A file, several files, or a whole partitioned folder.
+      Everything runs in this page: no server, no install, no network.
+      Nothing leaves your machine.</div>
   </div>
   <div id="gridwrap" hidden><table class="grid" id="grid"></table></div>
   <div id="pager" hidden></div>
@@ -1841,42 +1844,183 @@ function fileSource(file) {
   };
 }
 
-function newTable(meta) {
-  const cols = meta.schema.leaves.map((leaf) => ({
-    leaf,
-    name: leaf.label || leaf.path.join("."),
-    spec: typeSpec(leaf),
-    rows: [],
-    sniffed: false,
-  }));
-  return { meta, cols, nextGroup: 0, rowsLoaded: 0, groupsLoaded: 0, truncated: meta.rowGroups.length > 0 };
+/* ===================================================================
+   A dataset is one or more parquet files read as a single table.
+   A lone file is the same thing with one part, so there is one path
+   through the reader rather than two.
+   =================================================================== */
+function isParquetPath(path) {
+  const name = path.split("/").pop();
+  if (!name || name[0] === "." || name[0] === "_") return false;   /* _SUCCESS, .crc, hidden */
+  return /\.(parquet|parq|pq)$/i.test(name);
+}
+const unHive = (s) => { try { return decodeURIComponent(s); } catch (e) { return s; } };
+/** Hive lays partition values in the path: year=2024/month=01/part-0.parquet */
+function hivePartition(path) {
+  const out = [];
+  const segs = path.split("/");
+  for (let i = 0; i < segs.length - 1; i++) {
+    const m = /^([^=]+)=(.*)$/.exec(segs[i]);
+    if (m) out.push({ key: unHive(m[1]), value: m[2] === "__HIVE_DEFAULT_PARTITION__" ? null : unHive(m[2]) });
+  }
+  return out;
+}
+/** A column is the same column across files only if it holds the same shape. */
+function leafSignature(leaf) {
+  const lt = leaf.logical ? leaf.logical.name + JSON.stringify(leaf.logical) : leaf.converted || "";
+  return leaf.type + "/" + (leaf.typeLength || 0) + "/" + lt + "/" + leaf.maxRep;
+}
+/** Partition values arrive as text; give the column the narrowest type that fits. */
+function partitionSpec(values) {
+  const real = values.filter((v) => v !== null && v !== "");
+  const label = "partition";
+  if (real.length && real.every((v) => /^-?\d{1,15}$/.test(v))) {
+    return { kind: "number", label, physical: "PATH", partition: true, convert: (v) => (v === null ? null : +v) };
+  }
+  if (real.length && real.every((v) => /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(v))) {
+    return { kind: "number", label, physical: "PATH", partition: true, convert: (v) => (v === null ? null : +v) };
+  }
+  if (real.length && real.every((v) => /^\d{4}-\d{2}-\d{2}$/.test(v))) {
+    return { kind: "temporal", sub: "date", label: "partition date", physical: "PATH", partition: true,
+      convert: (v) => (v === null ? null : Date.UTC(+v.slice(0, 4), +v.slice(5, 7) - 1, +v.slice(8, 10))) };
+  }
+  return { kind: "string", label, physical: "PATH", partition: true, convert: (v) => v };
 }
 
-/** Reads row groups into the table until `maxRows` more rows have been added. */
-async function loadMore(src, table, maxRows, onProgress) {
-  const meta = table.meta;
+/**
+ * Reads every part's footer, then reconciles them into one column list.
+ * Columns are the union across files; a file missing one reads as null.
+ * A column that means something different in two files is fatal, and says so.
+ */
+async function readDataset(entries, onProgress) {
+  const parts = [];
+  const skipped = [];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (onProgress) await onProgress(i, entries.length, e.path);
+    let meta;
+    try { meta = await readFooter(e.src); }
+    catch (err) { skipped.push(e.path + " — " + err.message); continue; }
+    parts.push({
+      src: e.src, path: e.path, meta,
+      partition: hivePartition(e.path),
+      byPath: null, leafByPath: null,
+    });
+  }
+  if (!parts.length) {
+    throw new Error(entries.length
+      ? "None of the " + entries.length + " file(s) could be read:\n" + skipped.join("\n")
+      : "No .parquet files here.");
+  }
+
+  /* union the leaves, in first-seen order, and refuse real disagreements */
+  const columns = [], byKey = new Map(), conflicts = [];
+  for (const part of parts) {
+    part.leafByPath = new Map();
+    for (const leaf of part.meta.schema.leaves) {
+      const key = leaf.path.join("\u0001");
+      part.leafByPath.set(key, leaf);
+      const seen = byKey.get(key);
+      if (!seen) {
+        const col = { key, leaf, name: leaf.label || leaf.path.join("."), sig: leafSignature(leaf), from: part };
+        byKey.set(key, col);
+        columns.push(col);
+      } else if (seen.sig !== leafSignature(leaf)) {
+        conflicts.push('"' + seen.name + '" is ' + seen.leaf.type + " in " + seen.from.path +
+          " but " + leaf.type + " in " + part.path);
+      }
+    }
+  }
+  if (conflicts.length) {
+    throw new Error("These files do not describe the same table:\n" + conflicts.slice(0, 6).join("\n") +
+      (conflicts.length > 6 ? "\n…and " + (conflicts.length - 6) + " more" : ""));
+  }
+
+  /* partition keys, in the order the paths introduce them */
+  const partKeys = [];
+  for (const part of parts) {
+    for (const p of part.partition) if (partKeys.indexOf(p.key) < 0) partKeys.push(p.key);
+  }
+  const partitionCols = partKeys.map((key) => {
+    const raw = parts.map((part) => {
+      const hit = part.partition.find((p) => p.key === key);
+      return hit ? hit.value : null;
+    });
+    const spec = partitionSpec(raw);
+    parts.forEach((part, i) => {
+      part.partValues = part.partValues || {};
+      part.partValues[key] = spec.convert(raw[i]);
+    });
+    return { key: "\u0000part\u0000" + key, name: key, partKey: key, spec, leaf: null };
+  });
+
+  for (const part of parts) {
+    part.rows = part.meta.numRows;
+    part.size = part.src.size;
+  }
+  const totalRows = parts.reduce((a, p) => a + p.rows, 0);
+  const totalGroups = parts.reduce((a, p) => a + p.meta.rowGroups.length, 0);
+  return {
+    parts, columns, partitionCols, skipped,
+    reference: parts[0].meta,
+    numRows: totalRows,
+    numGroups: totalGroups,
+    size: parts.reduce((a, p) => a + p.size, 0),
+  };
+}
+
+function newTable(dataset) {
+  const cols = dataset.partitionCols.map((pc) => ({
+    leaf: null, partKey: pc.partKey, key: pc.key, name: pc.name, spec: pc.spec, rows: [], sniffed: true,
+  })).concat(dataset.columns.map((c) => ({
+    leaf: c.leaf, key: c.key, name: c.name, spec: typeSpec(c.leaf), rows: [], sniffed: false,
+  })));
+  return {
+    dataset, meta: dataset.reference, cols,
+    nextPart: 0, nextGroup: 0, rowsLoaded: 0, groupsLoaded: 0,
+    truncated: dataset.numGroups > 0,
+  };
+}
+
+/** Reads row groups, part by part, until `maxRows` more rows have been added. */
+async function loadMore(dataset, table, maxRows, onProgress) {
   let added = 0;
-  while (table.nextGroup < meta.rowGroups.length && added < maxRows) {
+  while (table.nextPart < dataset.parts.length && added < maxRows) {
+    const part = dataset.parts[table.nextPart];
+    const meta = part.meta;
+    if (table.nextGroup >= meta.rowGroups.length) { table.nextPart++; table.nextGroup = 0; continue; }
     const rg = meta.rowGroups[table.nextGroup];
+    if (!part.byPath) {
+      part.byPath = new Map();
+      rg.columns.forEach((c, i) => { if (c.meta) part.byPath.set(c.meta.path.join("\u0001"), i); });
+    }
     const byPath = new Map();
-    rg.columns.forEach((c, i) => { if (c.meta) byPath.set(c.meta.path.join(" "), i); });
+    rg.columns.forEach((c, i) => { if (c.meta) byPath.set(c.meta.path.join("\u0001"), i); });
     for (let ci = 0; ci < table.cols.length; ci++) {
       const col = table.cols[ci];
-      const key = col.leaf.path.join(" ");
-      const idx = byPath.has(key) ? byPath.get(key) : ci;
+      if (col.partKey !== undefined) {
+        const v = part.partValues ? part.partValues[col.partKey] : null;
+        for (let i = 0; i < rg.numRows; i++) col.rows.push(v === undefined ? null : v);
+        continue;
+      }
+      const leaf = part.leafByPath.get(col.key);
+      const idx = byPath.has(col.key) ? byPath.get(col.key) : -1;
+      if (!leaf || idx < 0) {                       /* this file does not have it */
+        for (let i = 0; i < rg.numRows; i++) col.rows.push(null);
+        continue;
+      }
       const chunk = rg.columns[idx];
-      if (!chunk) throw new Error("row group " + table.nextGroup + " has no chunk for " + col.name);
       if (chunk.filePath) {
         throw new Error("Column " + col.name + " lives in a separate file (" + chunk.filePath +
-          "). paris-parquet reads one self-contained file at a time.");
+          "), which parquet allows but nothing writes.");
       }
       if (chunk.encryptedMetadata || chunk.cryptoMetadata) throw new Error("Column " + col.name + " is encrypted.");
       let raw;
       try {
-        raw = await readColumnChunk(src, chunk, col.leaf);
+        raw = await readColumnChunk(part.src, chunk, leaf);
       } catch (e) {
         throw new Error('Could not read column "' + col.name + '" in row group ' + table.nextGroup +
-          " (" + chunk.meta.codec + ", " + chunk.meta.encodings.join("/") + "): " + e.message);
+          " of " + part.path + " (" + chunk.meta.codec + ", " + chunk.meta.encodings.join("/") + "): " + e.message);
       }
       if (!col.sniffed && raw.values.length) {
         col.sniffed = true;
@@ -1886,16 +2030,18 @@ async function loadMore(src, table, maxRows, onProgress) {
           col.spec.convert = (v) => utf8.decode(v);
         }
       }
-      const rows = assemble(col.leaf, raw.values, raw.defs, raw.reps, col.spec.convert);
+      const rows = assemble(leaf, raw.values, raw.defs, raw.reps, col.spec.convert);
       for (let i = 0; i < rows.length; i++) col.rows.push(rows[i]);
-      if (onProgress) onProgress(table.nextGroup, ci, table.cols.length);
+      if (onProgress) onProgress(table.nextPart, table.nextGroup, ci, table.cols.length);
     }
     added += rg.numRows;
     table.rowsLoaded += rg.numRows;
     table.nextGroup++;
     table.groupsLoaded++;
   }
-  table.truncated = table.nextGroup < meta.rowGroups.length;
+  table.truncated = table.nextPart < dataset.parts.length &&
+    (table.nextGroup < dataset.parts[table.nextPart].meta.rowGroups.length ||
+     table.nextPart < dataset.parts.length - 1);
   return added;
 }
 
@@ -2575,13 +2721,23 @@ function schemaTree(meta) {
   return "<div class='tree'>" + lines.join("\n") + "</div>";
 }
 
+function datasetName(dataset) {
+  const first = dataset.parts[0].path;
+  const cut = first.indexOf("/");
+  return cut > 0 ? first.slice(0, cut) + "/" : first;
+}
 function renderMeta() {
   const meta = state.meta, table = state.table, src = state.src;
+  const dataset = state.dataset;
   const leaves = meta.schema.leaves;
   const agg = leaves.map(() => ({ comp: 0, uncomp: 0, values: 0, nulls: 0, statNulls: false,
     enc: new Set(), codec: new Set() }));
   let totalComp = 0, totalUncomp = 0;
-  for (const rg of meta.rowGroups) {
+  const allGroups = [];
+  for (const part of (dataset ? dataset.parts : [{ meta }])) {
+    for (const rg of part.meta.rowGroups) allGroups.push({ rg, part });
+  }
+  for (const { rg } of allGroups) {
     rg.columns.forEach((c, i) => {
       if (!c.meta || i >= agg.length) return;
       const a = agg[i];
@@ -2602,12 +2758,14 @@ function renderMeta() {
   for (const a of agg) { for (const c of a.codec) codecs.add(c); for (const e of a.enc) encs.add(e); }
 
   $("mbar").innerHTML = [
-    "<span class='tag'>rows <b>" + num(meta.numRows) + "</b></span>",
+    dataset && dataset.parts.length > 1
+      ? "<span class='tag'>files <b>" + num(dataset.parts.length) + "</b></span>" : "",
+    "<span class='tag'>rows <b>" + num(dataset ? dataset.numRows : meta.numRows) + "</b></span>",
     table.truncated && table.rowsLoaded ? "<span class='tag'>read so far <b>" + num(table.rowsLoaded) +
       "</b> rows &mdash; summaries cover these</span>" : "",
-    "<span class='tag'>columns <b>" + num(leaves.length) + "</b></span>",
-    "<span class='tag'>row groups <b>" + num(meta.rowGroups.length) + "</b></span>",
-    "<span class='tag'>file <b>" + bytesHuman(src.size) + "</b></span>",
+    "<span class='tag'>columns <b>" + num(table.cols.length) + "</b></span>",
+    "<span class='tag'>row groups <b>" + num(dataset ? dataset.numGroups : meta.rowGroups.length) + "</b></span>",
+    "<span class='tag'>size <b>" + bytesHuman(dataset ? dataset.size : src.size) + "</b></span>",
     "<span class='tag'>compression <b>" + esc([...codecs].join(", ") || "-") + "</b></span>",
     "<span class='tag'>encryption <b>" + (meta.encryption ? esc(meta.encryption.algorithm) : "none") + "</b></span>",
     "<span class='tag'>format <b>v" + (meta.version == null ? "?" : meta.version) + "</b></span>",
@@ -2616,13 +2774,17 @@ function renderMeta() {
 
   const cards = [];
   const row = (k, v) => "<tr><td class='k'>" + k + "</td><td>" + v + "</td></tr>";
-  cards.push("<div class='mcard'><h3>file</h3><table class='kvt'>" + [
-    row("name", esc(src.name || "(dropped file)")),
-    row("size", bytesHuman(src.size) + " <span class='muted'>(" + num(src.size) + " B)</span>"),
-    row("rows", num(meta.numRows)),
-    row("columns", num(leaves.length) + " leaf <span class='muted'>/ " +
-      num(meta.schema.nodes.length - 1) + " schema nodes</span>"),
-    row("row groups", num(meta.rowGroups.length)),
+  const partCount = dataset ? dataset.parts.length : 1;
+  cards.push("<div class='mcard'><h3>" + (partCount > 1 ? "dataset" : "file") + "</h3><table class='kvt'>" + [
+    row("name", esc(dataset && partCount > 1 ? datasetName(dataset) : (src.name || "(dropped file)"))),
+    partCount > 1 ? row("files", num(partCount) + " parquet file" + (partCount === 1 ? "" : "s")) : "",
+    row("size", bytesHuman(dataset ? dataset.size : src.size) +
+      " <span class='muted'>(" + num(dataset ? dataset.size : src.size) + " B)</span>"),
+    row("rows", num(dataset ? dataset.numRows : meta.numRows)),
+    row("columns", num(leaves.length) + " leaf" +
+      (dataset && dataset.partitionCols.length ? " + " + num(dataset.partitionCols.length) + " partition" : "") +
+      " <span class='muted'>/ " + num(meta.schema.nodes.length - 1) + " schema nodes</span>"),
+    row("row groups", num(dataset ? dataset.numGroups : meta.rowGroups.length)),
     row("format version", "v" + (meta.version == null ? "?" : meta.version)),
     row("created by", esc(meta.createdBy || "-")),
     row("footer size", bytesHuman(meta.footerLength)),
@@ -2639,20 +2801,39 @@ function renderMeta() {
 
   cards.push("<div class='mcard'><h3>schema</h3>" + schemaTree(meta) + "</div>");
 
-  let rgRows = "";
-  meta.rowGroups.forEach((rg, i) => {
-    const off = rg.fileOffset != null ? rg.fileOffset
-      : (rg.columns[0] && rg.columns[0].meta ? rg.columns[0].meta.dataPageOffset : null);
-    rgRows += "<tr><td class='n'>" + i + "</td><td class='n'>" + num(rg.numRows) + "</td><td class='n'>" +
-      bytesHuman(rg.totalCompressedSize != null ? rg.totalCompressedSize : rg.totalByteSize) +
-      "</td><td class='n'>" + bytesHuman(rg.totalByteSize) + "</td><td class='n'>" + num(off) + "</td></tr>";
-  });
-  cards.push("<div class='mcard wide'><h3>row groups</h3><div class='scrollx'><table class='kvt'>" +
-    "<tr><th>#</th><th>rows</th><th>compressed</th><th>uncompressed</th><th>offset</th></tr>" +
-    rgRows + "</table></div></div>");
+  if (partCount > 1) {
+    let fileRows = "";
+    dataset.parts.forEach((part, i) => {
+      const pv = part.partition.map((p) => p.key + "=" + (p.value === null ? "(null)" : p.value)).join(" ");
+      fileRows += "<tr><td title='" + esc(part.path) + "'>" + esc(part.path) + "</td><td class='n'>" +
+        num(part.rows) + "</td><td class='n'>" + bytesHuman(part.size) + "</td><td class='n'>" +
+        num(part.meta.rowGroups.length) + "</td><td title='" + esc(pv) + "'>" + esc(pv || "-") +
+        "</td><td>" + esc(part.meta.createdBy || "-") + "</td></tr>";
+    });
+    cards.push("<div class='mcard wide'><h3>files</h3><div class='scrollx'><table class='kvt'>" +
+      "<tr><th>path</th><th>rows</th><th>size</th><th>row groups</th><th>partition</th><th>written by</th></tr>" +
+      fileRows + "</table></div></div>");
+  } else {
+    let rgRows = "";
+    meta.rowGroups.forEach((rg, i) => {
+      const off = rg.fileOffset != null ? rg.fileOffset
+        : (rg.columns[0] && rg.columns[0].meta ? rg.columns[0].meta.dataPageOffset : null);
+      rgRows += "<tr><td class='n'>" + i + "</td><td class='n'>" + num(rg.numRows) + "</td><td class='n'>" +
+        bytesHuman(rg.totalCompressedSize != null ? rg.totalCompressedSize : rg.totalByteSize) +
+        "</td><td class='n'>" + bytesHuman(rg.totalByteSize) + "</td><td class='n'>" + num(off) + "</td></tr>";
+    });
+    cards.push("<div class='mcard wide'><h3>row groups</h3><div class='scrollx'><table class='kvt'>" +
+      "<tr><th>#</th><th>rows</th><th>compressed</th><th>uncompressed</th><th>offset</th></tr>" +
+      rgRows + "</table></div></div>");
+  }
+  if (dataset && dataset.skipped.length) {
+    cards.push("<div class='mcard wide'><div class='warnbox'>Skipped " + num(dataset.skipped.length) +
+      " file(s):<br>" + dataset.skipped.slice(0, 8).map(esc).join("<br>") + "</div></div>");
+  }
 
   let colRows = "";
   const firstGroup = meta.rowGroups[0];
+  const partitionNames = dataset ? dataset.partitionCols.map((c) => c.name) : [];
   const byPath = new Map();
   if (firstGroup) firstGroup.columns.forEach((c, i) => { if (c.meta) byPath.set(c.meta.path.join(" "), c); });
   leaves.forEach((leaf, i) => {
@@ -3881,20 +4062,74 @@ function busy(on, text) {
 }
 const FIRST_ROWS = 20000;
 
-async function openFile(file) {
+function isParquetFile(f) { return isParquetPath(f.webkitRelativePath || f.name); }
+function entriesFromFiles(list) {
+  const out = [];
+  for (const f of list) {
+    const path = f.webkitRelativePath || f.name;
+    if (isParquetPath(path)) out.push({ src: fileSource(f), path });
+  }
+  out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return out;
+}
+/** A dropped folder arrives as directory entries, not files; walk it. */
+async function entriesFromDrop(dt) {
+  const roots = [];
+  if (dt.items) {
+    for (const item of dt.items) {
+      const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+      if (entry) roots.push(entry);
+    }
+  }
+  if (!roots.length || !roots.some((r) => r.isDirectory)) return entriesFromFiles(dt.files);
+  const out = [];
+  const walk = async (entry, prefix) => {
+    if (entry.isFile) {
+      const path = prefix + entry.name;
+      if (!isParquetPath(path)) return;
+      const file = await new Promise((res, rej) => entry.file(res, rej));
+      out.push({ src: fileSource(file), path });
+      return;
+    }
+    const reader = entry.createReader();
+    for (;;) {
+      const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+      if (!batch.length) break;
+      for (const e of batch) await walk(e, prefix + entry.name + "/");
+    }
+  };
+  for (const r of roots) await walk(r, "");
+  out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return out;
+}
+
+async function openFile(file) { return openEntries(entriesFromFiles([file])); }
+
+async function openEntries(entries, label) {
   const old = $("err");
   if (old) old.remove();
-  busy(true, "reading footer...");
-  $("fileline").innerHTML = "<b>" + esc(file.name) + "</b> &middot; " + bytesHuman(file.size);
+  busy(true, "reading footers...");
+  const named = !!label || entries.length === 1;
+  const name = label || (entries.length === 1 ? entries[0].path : entries.length + " files");
+  $("fileline").innerHTML = "<b>" + esc(name) + "</b>";
   try {
-    const src = fileSource(file);
-    const meta = await readFooter(src);
-    const table = newTable(meta);
-    state.src = src; state.meta = meta; state.table = table;
+    if (!entries.length) throw new Error("No .parquet files here.");
+    const dataset = await readDataset(entries, async (i, n, path) => {
+      if (n > 1 && (i % 16 === 0 || i === n - 1)) {
+        busy(true, "reading footers… " + (i + 1) + " of " + n);
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    });
+    const meta = dataset.reference;
+    const table = newTable(dataset);
+    state.dataset = dataset;
+    state.src = dataset.parts[0].src;
+    state.meta = meta;
+    state.table = table;
     state.display = newDisplay(table.cols);
-    busy(true, "decoding " + num(Math.min(meta.numRows, FIRST_ROWS)) + " rows...");
+    busy(true, "decoding " + num(Math.min(dataset.numRows, FIRST_ROWS)) + " rows...");
     await new Promise((r) => setTimeout(r, 0));
-    await loadMore(src, table, FIRST_ROWS);
+    await loadMore(dataset, table, FIRST_ROWS);
     setView(baseView(table));
     state.query = newQuery();          /* a new file means new columns */
     $("qstat").textContent = "";
@@ -3903,9 +4138,11 @@ async function openFile(file) {
     renderQuery();
     renderMeta();
     updateButtons();
-    $("fileline").innerHTML = "<b>" + esc(file.name) + "</b> &middot; " + bytesHuman(file.size) + " &middot; " +
-      num(meta.numRows) + " rows x " + num(meta.schema.leaves.length) + " cols &middot; " +
-      num(meta.rowGroups.length) + " row group" + (meta.rowGroups.length === 1 ? "" : "s");
+    const parts = dataset.parts.length;
+    $("fileline").innerHTML = "<b>" + esc(name) + "</b> &middot; " +
+      (parts > 1 && named ? num(parts) + " files &middot; " : "") + bytesHuman(dataset.size) + " &middot; " +
+      num(dataset.numRows) + " rows x " + num(table.cols.length) + " cols &middot; " +
+      num(dataset.numGroups) + " row group" + (dataset.numGroups === 1 ? "" : "s");
   } catch (e) {
     $("gridwrap").hidden = true;
     $("pager").hidden = true;
@@ -3944,10 +4181,13 @@ function updateButtons() {
     $("toggleQuery").textContent = "Hide query";
   }
   if (can) {
-    const left = t.meta.numRows - t.rowsLoaded;
+    const left = t.dataset.numRows - t.rowsLoaded;
     let next = 0;
-    for (let g = t.nextGroup; g < t.meta.rowGroups.length && next < FIRST_ROWS; g++) {
-      next += t.meta.rowGroups[g].numRows;
+    for (let pi = t.nextPart; pi < t.dataset.parts.length && next < FIRST_ROWS; pi++) {
+      const groups = t.dataset.parts[pi].meta.rowGroups;
+      for (let g = pi === t.nextPart ? t.nextGroup : 0; g < groups.length && next < FIRST_ROWS; g++) {
+        next += groups[g].numRows;
+      }
     }
     $("more").textContent = "Load " + num(next) + " more";
     $("all").textContent = "Load all " + num(left);
@@ -3957,7 +4197,7 @@ async function grow(n) {
   busy(true, "decoding...");
   await new Promise((r) => setTimeout(r, 0));
   try {
-    await loadMore(state.src, state.table, n);
+    await loadMore(state.dataset, state.table, n);
     if (state.query && state.query.active) runQuery(); else setView(baseView(state.table));
     renderMeta();
     updateButtons();
@@ -3971,11 +4211,15 @@ function init() {
   $("theme").addEventListener("click", () => {
     applyTheme(THEMES[(THEMES.indexOf($("theme").textContent) + 1) % THEMES.length]);
   });
-  $("picker").addEventListener("change", (e) => {
-    const f = e.target.files[0];
-    e.target.value = "";              /* so picking the same file again re-reads it */
-    if (f) openFile(f);
-  });
+  const fromPicker = (e, label) => {
+    const entries = entriesFromFiles(e.target.files);
+    const first = e.target.files[0];
+    e.target.value = "";              /* so picking the same thing again re-reads it */
+    if (entries.length) openEntries(entries, label && first ? (first.webkitRelativePath || "").split("/")[0] : null);
+    else if (first) showError(new Error('"' + first.name + '" is not a .parquet file.'));
+  };
+  $("picker").addEventListener("change", (e) => fromPicker(e, false));
+  $("dirpicker").addEventListener("change", (e) => fromPicker(e, true));
   $("more").addEventListener("click", () => grow(FIRST_ROWS));
   $("all").addEventListener("click", () => grow(Infinity));
   $("toggleMeta").addEventListener("click", () => {
@@ -4050,18 +4294,28 @@ function init() {
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
   document.addEventListener("dragover", (e) => { stop(e); document.body.classList.add("dragging"); });
   document.addEventListener("dragleave", (e) => { if (e.relatedTarget === null) document.body.classList.remove("dragging"); });
-  document.addEventListener("drop", (e) => {
+  document.addEventListener("drop", async (e) => {
     stop(e);
     document.body.classList.remove("dragging");
-    const f = e.dataTransfer.files[0];
-    if (f) openFile(f);
+    busy(true, "looking through what you dropped…");
+    let entries = [];
+    try { entries = await entriesFromDrop(e.dataTransfer); }
+    catch (err) { busy(false); showError(err); return; }
+    if (!entries.length) {
+      busy(false);
+      showError(new Error("Nothing here ends in .parquet."));
+      return;
+    }
+    const folder = entries[0].path.indexOf("/") > 0 ? entries[0].path.split("/")[0] : null;
+    openEntries(entries, folder);
   });
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
 else init();
 
 /* exposed so this file can be driven from a test harness */
-window.PARIS = { readFooter, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
+window.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
+  hivePartition, isParquetPath, entriesFromFiles,
   runQuery, querySql, parseSql, sqlTokenize, adoptSql,
   baseView, setView, compileFilter, aggregate, exportParts, viewValue,
   displayCols, newDisplay, refreshView,

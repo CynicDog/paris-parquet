@@ -24,10 +24,12 @@ const src = {
   name: path.basename(file),
   async read(start, end) { return new Uint8Array(buf.subarray(start, end)); },
 };
-const meta = await PARIS.readFooter(src);
-const table = PARIS.newTable(meta);
-await PARIS.loadMore(src, table, Infinity);
+const dataset = await PARIS.readDataset([{ src, path: src.name }]);
+const meta = dataset.reference;
+const table = PARIS.newTable(dataset);
+await PARIS.loadMore(dataset, table, Infinity);
 PARIS.state.src = src;
+  PARIS.state.dataset = dataset;
 PARIS.state.meta = meta;
 PARIS.state.table = table;
 const cols = table.cols;
