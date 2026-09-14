@@ -120,6 +120,38 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .bools i{display:block;text-align:center;overflow:hidden}
 .bools i.t{background:var(--bool)} .bools i.f{background:var(--dim)} .bools i.n{background:var(--line)}
 
+/* ---------- chart ---------- */
+#chartwrap{flex:1;display:flex;flex-direction:column;min-height:0;background:var(--panel)}
+#chartbar{border-bottom:1px solid var(--line2)}
+#chartbar select,#chartbar input[type=checkbox]{vertical-align:middle}
+#chartbar select{font:11px var(--mono);background:var(--panel);color:var(--ink);
+  border:1px solid var(--line);border-radius:4px;padding:1px 4px;max-width:170px}
+#chartbar button{padding:1px 8px;font-size:11px}
+.cser{display:inline-flex;align-items:center;gap:3px;margin-right:7px;cursor:pointer}
+.cser input{accent-color:var(--accent);margin:0}
+#chartlegend{flex:none;display:flex;flex-wrap:wrap;gap:14px;padding:7px 14px 2px;font:11px var(--mono);
+  color:var(--dim)}
+#chartlegend:empty{display:none}
+.lgi{display:inline-flex;align-items:center;gap:5px}
+.lgi i{width:10px;height:10px;border-radius:2px;display:inline-block}
+.lgi i.lgline{width:14px;height:2px;border-radius:1px}
+#chartbody{flex:1;min-height:0;padding:4px 8px 6px;overflow:hidden}
+#chartbody svg .mark{transition:opacity .08s}
+#chartbody svg .mark:hover{opacity:.78}
+.chartempty{height:100%;display:flex;align-items:center;justify-content:center;text-align:center;
+  color:var(--faint);font:12px var(--mono);padding:20px}
+.chartsolo{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+.herofig{font:600 52px/1 var(--mono);color:var(--ink)}
+.herolab{font:12px var(--mono);color:var(--dim)}
+#charttip{position:fixed;z-index:50;background:var(--panel);border:1px solid var(--line);border-radius:5px;
+  box-shadow:0 4px 16px rgba(0,0,0,.18);padding:5px 8px;font:11px var(--mono);pointer-events:none;
+  max-width:280px}
+.ttcat{color:var(--dim);margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ttrow{display:flex;align-items:center;gap:6px;line-height:1.6}
+.ttrow i{width:12px;height:2px;border-radius:1px;flex:none}
+.ttrow b{color:var(--ink);font-weight:600}
+.ttrow span{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* ---------- cell inspector ---------- */
 #inspect{position:fixed;z-index:40;max-width:min(620px,92vw);max-height:60vh;display:flex;flex-direction:column;
   background:var(--panel);border:1px solid var(--line);border-radius:6px;
@@ -268,6 +300,7 @@ details[open]>summary::before{content:"▾ "}
   <div class="grow"></div>
   <button id="more" hidden>Load more rows</button>
   <button id="all" hidden>Load all</button>
+  <button id="toggleChart" hidden>Chart</button>
   <button id="toggleCols" hidden>Columns</button>
   <button id="toggleQuery" hidden>Query</button>
   <button id="toggleMeta" hidden>Hide metadata</button>
@@ -282,11 +315,17 @@ details[open]>summary::before{content:"▾ "}
       Nothing leaves your machine.</div>
   </div>
   <div id="gridwrap" hidden><table class="grid" id="grid"></table></div>
+  <div id="chartwrap" hidden>
+    <div class="qbar" id="chartbar"></div>
+    <div id="chartlegend"></div>
+    <div id="chartbody"></div>
+  </div>
   <div id="pager" hidden></div>
   <div id="busy" hidden>reading…</div>
 </div>
 
 <div id="inspect" hidden></div>
+<div id="charttip" hidden></div>
 <div id="colpick" hidden>
   <div class="ihead" id="cphead"></div>
   <div class="cpsearchwrap"><input id="cpsearch" placeholder="search name or type"></div>
@@ -2117,6 +2156,10 @@ function setView(view) {
   summarizeView(view);
   renderGrid();
   renderPager();
+  if (typeof chartDefaults === "function") {
+    chartDefaults(view);                       /* axes follow whatever is on screen */
+    if (chart.on) { renderChartControls(); renderChart(); }
+  }
 }
 
 /* ------------------------------------------------------------ pagination */
@@ -2423,7 +2466,7 @@ function renderGrid() {
   }
   $("colstyle").textContent = css;
 
-  $("gridwrap").hidden = false;
+  $("gridwrap").hidden = !!(typeof chart === "object" && chart.on);
   $("drop").hidden = true;
   const nameRow = grid.querySelector("tr.r-name");
   document.documentElement.style.setProperty("--nameh", nameRow.offsetHeight + "px");
@@ -2535,6 +2578,7 @@ function togglePicker(show) {
 }
 function initPicker() {
   $("toggleCols").addEventListener("click", () => togglePicker());
+  $("toggleChart").addEventListener("click", () => showChart(!chart.on));
   $("cpsearch").addEventListener("input", renderPicker);
   const act = (e) => {
     const el = e.target.closest("[data-act]");
@@ -2597,6 +2641,591 @@ function initPicker() {
       togglePicker(false);
     }
   }, true);
+}
+
+
+/* ======================================================================
+   Charts
+   Inline SVG, drawn by hand. Colours are the validated categorical order
+   (see the palette note below); both modes are stepped for their own
+   surface rather than flipped. Series keep their slot when others are
+   switched off, so a colour always means the same column.
+   ====================================================================== */
+const SVGNS = "http://www.w3.org/2000/svg";
+/* validated with the data-viz palette validator against this page's own
+   surfaces: light #ffffff and dark #1c1e22, adjacent pairs, 6 slots */
+const SERIES_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"];
+const SERIES_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300"];
+const SERIES_CAP = SERIES_LIGHT.length;
+const CHART_MAX_CATS = 30;
+
+function darkNow() {
+  const stamped = document.documentElement.getAttribute("data-theme");
+  if (stamped === "dark") return true;
+  if (stamped === "light") return false;
+  return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+}
+function chartInk() {
+  const dark = darkNow();
+  return {
+    series: dark ? SERIES_DARK : SERIES_LIGHT,
+    surface: dark ? "#1c1e22" : "#ffffff",
+    text: dark ? "#e6e6e3" : "#1c1c1a",
+    dim: dark ? "#9b9d9f" : "#6b6b66",
+    faint: dark ? "#6e7073" : "#9a9a94",
+    grid: dark ? "#2c2f34" : "#e2e2dd",
+  };
+}
+const el = (name, attrs) => {
+  const n = document.createElementNS(SVGNS, name);
+  for (const k in attrs) if (attrs[k] !== undefined && attrs[k] !== null) n.setAttribute(k, attrs[k]);
+  return n;
+};
+/** Labels come out of the file, so they go in as text, never as markup. */
+function svgText(x, y, text, attrs) {
+  const n = el("text", Object.assign({ x, y }, attrs));
+  n.textContent = text;
+  return n;
+}
+/** Column with a rounded data end and a square foot on the baseline. */
+function barPath(x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, w / 2, h));
+  return "M" + x + "," + (y + h) + "V" + (y + rr) + "a" + rr + "," + rr + " 0 0 1 " + rr + ",-" + rr +
+    "h" + (w - 2 * rr) + "a" + rr + "," + rr + " 0 0 1 " + rr + "," + rr + "V" + (y + h) + "Z";
+}
+function barPathH(x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, h / 2, w));
+  return "M" + x + "," + y + "H" + (x + w - rr) + "a" + rr + "," + rr + " 0 0 1 " + rr + "," + rr +
+    "v" + (h - 2 * rr) + "a" + rr + "," + rr + " 0 0 1 -" + rr + "," + rr + "H" + x + "Z";
+}
+/** Axis ticks on round numbers, so the reader gets 0 / 1,000 / 2,000. */
+function niceTicks(lo, hi, want) {
+  if (!isFinite(lo) || !isFinite(hi)) return { ticks: [0], lo: 0, hi: 1 };
+  if (lo === hi) { const pad = Math.abs(lo) || 1; lo -= pad / 2; hi += pad / 2; }
+  const raw = (hi - lo) / Math.max(1, want);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm >= 7.5 ? 10 : norm >= 3 ? 5 : norm >= 1.5 ? 2 : 1) * mag;
+  const start = Math.ceil(lo / step) * step;
+  const ticks = [];
+  for (let t = start; t <= hi + step * 1e-9 && ticks.length < 40; t += step) {
+    ticks.push(Math.abs(t) < step * 1e-9 ? 0 : t);
+  }
+  return { ticks, step };
+}
+function tickLabel(v, spec) {
+  if (spec && spec.kind === "temporal") return fmtTemporal(v, spec);
+  const a = Math.abs(v);
+  if (a >= 1e9) return (v / 1e9).toFixed(a >= 1e10 ? 0 : 1) + "B";
+  if (a >= 1e6) return (v / 1e6).toFixed(a >= 1e7 ? 0 : 1) + "M";
+  if (a >= 1e4) return (v / 1e3).toFixed(0) + "k";
+  if (Number.isInteger(v)) return v.toLocaleString("en-US");
+  return String(Number(v.toPrecision(4)));
+}
+
+const chart = { on: false, type: "auto", x: -1, series: [], stacked: false };
+
+function numericCols(view) {
+  return view.cols.map((c, i) => i).filter((i) => view.cols[i].spec.kind === "number");
+}
+/** Picks sensible axes for whatever the view currently is. */
+function chartDefaults(view) {
+  const nums = numericCols(view);
+  let x = view.cols.findIndex((c) => c.spec.kind === "temporal");
+  if (x < 0) x = view.cols.findIndex((c) => c.spec.kind === "string" || c.spec.kind === "bool");
+  if (x < 0) x = nums.length > 1 ? nums[0] : 0;
+  const series = nums.filter((i) => i !== x).slice(0, SERIES_CAP);
+  chart.x = x;
+  chart.series = series.length ? series : nums.slice(0, 1);
+  chart.type = "auto";
+  chart.stacked = false;
+}
+function effectiveType(view, cats) {
+  if (chart.type !== "auto") return chart.type;
+  const xs = view.cols[chart.x];
+  if (xs && xs.spec.kind === "temporal") return "line";
+  const longNames = cats.some((c) => String(c.label).length > 12);
+  return cats.length > 14 || longNames ? "bar" : "column";
+}
+
+/** Rolls the view into one point per x, summing when an x repeats. */
+function chartData(view) {
+  const xi = chart.x;
+  const xcol = view.cols[xi];
+  if (!xcol) return null;
+  const sers = chart.series.filter((i) => view.cols[i]).slice(0, SERIES_CAP);
+  if (!sers.length) return null;
+  const groups = new Map();
+  let collapsed = 0;
+  for (let r = 0; r < view.count; r++) {
+    const xv = viewValue(view, xi, r);
+    const key = xv === null || xv === undefined ? "\u0000null" : String(xv);
+    let g = groups.get(key);
+    if (!g) {
+      g = { x: xv, label: xv === null || xv === undefined ? "(null)" : fmtValue(xv, xcol.spec),
+        ys: sers.map(() => null), rows: 0 };
+      groups.set(key, g);
+    } else collapsed++;
+    g.rows++;
+    sers.forEach((ci, si) => {
+      const v = numeric(viewValue(view, ci, r));
+      if (v === v && isFinite(v)) g.ys[si] = (g.ys[si] === null ? 0 : g.ys[si]) + v;
+    });
+  }
+  let points = [...groups.values()];
+  const temporal = xcol.spec.kind === "temporal";
+  const numericX = xcol.spec.kind === "number";
+  if (temporal || numericX) points.sort((a, b) => numeric(a.x) - numeric(b.x));
+  return {
+    points, collapsed, temporal, numericX,
+    xcol, series: sers.map((ci) => view.cols[ci]), seriesIdx: sers,
+  };
+}
+
+function renderChart() {
+  const host = $("chartbody");
+  if (!host) return;
+  host.textContent = "";
+  $("chartlegend").textContent = "";
+  const view = state.view;
+  if (!view) return;
+  if (chart.x < 0 || chart.x >= view.cols.length) chartDefaults(view);
+  const data = chartData(view);
+  const note = $("chartnote");
+  note.textContent = "";
+  if (!data) {
+    host.appendChild(emptyMessage("Pick a column for each axis — a chart needs one to group by and one to measure."));
+    return;
+  }
+  if (!view.count) {
+    host.appendChild(emptyMessage("Nothing to chart: the current result has no rows."));
+    return;
+  }
+  const ink = chartInk();
+
+  /* one value is a number, not a chart */
+  if (data.points.length === 1 && data.series.length === 1) {
+    host.appendChild(heroFigure(data, ink));
+    return;
+  }
+
+  renderChartLegend(data, ink);      /* before measuring: it takes height from the body */
+  const box = host.getBoundingClientRect();
+  const W = Math.max(320, Math.floor(box.width)), H = Math.max(160, Math.floor(box.height));
+
+  let points = data.points;
+  const type = effectiveType(view, points);
+  /* a horizontal bar needs a readable row; never draw more than will fit */
+  const maxCats = type === "bar" ? Math.max(5, Math.floor((H - 44) / 15)) : CHART_MAX_CATS;
+  let capped = 0;
+  if ((type === "column" || type === "bar") && points.length > maxCats) {
+    const ranked = points.slice().sort((a, b) => Math.abs(b.ys[0] || 0) - Math.abs(a.ys[0] || 0));
+    points = ranked.slice(0, maxCats);
+    capped = data.points.length;
+    if (data.temporal || data.numericX) points.sort((a, b) => numeric(a.x) - numeric(b.x));
+  }
+  const notes = [];
+  if (capped) notes.push("top " + points.length + " of " + num(capped) + " by " + data.series[0].name);
+  if (data.collapsed) notes.push(num(data.collapsed) + " rows summed into their category — group in the query for a cleaner chart");
+  if (chart.series.length > SERIES_CAP) notes.push("first " + SERIES_CAP + " series shown");
+  note.textContent = notes.join(" · ");
+
+  const svg = el("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H,
+    style: "display:block", role: "img" });
+  svg.appendChild(el("rect", { x: 0, y: 0, width: W, height: H, fill: ink.surface }));
+  const draw = type === "bar" ? drawHorizontal : type === "line" ? drawLine
+    : type === "scatter" ? drawScatter : drawColumn;
+  draw(svg, { W, H, ink, data, points, stacked: chart.stacked && data.series.length > 1 });
+  host.appendChild(svg);
+}
+function emptyMessage(text) {
+  const d = document.createElement("div");
+  d.className = "chartempty";
+  d.textContent = text;
+  return d;
+}
+/** A single number is a hero figure; a one-bar bar chart is not a chart. */
+function heroFigure(data, ink) {
+  const d = document.createElement("div");
+  d.className = "chartsolo";
+  const v = document.createElement("div");
+  v.className = "herofig";
+  v.textContent = fmtValue(data.points[0].ys[0], data.series[0].spec);
+  const l = document.createElement("div");
+  l.className = "herolab";
+  const same = data.xcol === data.series[0];
+  l.textContent = same ? data.series[0].name : data.series[0].name + " · " + data.points[0].label;
+  d.appendChild(v);
+  d.appendChild(l);
+  return d;
+}
+
+/* ---------------------------------------------------------- axes & grid */
+function measureText(text, size) { return String(text).length * size * 0.58; }
+
+function yAxis(svg, ink, lo, hi, plot, spec, horizontal) {
+  const { ticks } = niceTicks(lo, hi, horizontal ? 5 : 5);
+  const scale = (v) => (horizontal
+    ? plot.x + (v - lo) / (hi - lo) * plot.w
+    : plot.y + plot.h - (v - lo) / (hi - lo) * plot.h);
+  for (const t of ticks) {
+    const p = scale(t);
+    if (horizontal) {
+      svg.appendChild(el("line", { x1: p, y1: plot.y, x2: p, y2: plot.y + plot.h,
+        stroke: ink.grid, "stroke-width": 1 }));
+      svg.appendChild(svgText(p, plot.y + plot.h + 14, tickLabel(t, spec),
+        { fill: ink.dim, "font-size": 10, "text-anchor": "middle", "font-family": "ui-monospace,monospace" }));
+    } else {
+      svg.appendChild(el("line", { x1: plot.x, y1: p, x2: plot.x + plot.w, y2: p,
+        stroke: ink.grid, "stroke-width": 1 }));
+      svg.appendChild(svgText(plot.x - 7, p + 3.5, tickLabel(t, spec),
+        { fill: ink.dim, "font-size": 10, "text-anchor": "end", "font-family": "ui-monospace,monospace" }));
+    }
+  }
+  return scale;
+}
+function domainOf(points, fromZero) {
+  let lo = Infinity, hi = -Infinity;
+  for (const p of points) for (const v of p.ys) { if (v === null) continue; if (v < lo) lo = v; if (v > hi) hi = v; }
+  if (!isFinite(lo)) { lo = 0; hi = 1; }
+  if (fromZero) { lo = Math.min(0, lo); hi = Math.max(0, hi); }
+  if (lo === hi) { hi = lo + (Math.abs(lo) || 1); }
+  return [lo, hi];
+}
+function stackDomain(points) {
+  let lo = 0, hi = 0;
+  for (const p of points) {
+    let pos = 0, neg = 0;
+    for (const v of p.ys) { if (v === null) continue; if (v >= 0) pos += v; else neg += v; }
+    if (pos > hi) hi = pos;
+    if (neg < lo) lo = neg;
+  }
+  if (lo === hi) hi = lo + 1;
+  return [lo, hi];
+}
+
+/* ------------------------------------------------------------- columns */
+function drawColumn(svg, ctx) {
+  const { W, H, ink, data, points, stacked } = ctx;
+  const n = data.series.length;
+  const labelSize = 10;
+  const maxLabel = points.reduce((a, p) => Math.max(a, measureText(p.label, labelSize)), 0);
+  const slot = (W - 60) / Math.max(1, points.length);
+  const rotate = maxLabel > slot - 6;
+  const bottom = rotate ? Math.min(90, maxLabel + 16) : 26;
+  const [lo, hi] = stacked ? stackDomain(points) : domainOf(points, true);
+  const left = 14 + measureText(tickLabel(hi, data.series[0].spec), 10);
+  const plot = { x: left, y: 12, w: W - left - 12, h: H - 12 - bottom };
+  const scale = yAxis(svg, ink, lo, hi, plot, data.series[0].spec, false);
+  svg.appendChild(el("line", { x1: plot.x, y1: scale(Math.max(lo, Math.min(hi, 0))),
+    x2: plot.x + plot.w, y2: scale(Math.max(lo, Math.min(hi, 0))), stroke: ink.grid, "stroke-width": 1 }));
+
+  const band = plot.w / points.length;
+  const inner = Math.min(24 * (stacked ? 1 : n) + (stacked ? 0 : (n - 1) * 2), band * 0.72);
+  const barW = stacked ? inner : Math.max(2, (inner - (n - 1) * 2) / n);
+  points.forEach((p, pi) => {
+    const cx = plot.x + band * (pi + 0.5);
+    if (stacked) {
+      let up = 0, down = 0;
+      p.ys.forEach((v, si) => {
+        if (v === null) return;
+        const base = v >= 0 ? up : down;
+        const y0 = scale(base), y1 = scale(base + v);
+        if (v >= 0) up += v; else down += v;
+        const top = Math.min(y0, y1), h = Math.max(0, Math.abs(y1 - y0) - 2);   /* 2px surface gap */
+        if (h <= 0) return;
+        svg.appendChild(markRect(barPath(cx - barW / 2, top, barW, h, si === 0 ? 4 : 0),
+          ink.series[si % SERIES_CAP], p, si, data));
+      });
+    } else {
+      p.ys.forEach((v, si) => {
+        if (v === null) return;
+        const zero = scale(Math.max(lo, Math.min(hi, 0)));
+        const y = scale(v);
+        const x = cx - inner / 2 + si * (barW + 2);
+        const top = Math.min(zero, y), h = Math.max(1, Math.abs(zero - y));
+        svg.appendChild(markRect(barPath(x, top, barW, h, 4), ink.series[si % SERIES_CAP], p, si, data));
+      });
+    }
+    const t = svgText(cx, plot.y + plot.h + (rotate ? 12 : 16), p.label, {
+      fill: ink.dim, "font-size": labelSize, "font-family": "ui-monospace,monospace",
+      "text-anchor": rotate ? "end" : "middle",
+    });
+    if (rotate) t.setAttribute("transform", "rotate(-40 " + cx + " " + (plot.y + plot.h + 12) + ")");
+    svg.appendChild(t);
+  });
+}
+function markRect(d, fill, point, si, data) {
+  const p = el("path", { d, fill, class: "mark" });
+  p.addEventListener("pointerenter", (e) => showChartTip(e, point, data, si));
+  p.addEventListener("pointerleave", hideChartTip);
+  return p;
+}
+
+/* --------------------------------------------------------- horizontal */
+function drawHorizontal(svg, ctx) {
+  const { W, H, ink, data, points, stacked } = ctx;
+  const n = data.series.length;
+  const maxLabel = points.reduce((a, p) => Math.max(a, measureText(p.label, 10)), 0);
+  const left = Math.min(190, maxLabel + 10);
+  const plot = { x: left, y: 10, w: W - left - 16, h: H - 10 - 26 };
+  const [lo, hi] = stacked ? stackDomain(points) : domainOf(points, true);
+  const scale = yAxis(svg, ink, lo, hi, plot, data.series[0].spec, true);
+  const band = plot.h / points.length;
+  const inner = Math.min(24 * (stacked ? 1 : n) + (stacked ? 0 : (n - 1) * 2), band * 0.72);
+  const barH = stacked ? inner : Math.max(2, (inner - (n - 1) * 2) / n);
+  points.forEach((p, pi) => {
+    const cy = plot.y + band * (pi + 0.5);
+    if (stacked) {
+      let up = 0;
+      p.ys.forEach((v, si) => {
+        if (v === null) return;
+        const x0 = scale(up), x1 = scale(up + v);
+        up += v;
+        const x = Math.min(x0, x1), w = Math.max(0, Math.abs(x1 - x0) - 2);
+        if (w <= 0) return;
+        svg.appendChild(markRect(barPathH(x, cy - barH / 2, w, barH, si === 0 ? 4 : 0),
+          ink.series[si % SERIES_CAP], p, si, data));
+      });
+    } else {
+      p.ys.forEach((v, si) => {
+        if (v === null) return;
+        const zero = scale(Math.max(lo, Math.min(hi, 0)));
+        const x1 = scale(v);
+        const y = cy - inner / 2 + si * (barH + 2);
+        svg.appendChild(markRect(barPathH(Math.min(zero, x1), y, Math.max(1, Math.abs(x1 - zero)), barH, 4),
+          ink.series[si % SERIES_CAP], p, si, data));
+      });
+    }
+    svg.appendChild(svgText(left - 6, cy + 3.5, p.label, {
+      fill: ink.dim, "font-size": 10, "text-anchor": "end", "font-family": "ui-monospace,monospace" }));
+  });
+}
+
+/* -------------------------------------------------------------- lines */
+function drawLine(svg, ctx) {
+  const { W, H, ink, data, points } = ctx;
+  const [lo, hi] = domainOf(points, false);
+  const left = 14 + measureText(tickLabel(hi, data.series[0].spec), 10);
+  const plot = { x: left, y: 12, w: W - left - 14, h: H - 12 - 28 };
+  const yScale = yAxis(svg, ink, lo, hi, plot, data.series[0].spec, false);
+  const numericX = data.temporal || data.numericX;
+  const xs = points.map((p, i) => (numericX ? numeric(p.x) : i));
+  const xLo = Math.min.apply(null, xs), xHi = Math.max.apply(null, xs);
+  const xScale = (v) => plot.x + (xHi === xLo ? plot.w / 2 : (v - xLo) / (xHi - xLo) * plot.w);
+
+  const { ticks } = niceTicks(xLo, xHi, Math.max(2, Math.min(6, Math.floor(plot.w / 110))));
+  for (const t of (numericX ? ticks : xs.filter((_, i) => i % Math.ceil(xs.length / 6) === 0))) {
+    const px = xScale(t);
+    svg.appendChild(svgText(px, plot.y + plot.h + 16,
+      numericX ? tickLabel(t, data.xcol.spec) : points[xs.indexOf(t)].label,
+      { fill: ink.dim, "font-size": 10, "text-anchor": "middle", "font-family": "ui-monospace,monospace" }));
+  }
+  data.series.forEach((s, si) => {
+    let d = "", open = false;
+    points.forEach((p, i) => {
+      const v = p.ys[si];
+      if (v === null) { open = false; return; }
+      const px = xScale(xs[i]), py = yScale(v);
+      d += (open ? "L" : "M") + px.toFixed(1) + "," + py.toFixed(1);
+      open = true;
+    });
+    if (d) {
+      svg.appendChild(el("path", { d, fill: "none", stroke: ink.series[si % SERIES_CAP],
+        "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    }
+    if (points.length <= 60) {
+      points.forEach((p, i) => {
+        if (p.ys[si] === null) return;
+        svg.appendChild(el("circle", { cx: xScale(xs[i]), cy: yScale(p.ys[si]), r: 4,
+          fill: ink.series[si % SERIES_CAP], stroke: ink.surface, "stroke-width": 2 }));
+      });
+    }
+  });
+  crosshairLayer(svg, plot, points, xs, xScale, data, ink);
+}
+/** The reader aims at an x, never at a 2px line. */
+function crosshairLayer(svg, plot, points, xs, xScale, data, ink) {
+  const line = el("line", { x1: 0, y1: plot.y, x2: 0, y2: plot.y + plot.h,
+    stroke: ink.faint, "stroke-width": 1, visibility: "hidden" });
+  svg.appendChild(line);
+  const hit = el("rect", { x: plot.x, y: plot.y, width: plot.w, height: plot.h, fill: "transparent" });
+  hit.addEventListener("pointermove", (e) => {
+    const box = svg.getBoundingClientRect();
+    const px = e.clientX - box.left;
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < xs.length; i++) {
+      const d = Math.abs(xScale(xs[i]) - px);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    line.setAttribute("x1", xScale(xs[best]));
+    line.setAttribute("x2", xScale(xs[best]));
+    line.setAttribute("visibility", "visible");
+    showChartTip(e, points[best], data, -1);
+  });
+  hit.addEventListener("pointerleave", () => { line.setAttribute("visibility", "hidden"); hideChartTip(); });
+  svg.appendChild(hit);
+}
+
+/* ------------------------------------------------------------ scatter */
+function drawScatter(svg, ctx) {
+  const { W, H, ink, data, points } = ctx;
+  const [lo, hi] = domainOf(points, false);
+  const left = 14 + measureText(tickLabel(hi, data.series[0].spec), 10);
+  const plot = { x: left, y: 12, w: W - left - 14, h: H - 12 - 28 };
+  const yScale = yAxis(svg, ink, lo, hi, plot, data.series[0].spec, false);
+  const numericX = data.temporal || data.numericX;
+  const xs = points.map((p, i) => (numericX ? numeric(p.x) : i));
+  const xLo = Math.min.apply(null, xs), xHi = Math.max.apply(null, xs);
+  const xScale = (v) => plot.x + (xHi === xLo ? plot.w / 2 : (v - xLo) / (xHi - xLo) * plot.w);
+  const { ticks } = niceTicks(xLo, xHi, Math.max(2, Math.min(6, Math.floor(plot.w / 110))));
+  for (const t of ticks) {
+    svg.appendChild(svgText(xScale(t), plot.y + plot.h + 16, tickLabel(t, data.xcol.spec),
+      { fill: ink.dim, "font-size": 10, "text-anchor": "middle", "font-family": "ui-monospace,monospace" }));
+  }
+  data.series.forEach((s, si) => {
+    points.forEach((p, i) => {
+      if (p.ys[si] === null) return;
+      const dot = el("circle", { cx: xScale(xs[i]), cy: yScale(p.ys[si]), r: 4,
+        fill: ink.series[si % SERIES_CAP], stroke: ink.surface, "stroke-width": 2 });
+      svg.appendChild(dot);
+    });
+  });
+  /* dots are pinpoints; let the pointer be nearest rather than dead-centre */
+  const hit = el("rect", { x: plot.x, y: plot.y, width: plot.w, height: plot.h, fill: "transparent" });
+  hit.addEventListener("pointermove", (e) => {
+    const box = svg.getBoundingClientRect();
+    const px = e.clientX - box.left, py = e.clientY - box.top;
+    let best = -1, bestD = Infinity, bestS = 0;
+    points.forEach((p, i) => {
+      p.ys.forEach((v, si) => {
+        if (v === null) return;
+        const dx = xScale(xs[i]) - px, dy = yScale(v) - py;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = i; bestS = si; }
+      });
+    });
+    if (best >= 0 && bestD < 40 * 40) showChartTip(e, points[best], data, bestS);
+    else hideChartTip();
+  });
+  hit.addEventListener("pointerleave", hideChartTip);
+  svg.appendChild(hit);
+}
+
+/* ------------------------------------------------------ legend & tooltip */
+function renderChartLegend(data, ink) {
+  const box = $("chartlegend");
+  box.textContent = "";
+  if (data.series.length < 2) return;        /* one series needs no legend box */
+  const line = chart.type === "line";
+  data.series.forEach((s, si) => {
+    const item = document.createElement("span");
+    item.className = "lgi";
+    const key = document.createElement("i");
+    key.style.background = ink.series[si % SERIES_CAP];
+    if (line) key.className = "lgline";
+    const name = document.createElement("span");
+    name.textContent = s.name;
+    item.appendChild(key);
+    item.appendChild(name);
+    box.appendChild(item);
+  });
+}
+function showChartTip(e, point, data, si) {
+  const tip = $("charttip");
+  const ink = chartInk();
+  tip.textContent = "";
+  const head = document.createElement("div");
+  head.className = "ttcat";
+  head.textContent = data.xcol.name + " " + point.label;
+  tip.appendChild(head);
+  data.series.forEach((s, i) => {
+    if (si >= 0 && i !== si && data.series.length > 1 && chart.type !== "line") return;
+    const row = document.createElement("div");
+    row.className = "ttrow";
+    const key = document.createElement("i");
+    key.style.background = ink.series[i % SERIES_CAP];
+    const val = document.createElement("b");
+    val.textContent = point.ys[i] === null ? "—" : fmtValue(point.ys[i], s.spec);
+    const nm = document.createElement("span");
+    nm.textContent = s.name;
+    row.appendChild(key);
+    row.appendChild(val);
+    row.appendChild(nm);
+    tip.appendChild(row);
+  });
+  tip.hidden = false;
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.max(6, Math.min(e.clientX + 14, window.innerWidth - w - 6)) + "px";
+  tip.style.top = Math.max(6, Math.min(e.clientY - h - 10, window.innerHeight - h - 6)) + "px";
+}
+function hideChartTip() { $("charttip").hidden = true; }
+
+/* --------------------------------------------------------------- panel */
+function renderChartControls() {
+  const view = state.view;
+  if (!view) return;
+  const opt = (i, c, sel) => "<option value='" + i + "'" + (sel ? " selected" : "") + ">" +
+    esc(c.name) + "</option>";
+  let xs = "";
+  view.cols.forEach((c, i) => { xs += opt(i, c, i === chart.x); });
+  let sers = "";
+  const nums = numericCols(view);
+  if (!nums.length) sers = "<span class='muted'>no numeric column to measure</span>";
+  for (const i of nums) {
+    if (i === chart.x) continue;
+    const on = chart.series.indexOf(i) >= 0;
+    sers += "<label class='cser'><input type='checkbox' data-ser='" + i + "'" + (on ? " checked" : "") +
+      "><span>" + esc(view.cols[i].name) + "</span></label>";
+  }
+  const types = [["auto", "auto"], ["column", "column"], ["bar", "bar"], ["line", "line"], ["scatter", "scatter"]];
+  $("chartbar").innerHTML =
+    "<span class='qtitle'>CHART</span>" +
+    "<label class='pinfo'>x <select id='chartx'>" + xs + "</select></label>" +
+    "<span class='psep'></span><span class='pinfo'>y " + sers + "</span>" +
+    "<span class='psep'></span><span class='seg' id='charttype'>" +
+    types.map(([v, l]) => "<button data-t='" + v + "'" + (chart.type === v ? " class='on'" : "") + ">" +
+      l + "</button>").join("") + "</span>" +
+    "<label class='pinfo'><input type='checkbox' id='chartstack'" + (chart.stacked ? " checked" : "") +
+    "> stacked</label>" +
+    "<span class='grow'></span><span id='chartnote' class='muted'></span>" +
+    "<button id='chartsvg' title='Download this chart as SVG'>SVG</button>";
+  $("chartx").onchange = (e) => { chart.x = +e.target.value; chart.series = chart.series.filter((i) => i !== chart.x); renderChartControls(); renderChart(); };
+  $("charttype").onclick = (e) => {
+    const b = e.target.closest("button[data-t]");
+    if (!b) return;
+    chart.type = b.dataset.t;
+    renderChartControls();
+    renderChart();
+  };
+  $("chartstack").onchange = (e) => { chart.stacked = e.target.checked; renderChart(); };
+  $("chartbar").querySelectorAll("input[data-ser]").forEach((cb) => {
+    cb.onchange = () => {
+      const i = +cb.dataset.ser;
+      if (cb.checked) { if (chart.series.indexOf(i) < 0) chart.series.push(i); }
+      else chart.series = chart.series.filter((x) => x !== i);
+      chart.series.sort((a, b) => a - b);
+      renderChart();
+    };
+  });
+  $("chartsvg").onclick = () => {
+    const svg = $("chartbody").querySelector("svg");
+    if (!svg) return;
+    const text = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      svg.outerHTML.replace("<svg", '<svg xmlns="' + SVGNS + '"');
+    download([text], "image/svg+xml;charset=utf-8", exportName("svg"));
+  };
+}
+function showChart(on) {
+  chart.on = on;
+  $("chartwrap").hidden = !on;
+  $("gridwrap").hidden = on || !state.view;
+  $("toggleChart").textContent = on ? "Table" : "Chart";
+  if (on) {
+    if (chart.x < 0 && state.view) chartDefaults(state.view);
+    renderChartControls();
+    renderChart();
+  }
 }
 
 /* ------------------------------------------------------- cell inspector */
@@ -4037,6 +4666,7 @@ function applyTheme(name) {
   if (name === "auto") root.removeAttribute("data-theme");
   else root.setAttribute("data-theme", name);
   $("theme").textContent = name;
+  if (chart.on) renderChart();                 /* dark steps are chosen, not flipped */
   /* file:// pages may refuse storage entirely; the choice just won't persist */
   try { localStorage.setItem("paris-parquet-theme", name); } catch (e) { /* fine */ }
 }
@@ -4154,6 +4784,8 @@ async function openEntries(entries, label) {
     $("more").hidden = true;
     $("all").hidden = true;
     $("toggleCols").hidden = true;
+    $("toggleChart").hidden = true;
+    $("chartwrap").hidden = true;
     $("colpick").hidden = true;
     $("toggleMeta").hidden = true;
     showError(e);
@@ -4175,6 +4807,7 @@ function updateButtons() {
   $("toggleMeta").hidden = !t;
   $("toggleQuery").hidden = !t;
   $("toggleCols").hidden = !t;
+  $("toggleChart").hidden = !t;
   if (t && $("toggleQuery").textContent === "Query" && $("query").hidden) {
     $("query").hidden = false;
     $("qgrip").hidden = false;
@@ -4290,6 +4923,7 @@ function init() {
   window.addEventListener("resize", () => {
     const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--metah"));
     if (cur > 0) metaHeight(cur); else renderRows(true);
+    if (chart.on) renderChart();
   });
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
   document.addEventListener("dragover", (e) => { stop(e); document.body.classList.add("dragging"); });
@@ -4316,7 +4950,7 @@ else init();
 /* exposed so this file can be driven from a test harness */
 window.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
   hivePartition, isParquetPath, entriesFromFiles,
-  runQuery, querySql, parseSql, sqlTokenize, adoptSql,
+  runQuery, querySql, parseSql, sqlTokenize, adoptSql, chart, chartData, chartDefaults, niceTicks,
   baseView, setView, compileFilter, aggregate, exportParts, viewValue,
   displayCols, newDisplay, refreshView,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
