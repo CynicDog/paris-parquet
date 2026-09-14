@@ -1352,6 +1352,8 @@ function decodePlain(b, pos, end, type, count, typeLength, out) {
   }
 }
 
+const same = (v) => v;
+
 /** DELTA_BINARY_PACKED. Returns {values, pos}; int64 accumulates in BigInt. */
 function deltaBinaryPacked(b, pos, end, count, big) {
   const rv = () => { let shift = 1, v = 0, by; do { by = b[pos++]; v += (by & 0x7f) * shift; shift *= 128; } while (by & 0x80); return v; };
@@ -1432,15 +1434,24 @@ function byteStreamSplit(b, pos, count, width, type, out) {
 }
 
 /** Decodes one page's value section into physical values. */
-function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out) {
+/**
+ * `convert` turns a physical value into the one the rest of the page uses.
+ * It is applied here rather than after assembly so that a dictionary-encoded
+ * column converts its dictionary once instead of once per row: a column of
+ * a million rows over a thousand distinct strings then decodes a thousand
+ * strings, not a million.
+ */
+function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out, convert) {
+  /* the dictionary arrives converted already, so only the rest goes through */
+  const sink = convert ? { push: (v) => out.push(convert(v)) } : out;
   switch (enc) {
     case "PLAIN":
-      decodePlain(b, pos, end, type, count, typeLength, out);
+      decodePlain(b, pos, end, type, count, typeLength, sink);
       return;
     case "RLE": {                       // boolean data pages
       const len = u32le(b, pos);
       const idx = rleHybrid(b, pos + 4, pos + 4 + len, 1, count);
-      for (let i = 0; i < count; i++) out.push(idx[i] === 1);
+      for (let i = 0; i < count; i++) sink.push(idx[i] === 1);
       return;
     }
     case "PLAIN_DICTIONARY":
@@ -1453,13 +1464,13 @@ function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out) {
     }
     case "DELTA_BINARY_PACKED": {
       const r = deltaBinaryPacked(b, pos, end, count, type === "INT64");
-      for (let i = 0; i < count; i++) out.push(r.values[i]);
+      for (let i = 0; i < count; i++) sink.push(r.values[i]);
       return;
     }
     case "DELTA_LENGTH_BYTE_ARRAY": {
       const r = deltaBinaryPacked(b, pos, end, count, false);
       let p = r.pos;
-      for (let i = 0; i < count; i++) { const n = r.values[i]; out.push(b.subarray(p, p + n)); p += n; }
+      for (let i = 0; i < count; i++) { const n = r.values[i]; sink.push(b.subarray(p, p + n)); p += n; }
       return;
     }
     case "DELTA_BYTE_ARRAY": {
@@ -1473,7 +1484,7 @@ function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out) {
         v.set(prev.subarray(0, pl));
         v.set(b.subarray(p, p + sl), pl);
         p += sl;
-        out.push(v);
+        sink.push(v);
         prev = v;
       }
       return;
@@ -1482,7 +1493,7 @@ function decodeValues(enc, b, pos, end, type, count, typeLength, dict, out) {
       const w = type === "FLOAT" || type === "INT32" ? 4 : type === "DOUBLE" || type === "INT64" ? 8
         : type === "FIXED_LEN_BYTE_ARRAY" ? typeLength : 0;
       if (!w) throw new Error("BYTE_STREAM_SPLIT: unsupported type " + type);
-      byteStreamSplit(b, pos, count, w, type, out);
+      byteStreamSplit(b, pos, count, w, type, sink);
       return;
     }
     default:
@@ -1512,8 +1523,9 @@ async function readPage(buf, pos, m, leaf, out) {
   if (ptype === "DICTIONARY_PAGE") {
     const dh = h[7] || {};
     const page = await decompress(m.codec, raw, uncompSize);
-    out.dict = [];
-    decodePlain(page, 0, page.length, m.type, dh[1] | 0, leaf.typeLength, out.dict);
+    const entries = [];
+    decodePlain(page, 0, page.length, m.type, dh[1] | 0, leaf.typeLength, entries);
+    out.dict = out.convert ? entries.map(out.convert) : entries;
     return { pos: next, n: 0 };
   }
   if (ptype === "INDEX_PAGE") return { pos: next, n: 0 };
@@ -1538,7 +1550,8 @@ async function readPage(buf, pos, m, leaf, out) {
       for (let i = 0; i < n; i++) if (lv[i] === maxDef) nonNull++;
     }
     if (nonNull > 0) {
-      decodeValues(ENC[dh[2]], page, p, page.length, m.type, nonNull, leaf.typeLength, out.dict, out.values);
+      decodeValues(ENC[dh[2]], page, p, page.length, m.type, nonNull, leaf.typeLength,
+        out.dict, out.values, out.convert);
     }
     return { pos: next, n };
   }
@@ -1553,19 +1566,21 @@ async function readPage(buf, pos, m, leaf, out) {
     const body = raw.subarray(repLen + defLen);
     const page = compressed ? await decompress(m.codec, body, uncompSize - repLen - defLen) : body;
     if (n - nulls > 0) {
-      decodeValues(ENC[dh[4]], page, 0, page.length, m.type, n - nulls, leaf.typeLength, out.dict, out.values);
+      decodeValues(ENC[dh[4]], page, 0, page.length, m.type, n - nulls, leaf.typeLength,
+        out.dict, out.values, out.convert);
     }
     return { pos: next, n };
   }
   throw new Error("unknown page type " + h[1]);
 }
 
-function newSink(leaf, dict) {
+function newSink(leaf, dict, convert) {
   return { values: [], defs: leaf.maxDef > 0 ? [] : null, reps: leaf.maxRep > 0 ? [] : null,
-    dict: dict === undefined ? null : dict };
+    dict: dict === undefined ? null : dict, convert: convert || null };
 }
 
-async function readColumnChunk(src, chunk, leaf) {
+/** With a `convert`, the values come back converted; without one, physical. */
+async function readColumnChunk(src, chunk, leaf, convert) {
   const m = chunk.meta;
   if (!m) throw new Error("column chunk has no metadata (encrypted?)");
   let start = m.dataPageOffset;
@@ -1575,7 +1590,7 @@ async function readColumnChunk(src, chunk, leaf) {
   const end = Math.min(src.size, start + m.totalCompressedSize);
   const buf = await src.read(start, end);
 
-  const out = newSink(leaf);
+  const out = newSink(leaf, undefined, convert);
   let pos = 0, seen = 0;
   while (pos < buf.length && seen < m.numValues) {
     const r = await readPage(buf, pos, m, leaf, out);
@@ -1672,8 +1687,8 @@ async function readRowsRanges(src, chunk, leaf, ranges, numRows, convert) {
     try { return await readPagesRanges(src, chunk, leaf, locs, ranges, numRows, convert); }
     catch (e) { chunk.offsets = null; }   /* an index we cannot follow: read it all */
   }
-  const raw = await readColumnChunk(src, chunk, leaf);
-  const all = assemble(leaf, raw.values, raw.defs, raw.reps, convert);
+  const raw = await readColumnChunk(src, chunk, leaf, convert);
+  const all = assemble(leaf, raw.values, raw.defs, raw.reps, null);
   const out = [];
   for (const r of ranges) for (let i = r[0]; i < r[1]; i++) out.push(all[i]);
   return out;
@@ -1684,9 +1699,9 @@ async function readPagesRanges(src, chunk, leaf, locs, ranges, numRows, convert)
   if (m.dictionaryPageOffset != null && m.dictionaryPageOffset > 0 &&
       m.dictionaryPageOffset < locs[0].offset) {
     const buf = await src.read(m.dictionaryPageOffset, locs[0].offset);
-    const sink = newSink(leaf);
+    const sink = newSink(leaf, undefined, convert);
     await readPage(buf, 0, m, leaf, sink);
-    dict = sink.dict;
+    dict = sink.dict;                         /* converted once, for every page */
   }
   const out = [];
   for (let i = 0; i < locs.length; i++) {
@@ -1694,9 +1709,9 @@ async function readPagesRanges(src, chunk, leaf, locs, ranges, numRows, convert)
     const to = i + 1 < locs.length ? locs[i + 1].row : numRows;
     if (!rangesTouch(ranges, from, to)) continue;
     const buf = await src.read(locs[i].offset, Math.min(src.size, locs[i].offset + locs[i].size));
-    const sink = newSink(leaf, dict);
+    const sink = newSink(leaf, dict, convert);
     await readPage(buf, 0, m, leaf, sink);
-    const rows = assemble(leaf, sink.values, sink.defs, sink.reps, convert);
+    const rows = assemble(leaf, sink.values, sink.defs, sink.reps, null);
     if (rows.length !== to - from) {
       throw new Error("the page index says page " + i + " holds rows " + from + " to " + to +
         ", but it decodes to " + rows.length);
@@ -1723,10 +1738,12 @@ function pushLevels(sink, b, pos, end, width, count, enc) {
  * Turns (values, definition levels, repetition levels) back into one value
  * per row, nesting arrays wherever the path repeats.
  */
+/** `convert` is optional: values that arrived converted pass straight through. */
 function assemble(leaf, values, defs, reps, convert) {
   const maxDef = leaf.maxDef, maxRep = leaf.maxRep;
+  if (!convert) convert = same;
   if (maxRep === 0) {
-    if (maxDef === 0) return values.map(convert);
+    if (maxDef === 0) return convert === same ? values : values.map(convert);
     const rows = new Array(defs.length);
     let vi = 0;
     for (let i = 0; i < defs.length; i++) rows[i] = defs[i] === maxDef ? convert(values[vi++]) : null;
@@ -2091,6 +2108,7 @@ function fileSource(file) {
   return {
     size: file.size,
     name: file.name,
+    file,                              /* a worker opens it again for itself */
     async read(start, end) { return new Uint8Array(await file.slice(start, end).arrayBuffer()); },
   };
 }
@@ -2269,13 +2287,275 @@ async function sniffUtf8(dataset, col, atHand, isFirstGroup) {
   return yes;
 }
 
+/* ======================================================================
+   Workers — decoding column chunks on the other cores.
+
+   The decoders in this file are the only ones there are, so the workers
+   run this same file: the page hands its own <script> text to a Blob URL
+   and starts workers on that. Nothing is duplicated, nothing is fetched,
+   and a worker knows every codec and encoding the page does.
+
+   This thread reads the bytes — waiting on a disk is not work it minds —
+   and hands them over rather than copying them. What comes back is the
+   assembled rows: as one Float64Array where the column is numbers with no
+   nulls in it, as one buffer and its offsets where it is byte strings,
+   and otherwise copied value by value, which is why the columns that
+   would be copied that way are decoded here instead.
+   ====================================================================== */
+const OWN_SCRIPT = (typeof document !== "undefined" && document.currentScript) || null;
+const pool = { workers: [], free: [], waiting: [], jobs: new Map(), id: 0, url: null,
+  off: false, force: false, started: false, used: 0, workMs: 0 };
+
+function poolStart() {
+  if (pool.started) return;
+  pool.started = true;
+  const cores = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 1;
+  const n = Math.max(0, Math.min(4, cores - 1));
+  if (!n || typeof Worker === "undefined" || typeof Blob === "undefined" ||
+      typeof URL === "undefined" || !URL.createObjectURL || !OWN_SCRIPT || !OWN_SCRIPT.textContent) {
+    pool.off = true;
+    return;
+  }
+  try {
+    pool.url = URL.createObjectURL(new Blob([OWN_SCRIPT.textContent], { type: "text/javascript" }));
+    for (let i = 0; i < n; i++) {
+      const w = new Worker(pool.url);
+      w.onmessage = (e) => poolDone(w, e.data);
+      w.onerror = () => poolStop();
+      pool.workers.push(w);
+      pool.free.push(w);
+    }
+  } catch (e) { poolStop(); }
+}
+/** Anything unexpected and the main thread takes the work back. */
+function poolStop() {
+  pool.off = true;
+  for (const job of pool.jobs.values()) job.reject(new Error("the decoding worker stopped"));
+  pool.jobs.clear();
+  for (const job of pool.waiting.splice(0)) job.reject(new Error("the decoding worker stopped"));
+  for (const w of pool.workers.splice(0)) { try { w.terminate(); } catch (e) { /* going anyway */ } }
+  pool.free.length = 0;
+}
+function poolDone(w, msg) {
+  const job = pool.jobs.get(msg.id);
+  pool.jobs.delete(msg.id);
+  pool.free.push(w);
+  const next = pool.waiting.shift();
+  if (next) poolSend(next);
+  if (!job) return;
+  if (msg.error) job.reject(new Error(msg.error)); else job.resolve(msg);
+}
+function poolSend(job) {
+  const w = pool.free.pop();
+  if (!w) { pool.waiting.push(job); return; }
+  pool.jobs.set(job.msg.id, job);
+  w.postMessage(job.msg, job.transfer || []);
+}
+function poolRun(msg, transfer) {
+  return new Promise((resolve, reject) => poolSend({ msg, transfer, resolve, reject }));
+}
+
+/**
+ * Which columns are worth sending away. Decoding in parallel only pays if
+ * the answer can come back without being copied value by value, and what
+ * crosses that way is a run of numbers or a run of bytes: both leave as one
+ * buffer, handed over rather than cloned. Text, booleans, decimals and
+ * anything nested would cost more to clone than they cost to decode, so they
+ * are decoded here — which is no loss, because that happens while the
+ * workers are busy with the rest.
+ */
+/* A round trip costs this thread about as much as a small chunk costs to
+   decode, so a row group is only worth sending away when there is enough in
+   it to more than pay that back. */
+const WORKER_MIN_BYTES = 384 * 1024;
+/** The column chunk of one column in one row group. */
+function chunkFor(rg, key) {
+  for (const c of rg.columns) if (c.meta && c.meta.path.join("\u0001") === key) return c;
+  return null;
+}
+/** Is there enough work in this row group to be worth the round trips? */
+function poolWorthIt(part, rg, cols, indexes, sel) {
+  if (sel || pool.off || !pool.workers.length) return false;
+  if (pool.force) return true;          /* for checking that both paths agree */
+  let bytes = 0;
+  for (const ci of indexes) {
+    const col = cols[ci];
+    if (col.partKey !== undefined) continue;
+    const chunk = chunkFor(rg, col.key);
+    if (!chunk || !workerCan(part, col, sel, chunk)) continue;
+    bytes += chunk.meta.totalCompressedSize;
+    if (bytes >= WORKER_MIN_BYTES) return true;
+  }
+  return false;
+}
+
+function workerCan(part, col, sel, chunk) {
+  if (pool.off || !pool.workers.length || sel || !part.src) return false;
+  if (chunk && !(chunk.meta && chunk.meta.totalCompressedSize > 0)) return false;
+  const spec = col.spec;
+  if (spec.nested || spec.decimal) return false;
+  if (spec.maybeUtf8 && !col.sniffed) return false;
+  if (spec.kind === "binary") return true;                    /* packs into one buffer */
+  if (spec.kind !== "number" && spec.kind !== "temporal") return false;
+  return spec.physical === "INT32" || spec.physical === "INT64" || spec.physical === "INT96" ||
+    spec.physical === "FLOAT" || spec.physical === "DOUBLE";
+}
+/** Everything a worker needs to decode one column chunk, as plain data. */
+function workerJob(part, chunk, leaf, col, sel, numRows, bytes, bufStart) {
+  const m = chunk.meta;
+  return {
+    paris: "col", id: ++pool.id, sel, numRows,
+    bytes, bufStart, srcSize: part.src.size,
+    utf8: / \(utf-8\)$/.test(col.spec.label || ""),
+    chunk: {
+      filePath: null,
+      offsetIndexOffset: chunk.offsetIndexOffset, offsetIndexLength: chunk.offsetIndexLength,
+      meta: { codec: m.codec, type: m.type, numValues: m.numValues, encodings: m.encodings,
+        dataPageOffset: m.dataPageOffset, dictionaryPageOffset: m.dictionaryPageOffset,
+        totalCompressedSize: m.totalCompressedSize },
+    },
+    leaf: { type: leaf.type, typeLength: leaf.typeLength, logical: leaf.logical, converted: leaf.converted,
+      scale: leaf.scale, precision: leaf.precision, maxDef: leaf.maxDef, maxRep: leaf.maxRep,
+      chain: (leaf.chain || []).map((c) => ({ rep: c.rep })) },
+  };
+}
+/* A row group's column chunks lie together in the file, so when most of one
+   is wanted it is a single read rather than a read apiece — and the decoders
+   can then all start at once instead of waiting their turn at the disk. */
+const GROUP_READ_MAX = 32 * 1024 * 1024;
+async function readGroupBytes(src, rg, wanted) {
+  let lo = Infinity, hi = 0, want = 0;
+  for (const c of rg.columns) {
+    if (!c.meta) continue;
+    const [a, b] = chunkRange(src, c.meta);
+    if (a < lo) lo = a;
+    if (b > hi) hi = b;
+    if (wanted.has(c.meta.path.join("\u0001"))) want += b - a;
+  }
+  const span = hi - lo;
+  if (!(span > 0) || span > GROUP_READ_MAX) return null;
+  if (want < span * 0.6) return null;        /* most of it is not wanted */
+  return { lo, hi, bytes: await src.read(lo, hi) };
+}
+/** A source that answers out of the bytes already in hand where it can. */
+function groupSource(src, group) {
+  if (!group) return src;
+  return {
+    size: src.size, file: src.file,
+    async read(a, b) {
+      if (a >= group.lo && b <= group.hi) return group.bytes.subarray(a - group.lo, b - group.lo);
+      return src.read(a, b);
+    },
+  };
+}
+
+/** The bytes of a whole column chunk, dictionary page included. */
+function chunkRange(src, m) {
+  let start = m.dataPageOffset;
+  if (m.dictionaryPageOffset != null && m.dictionaryPageOffset > 0 && m.dictionaryPageOffset < start) {
+    start = m.dictionaryPageOffset;
+  }
+  return [start, Math.min(src.size, start + m.totalCompressedSize)];
+}
+/**
+ * Reading the file is not work the main thread minds doing — it waits on the
+ * disk rather than the processor — and handing the bytes over costs nothing,
+ * where letting three workers open the same file at once costs plenty.
+ */
+async function workerColumn(part, chunk, leaf, col, sel, numRows, group) {
+  const [start, end] = chunkRange(part.src, chunk.meta);
+  const raw = await groupSource(part.src, group).read(start, end);
+  /* handing a buffer over detaches it, so it has to be this job's alone: a
+     window onto the row group's bytes, or onto anything else, is copied */
+  const own = !group && raw.byteOffset === 0 && raw.byteLength === raw.buffer.byteLength;
+  const buf = own ? raw.buffer : raw.slice().buffer;
+  const res = await poolRun(workerJob(part, chunk, leaf, col, sel, numRows, buf, start), [buf]);
+  pool.used++;
+  pool.workMs += res.ms || 0;
+  if (res.nums) return res.nums;
+  if (!res.packed) return res.rows;
+  const { bytes, offsets, nulls } = res;
+  const rows = new Array(offsets.length - 1);
+  for (let i = 0; i < rows.length; i++) {
+    rows[i] = nulls[i] ? null : bytes.subarray(offsets[i], offsets[i + 1]);
+  }
+  return rows;
+}
+
+/* This is the other end of it: the same file, running as a worker. */
+function workerMain(scope) {
+  scope.onmessage = async (e) => {
+    const m = e.data;
+    if (!m || m.paris !== "col") return;
+    const t0 = Date.now();
+    try {
+      const chunkBytes = new Uint8Array(m.bytes);
+      const src = {
+        size: m.srcSize,
+        async read(a, b) { return chunkBytes.subarray(a - m.bufStart, b - m.bufStart); },
+      };
+      const spec = typeSpec(m.leaf);
+      if (m.utf8) becomesText({ spec });
+      let rows;
+      if (m.sel) {
+        rows = await readRowsRanges(src, m.chunk, m.leaf, m.sel, m.numRows, spec.convert);
+      } else {
+        const raw = await readColumnChunk(src, m.chunk, m.leaf, spec.convert);
+        rows = assemble(m.leaf, raw.values, raw.defs, raw.reps, null);
+      }
+      /* a column of numbers with no nulls goes over as one buffer, handed
+         across rather than copied: cloning three million values one at a time
+         costs more than decoding them did */
+      let numeric = rows.length > 0;
+      for (let i = 0; i < rows.length; i++) {
+        if (typeof rows[i] !== "number") { numeric = false; break; }
+      }
+      if (numeric) {
+        const nums = new Float64Array(rows.length);
+        for (let i = 0; i < rows.length; i++) nums[i] = rows[i];
+        scope.postMessage({ id: m.id, nums, ms: Date.now() - t0 }, [nums.buffer]);
+        return;
+      }
+      /* every value a window onto the page buffer: send the bytes once */
+      let packable = rows.length > 0;
+      for (let i = 0; i < rows.length; i++) {
+        const v = rows[i];
+        if (v === null || v === undefined) continue;
+        if (!(v instanceof Uint8Array)) { packable = false; break; }
+      }
+      if (packable) {
+        let total = 0;
+        for (let i = 0; i < rows.length; i++) if (rows[i]) total += rows[i].length;
+        const bytes = new Uint8Array(total);
+        const offsets = new Int32Array(rows.length + 1);
+        const nulls = new Uint8Array(rows.length);
+        let at = 0;
+        for (let i = 0; i < rows.length; i++) {
+          offsets[i] = at;
+          const v = rows[i];
+          if (v === null || v === undefined) { nulls[i] = 1; continue; }
+          bytes.set(v, at);
+          at += v.length;
+        }
+        offsets[rows.length] = at;
+        scope.postMessage({ id: m.id, packed: true, bytes, offsets, nulls, ms: Date.now() - t0 },
+          [bytes.buffer, offsets.buffer, nulls.buffer]);
+        return;
+      }
+      scope.postMessage({ id: m.id, rows, ms: Date.now() - t0 });
+    } catch (err) {
+      scope.postMessage({ id: m.id, error: (err && err.message) || String(err) });
+    }
+  };
+}
+
 /**
  * Decodes one column for one row group, or for the selection of rows a plan
  * narrowed it to. The row group is read the same way whether this happens
  * while the group is first read or long afterwards, which is what lets a
  * column be filled in later without re-reading anything else.
  */
-async function readColumnRows(dataset, part, rg, col, sel, took, firstGroup) {
+async function readColumnRows(dataset, part, rg, col, sel, took, firstGroup, ctx) {
   if (col.partKey !== undefined) {
     const v = part.partValues ? part.partValues[col.partKey] : null;
     const rows = new Array(took);
@@ -2283,8 +2563,7 @@ async function readColumnRows(dataset, part, rg, col, sel, took, firstGroup) {
     return rows;
   }
   const leaf = part.leafByPath.get(col.key);
-  let chunk = null;
-  for (const c of rg.columns) if (c.meta && c.meta.path.join("\u0001") === col.key) { chunk = c; break; }
+  const chunk = chunkFor(rg, col.key);
   if (!leaf || !chunk) {                          /* this file does not have it */
     const rows = new Array(took);
     rows.fill(null);
@@ -2295,6 +2574,17 @@ async function readColumnRows(dataset, part, rg, col, sel, took, firstGroup) {
       "), which parquet allows but nothing writes.");
   }
   if (chunk.encryptedMetadata || chunk.cryptoMetadata) throw new Error("Column " + col.name + " is encrypted.");
+  const group = ctx ? ctx.group : null;
+  if (ctx && ctx.workers && workerCan(part, col, sel, chunk)) {
+    try { return await workerColumn(part, chunk, leaf, col, sel, rg.numRows, group); }
+    catch (e) {
+      if (!pool.off) {
+        throw new Error('Could not read column "' + col.name + '" in ' + part.path + ": " + e.message);
+      }
+      /* the pool gave up; this thread does it instead */
+    }
+  }
+  const src = groupSource(part.src, group);
   try {
     if (sel) {
       /* page by page, so the text-or-bytes question has to be settled before
@@ -2303,14 +2593,19 @@ async function readColumnRows(dataset, part, rg, col, sel, took, firstGroup) {
         col.sniffed = true;
         if (col.spec.maybeUtf8 && await sniffUtf8(dataset, col, [], false)) becomesText(col);
       }
-      return await readRowsRanges(part.src, chunk, leaf, sel, rg.numRows, col.spec.convert);
+      return await readRowsRanges(src, chunk, leaf, sel, rg.numRows, col.spec.convert);
     }
-    const raw = await readColumnChunk(part.src, chunk, leaf);
-    if (!col.sniffed && raw.values.length) {
+    if (col.spec.maybeUtf8 && !col.sniffed) {
+      /* the values are what decides whether this column is text, so they have
+         to arrive physical and be converted after the answer is in */
+      const raw = await readColumnChunk(src, chunk, leaf);
       col.sniffed = true;
-      if (col.spec.maybeUtf8 && await sniffUtf8(dataset, col, raw.values, firstGroup)) becomesText(col);
+      if (await sniffUtf8(dataset, col, raw.values, firstGroup)) becomesText(col);
+      return assemble(leaf, raw.values, raw.defs, raw.reps, col.spec.convert);
     }
-    return assemble(leaf, raw.values, raw.defs, raw.reps, col.spec.convert);
+    col.sniffed = true;
+    const raw = await readColumnChunk(src, chunk, leaf, col.spec.convert);
+    return assemble(leaf, raw.values, raw.defs, raw.reps, null);
   } catch (e) {
     throw new Error('Could not read column "' + col.name + '" in ' + part.path +
       " (" + chunk.meta.codec + ", " + chunk.meta.encodings.join("/") + "): " + e.message);
@@ -2343,13 +2638,27 @@ async function loadMore(dataset, table, maxRows, onProgress) {
     const took = sel ? rangeCount(sel) : rg.numRows;
     const firstGroup = table.nextPart === 0 && table.nextGroup === 0;
     table.reads.push({ pi: table.nextPart, gi: table.nextGroup, sel, rows: took, firstGroup });
+    /* every column of the group is asked for at once: with a pool they
+       decode side by side, and without one they queue up as before */
+    const wanted = [];
     for (let ci = 0; ci < table.cols.length; ci++) {
       const col = table.cols[ci];
       if (table.need && !table.need.has(ci) && col.partKey === undefined) continue;
-      const rows = await readColumnRows(dataset, part, rg, col, sel, took, firstGroup);
-      for (let i = 0; i < rows.length; i++) col.rows.push(rows[i]);
+      wanted.push(ci);
+    }
+    const keys = new Set();
+    for (const ci of wanted) if (table.cols[ci].partKey === undefined) keys.add(table.cols[ci].key);
+    const ctx = {
+      group: sel || keys.size < 2 ? null : await readGroupBytes(part.src, rg, keys),
+      workers: poolWorthIt(part, rg, table.cols, wanted, sel),
+    };
+    const decoded = await Promise.all(wanted.map((ci) =>
+      readColumnRows(dataset, part, rg, table.cols[ci], sel, took, firstGroup, ctx)));
+    for (let k = 0; k < wanted.length; k++) {
+      const col = table.cols[wanted[k]];
+      appendRows(col, decoded[k]);
       col.filled = table.reads.length;
-      if (onProgress) onProgress(table.nextPart, table.nextGroup, ci, table.cols.length);
+      if (onProgress) onProgress(table.nextPart, table.nextGroup, wanted[k], table.cols.length);
     }
     added += took;
     table.rowsLoaded += took;
@@ -2358,6 +2667,27 @@ async function loadMore(dataset, table, maxRows, onProgress) {
   }
   table.truncated = groupsLeft(dataset, table) > 0;
   return added;
+}
+
+/**
+ * Rows arrive as a plain array or, when a worker found every value of a
+ * column to be a number with no nulls among them, as a Float64Array it could
+ * hand over without copying. Both index and measure the same; only joining
+ * two pieces has to know the difference.
+ */
+function appendRows(col, rows) {
+  const have = col.rows;
+  if (!have.length) { col.rows = rows; return; }
+  if (!rows.length) return;
+  const a = ArrayBuffer.isView(have), b = ArrayBuffer.isView(rows);
+  if (a && b) {
+    const merged = new Float64Array(have.length + rows.length);
+    merged.set(have);
+    merged.set(rows, have.length);
+    col.rows = merged;
+    return;
+  }
+  col.rows = (a ? Array.from(have) : have).concat(b ? Array.from(rows) : rows);
 }
 
 /** Which columns are behind, of those asked for. */
@@ -2379,8 +2709,8 @@ async function fillColumns(dataset, table, indexes, onProgress) {
       const read = table.reads[r];
       const part = dataset.parts[read.pi];
       const rg = part.meta.rowGroups[read.gi];
-      const rows = await readColumnRows(dataset, part, rg, col, read.sel, read.rows, read.firstGroup);
-      for (let i = 0; i < rows.length; i++) col.rows.push(rows[i]);
+      appendRows(col, await readColumnRows(dataset, part, rg, col, read.sel, read.rows, read.firstGroup,
+        { group: null, workers: poolWorthIt(part, rg, table.cols, [behind[k]], read.sel) }));
       col.filled = r + 1;
     }
     if (onProgress) await onProgress(k + 1, behind.length, col.name);
@@ -4176,7 +4506,9 @@ function aggregate(q, cols, index, n) {
 function runQuery() {
   const q = state.query, table = state.table;
   if (!table) return;
-  if (needFilled(queryColumns(q).concat(wantedColumns(table)), runQuery)) return;
+  /* running is what settles it: an aggregate about to replace the grid does
+     not need the columns it is replacing */
+  if (needFilled([...neededColumns(table, true)], runQuery)) return;
   const t0 = performance.now();
   const cols = table.cols, n = table.rowsLoaded;
 
@@ -6319,6 +6651,7 @@ async function openEntries(entries, label) {
   const old = $("err");
   if (old) old.remove();
   busy(true, "reading footers...");
+  poolStart();                     /* the other cores, once there is a file for them */
   const named = !!label || entries.length === 1;
   const name = label || (entries.length === 1 ? entries[0].path : entries.length + " files");
   $("fileline").innerHTML = "<b>" + esc(name) + "</b>";
@@ -6521,11 +6854,19 @@ function init() {
     if (compare) openCompare(entries, folder); else openEntries(entries, folder);
   });
 }
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
-else init();
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
+}
 
 /* exposed so this file can be driven from a test harness */
-window.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
+/* running as a worker: no document, and the job is to decode what is asked */
+if (typeof document === "undefined" && typeof self !== "undefined" && typeof importScripts === "function") {
+  workerMain(self);
+}
+
+const HOST = typeof window !== "undefined" ? window : (typeof self !== "undefined" ? self : null);
+if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
   hivePartition, isParquetPath, entriesFromFiles,
   runQuery, querySql, parseSql, sqlTokenize, adoptSql, chart, chartData, chartDefaults, niceTicks,
   baseView, setView, compileFilter, aggregate, exportParts, viewValue,
@@ -6536,6 +6877,7 @@ window.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, summariz
   planScan, planReport, chunkBounds, clauseCanMatch, clauseGroups, xxh64, bloomHas, readBloom,
   bloomBytes, groupsLeft, rowsAhead, readOffsetIndex, readColumnIndex, readRowsRanges, clauseRanges,
   intersectRanges, unionRanges, mergeRanges, rangeCount,
+  pool, poolStart, workerCan,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
 </script>
 </body>

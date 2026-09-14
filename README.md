@@ -139,6 +139,15 @@ By default the first 20,000 rows are read (rounded up to whole row groups);
 buttons load more or all of it. Summaries describe the rows actually read, and
 the header says so when that is less than the whole file.
 
+Where the browser has cores to spare, the page uses them: it starts a few
+workers on **its own `<script>` text**, so they know every codec and encoding
+the page does and there is still only one file. A row group's column chunks
+are read together in one go, and the columns that can come back as one buffer
+— runs of numbers, runs of bytes — are decoded on the other cores and handed
+over rather than copied. Text and anything nested stay here, which is no loss:
+that work happens while the workers are busy with the rest. Small files skip
+all of it, because a round trip costs more than they do.
+
 ## What it understands
 
 Everything below is decoded inside `index.html` — the thrift footer, the
@@ -175,6 +184,7 @@ node tools/browser.mjs /tmp/fx/a.parquet      # drive the page in real Chromium
 node tools/browser-diff.mjs /tmp/fx/diff      # drive the diff panel, and count requests
 node tools/browser-push.mjs /tmp/fx/push      # drive the scan, and time it
 node tools/browser-lazy.mjs /tmp/fx/wide.parquet   # only decode what is wanted
+node tools/browser-workers.mjs /tmp/fx/*.parquet   # the other cores agree, cell for cell
 ```
 
 `check.mjs` pulls the `<script>` out of `index.html` and runs it against a stub

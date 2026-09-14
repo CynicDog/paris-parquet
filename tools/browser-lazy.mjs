@@ -88,7 +88,7 @@ else bad(`one column took ${times.one} ms and all of them took ${times.all} ms`)
 const truth = await page.evaluate(() => {
   const P = window.PARIS;
   const col = P.state.table.cols[5];
-  return { name: col.name, values: col.rows.slice(0, 5).map((v) => P.fmtValue(v, col.spec)) };
+  return { name: col.name, values: Array.from(col.rows.slice(0, 5)).map((v) => P.fmtValue(v, col.spec)) };
 });
 await page.goto("file://" + appPath);
 await page.setInputFiles("#picker", file);
@@ -108,7 +108,7 @@ await page.evaluate(async () => {
   /* and now something wants column 5 after all */
   await P.fillColumns(P.state.dataset, t, [5]);
   window.__after = { n: t.cols[5].rows.length,
-    values: t.cols[5].rows.slice(0, 5).map((v) => P.fmtValue(v, t.cols[5].spec)) };
+    values: Array.from(t.cols[5].rows.slice(0, 5)).map((v) => P.fmtValue(v, t.cols[5].spec)) };
 });
 const before = await page.evaluate(() => window.__before);
 const after = await page.evaluate(() => window.__after);
