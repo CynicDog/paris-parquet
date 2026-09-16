@@ -7,7 +7,8 @@ with the repo so the features have something to be tried on out of the box.
 
 Unlike tools/fixtures.py, which writes a large corpus covering every codec,
 encoding and awkward type, this is a tiny, readable, plausible shop: customers,
-products, and the orders that reference both. It is deterministic (seeded), so
+products, the orders that reference both, and a partitioned folder of events.
+It is deterministic (seeded), so
 regenerating it against the same pyarrow produces byte-identical
 files and an empty diff (the writer stamps its own version into the footer).
 
@@ -18,11 +19,15 @@ The shapes are chosen for the features, not for volume:
   - low-cardinality columns (country, category, status) worth grouping and
     pivoting on, nulls in a few columns, a decimal, a date and a timestamp
   - orders written in small row groups, so pushdown has something to skip
+  - data/events/, hive-partitioned, for Open folder / the folder tree: several
+    parts that read as one table, with year and month as real columns, plus a
+    _SUCCESS file that must be ignored
 """
 import datetime
 import decimal
 import os
 import random
+import shutil
 import sys
 
 import pyarrow as pa
@@ -117,6 +122,36 @@ def orders(n=600, n_customers=40):
     })
 
 
+EVENTS = ["view", "view", "view", "add_to_cart", "checkout", "support_ticket"]
+
+
+def events_part(year, month, n):
+    """One partition of data/events/. year and month are deliberately NOT
+    columns -- the reader derives them from the directory names."""
+    start = datetime.datetime(year, month, 1, 8, 0)
+    return pa.table({
+        "event_id": pa.array(["%d%02d-%04d" % (year, month, i) for i in range(n)], pa.string()),
+        "customer_id": pa.array([1000 + random.randrange(40) for _ in range(n)], pa.int32()),
+        "event": pa.array([random.choice(EVENTS) for _ in range(n)]).dictionary_encode(),
+        "seconds": pa.array([round(random.uniform(1.5, 600), 1) for _ in range(n)], pa.float64()),
+        "at": pa.array([start + datetime.timedelta(minutes=i * 41) for i in range(n)], pa.timestamp("ms")),
+    })
+
+
+def folder(root):
+    """A hive-partitioned folder: four parts that read as one 256-row table
+    with year and month recovered from the path. The _SUCCESS marker is there
+    on purpose -- the ecosystem leaves them lying around and the reader has to
+    ignore them rather than choke."""
+    shutil.rmtree(root, ignore_errors=True)
+    for i, month in enumerate((1, 2, 3, 4)):
+        d = os.path.join(root, "year=2024", "month=%02d" % month)
+        os.makedirs(d, exist_ok=True)
+        pq.write_table(events_part(2024, month, 58 + i * 4),
+                       os.path.join(d, "part-0.parquet"), compression="snappy")
+    open(os.path.join(root, "_SUCCESS"), "w").close()
+
+
 def main(out):
     os.makedirs(out, exist_ok=True)
     # a different codec each, so the diff panel and the file card have something
@@ -125,12 +160,16 @@ def main(out):
     pq.write_table(products(), os.path.join(out, "products.parquet"), compression="none")
     # small row groups: pushdown and the join's range narrowing can skip most of them
     pq.write_table(orders(), os.path.join(out, "orders.parquet"), compression="snappy", row_group_size=100)
-    for name in sorted(os.listdir(out)):
-        if name.endswith(".parquet"):
-            path = os.path.join(out, name)
+    folder(os.path.join(out, "events"))
+    for dirpath, dirnames, filenames in os.walk(out):
+        dirnames.sort()
+        for name in sorted(filenames):
+            if not name.endswith(".parquet"):
+                continue
+            path = os.path.join(dirpath, name)
             f = pq.ParquetFile(path)
-            print("%-20s %6d rows  %2d cols  %2d row groups  %6d bytes" %
-                  (name, f.metadata.num_rows, f.metadata.num_columns,
+            print("%-38s %6d rows  %2d cols  %2d row groups  %6d bytes" %
+                  (os.path.relpath(path, out), f.metadata.num_rows, f.metadata.num_columns,
                    f.metadata.num_row_groups, os.path.getsize(path)))
 
 

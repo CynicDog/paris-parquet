@@ -22,10 +22,12 @@ columns. Files the ecosystem leaves lying around (`_SUCCESS`, `.crc`,
 dotfiles) are ignored; a part missing a column reads as null there; two parts
 that disagree about a column's type are refused by name.
 
-`data/` holds three small files (27 KB in all) to try it on without finding
-a parquet file first — `customers`, `products` and the `orders` that reference
-both, so a join has two real keys to work with. `data/README.md` lists what to
-try on them; `tools/sample-data.py` regenerates them.
+`data/` holds a small corpus (39 KB in all) to try it on without finding a
+parquet file first — `customers`, `products` and the `orders` that reference
+both, so a join has two real keys to work with, plus `data/events/`, a
+hive-partitioned folder of four parts (and a `_SUCCESS` marker to ignore) for
+the folder tree and **Open folder**. `data/README.md` lists what to try on
+them; `tools/sample-data.py` regenerates them.
 
 ## Concepts
 

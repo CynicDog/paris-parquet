@@ -1,8 +1,9 @@
 # data/
 
-Three small parquet files (27 KB in total) so the features have something to
-be tried on straight away — open `index.html`, drop `orders.parquet` on it,
-then use **Folder** in the header to move between the three.
+Three small parquet files and one partitioned folder (39 KB in total) so the
+features have something to be tried on straight away — open `index.html`, drop
+`orders.parquet` on it, then use **Folder** in the header to move between
+them.
 
 They are generated, deterministically, by `tools/sample-data.py`, and checked
 in rather than generated on demand: the point is that a clone has something to
@@ -13,6 +14,7 @@ open without installing pyarrow first.
 | `customers.parquet` | 40 | 7 | gzip | who ordered — city, country, tier, signup date, a nullable `newsletter` flag |
 | `products.parquet` | 12 | 5 | uncompressed | the catalogue — category, `unit_price` as a real decimal, `in_stock` |
 | `orders.parquet` | 600 | 8 | snappy, 6 row groups | the fact table — references both, with quantity, amount, timestamp, status and a mostly-null `note` |
+| `events/` | 256 in 4 parts | 5 + 2 | snappy | a hive-partitioned folder — `year=2024/month=01..04/part-0.parquet`, plus a `_SUCCESS` marker that must be ignored |
 
 ## Things to try
 
@@ -29,6 +31,19 @@ open without installing pyarrow first.
 `customers` and `products` are both much smaller than `orders`, so they're the
 side that gets hashed and `orders` is the side whose row groups get narrowed —
 the join panel reports how many of its 6 it actually read.
+
+**Open folder / the folder tree** — `data/events/` is the one to point
+**Folder** (or **Open folder**) at. The four parts read as one 256-row table
+with `year` and `month` as real columns that are in none of the files — they
+come from the directory names, and are typed as numbers, not strings. The
+`_SUCCESS` file next to them is the kind of thing the ecosystem leaves lying
+around; it should never appear as a part. Opening `data/` itself instead gives
+you the sibling-browsing case: three unrelated files plus the folder, one
+click each.
+
+`events.customer_id` covers all 40 customers, so the folder-as-one-table can
+then be joined to `customers.parquet` like any single file — a join whose left
+side is four files is worth trying once.
 
 **Group by / pivot** — join in `customers`, then `GROUP BY country` with
 `SUM(amount)` and `COUNT(*)`; add `status` as a second key and switch to
