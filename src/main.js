@@ -2,7 +2,7 @@ import { decompress, gzipDecompress, lz4BlockDecompress, snappyDecompress, zstdD
 import { $, fillColumns, groupsLeft, loadMore, readColumnRows, rowsAhead, unfilled } from "./columns.js";
 import { fileSource, hivePartition, isParquetPath, newTable, readDataset } from "./dataset.js";
 import { cellEq, cellKey, colShape, columnStats, datasetShape, diff, initDiff, openCompare, renderDiff, rowDiff, schemaDiff, suggestKey } from "./diff.js";
-import { initJoin, join } from "./join.js";
+import { initJoin, join, openJoinCompare } from "./join.js";
 import { assemble, intersectRanges, mergeRanges, rangeCount, readColumnChunk, readColumnIndex, readOffsetIndex, readPage, readRowsRanges, unionRanges } from "./encoding.js";
 import { bloomBytes, bloomHas, chunkBounds, clauseCanMatch, clauseGroups, clauseRanges, planReport, planScan, readBloom, showPlan, xxh64 } from "./pushdown.js";
 import { aggregate, compileFilter, newQuery, parseSql, querySql, runQuery, sqlTokenize, toggleSort } from "./query.js";
@@ -77,6 +77,20 @@ export function busy(on, text) {
 export const FIRST_ROWS = 20000;
 
 export function isParquetFile(f) { return isParquetPath(f.webkitRelativePath || f.name); }
+
+/**
+ * Every parquet file this page load has been handed -- opened, dropped, or
+ * picked as the other side of a diff or join -- by path. An entry re-reads
+ * its File on demand, so remembering one costs a reference, and the folder
+ * panel can offer them all again without a picker dialog (see #17). Nothing
+ * is persisted: a reload starts empty, like the folder grant does.
+ */
+export const seen = new Map();
+export function remember(entries) {
+  for (const e of entries) if (!seen.has(e.path)) seen.set(e.path, e);
+  return entries;
+}
+
 export function entriesFromFiles(list) {
   const out = [];
   for (const f of list) {
@@ -84,7 +98,7 @@ export function entriesFromFiles(list) {
     if (isParquetPath(path)) out.push({ src: fileSource(f), path });
   }
   out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return out;
+  return remember(out);
 }
 /** A dropped folder arrives as directory entries, not files; walk it. */
 export async function entriesFromDrop(dt) {
@@ -114,7 +128,7 @@ export async function entriesFromDrop(dt) {
   };
   for (const r of roots) await walk(r, "");
   out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return out;
+  return remember(out);
 }
 
 export async function openFile(file) { return openEntries(entriesFromFiles([file])); }
@@ -346,8 +360,10 @@ export function init() {
     if (!isFileDrag(e)) return;
     stop(e);
     document.body.classList.remove("dragging");
-    /* dropped onto the diff panel, it is the other side rather than a new file */
-    const compare = diff.on && state.table && e.target.closest && e.target.closest("#diffwrap");
+    /* dropped onto the diff or join panel, it is the other side rather than a new file */
+    const onPanel = (id) => state.table && e.target.closest && e.target.closest(id);
+    const compare = diff.on && onPanel("#diffwrap");
+    const joinB = join.on && onPanel("#joinwrap");
     busy(true, "looking through what you dropped…");
     let entries = [];
     try { entries = await entriesFromDrop(e.dataTransfer); }
@@ -358,7 +374,9 @@ export function init() {
       return;
     }
     const folder = entries[0].path.indexOf("/") > 0 ? entries[0].path.split("/")[0] : null;
-    if (compare) openCompare(entries, folder); else openEntries(entries, folder);
+    if (compare) openCompare(entries, folder);
+    else if (joinB) openJoinCompare(entries, folder);
+    else openEntries(entries, folder);
   });
 }
 if (typeof document !== "undefined") {

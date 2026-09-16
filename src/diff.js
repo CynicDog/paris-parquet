@@ -505,10 +505,23 @@ export function sideA() {
   return { dataset: state.dataset, table: state.table, name: sideName(state.dataset) };
 }
 export function sideName(dataset) {
+  if (!dataset.parts.length) return "the joined table";   /* no file behind it */
   return dataset.parts.length > 1 ? datasetName(dataset) : dataset.parts[0].path;
 }
 export function renderDiff() {
   if (!state.table) return;
+  /* every card here is read out of the two footers -- row groups, codecs,
+     per-column statistics -- and a joined table has no footer of its own.
+     Say so rather than diffing half of it against a file */
+  if (state.table.joined) {
+    $("diffbar").innerHTML = "<span class='qtitle'>COMPARE</span>" +
+      "<span class='muted'>not available for a joined table</span>" +
+      "<span class='grow'></span><button data-dact='close'>close</button>";
+    $("diffbody").innerHTML = "<div class='dnote'>A diff is read from both files' footers — " +
+      "row groups, codecs, per-column statistics — and a joined table has none of its own. " +
+      "Undo the join first, in the <b>Join</b> panel, to compare the file it came from.</div>";
+    return;
+  }
   /* growing or scanning the open file leaves columns nobody asked for behind;
      a diff wants all of them */
   if (needFilled(state.table.cols.map((c, i) => i), renderDiff)) return;

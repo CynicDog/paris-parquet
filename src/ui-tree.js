@@ -1,6 +1,7 @@
 import { $ } from "./columns.js";
 import { isParquetPath } from "./dataset.js";
-import { busy, drag, openFile, showError } from "./main.js";
+import { join, joinHooks, openJoinCompare } from "./join.js";
+import { busy, drag, entriesFromFiles, openFile, seen, showError } from "./main.js";
 import { esc } from "./view.js";
 
 /**
@@ -12,14 +13,21 @@ import { esc } from "./view.js";
  */
 export const tree = {
   on: false,
-  kind: null,            /* "live" (File System Access) | "snapshot" (webkitdirectory) | null */
+  kind: null,            /* "live" | "snapshot" | "session" (files seen this load) | null */
   rootName: "",
   rootHandle: null,      /* FileSystemDirectoryHandle, kind === "live" only */
   liveChildren: new Map(), /* dir path ("" for root) -> [{name, kind, handle}], populated lazily */
   nodes: null,            /* kind === "snapshot": the whole tree, built once, up front */
   expanded: new Set(),
   openPath: null,         /* path of the file currently shown in the grid, for highlighting */
+  pickPath: null,         /* path picked as the join's side B, while picking */
+  wasOn: false,           /* the panel was already open before the join opened it */
 };
+
+/** Clicking a file opens it, unless the join panel is waiting for a side B. */
+function picking() {
+  return join.on;
+}
 
 export function treeSupported() {
   return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
@@ -41,7 +49,7 @@ async function listLiveDir(handle) {
 }
 
 function snapshotNode() {
-  return { children: new Map(), file: null };
+  return { children: new Map(), file: null, entry: null };
 }
 function buildSnapshotTree(files) {
   const root = snapshotNode();
@@ -85,6 +93,36 @@ export async function openTreeLive() {
   renderTree();
 }
 
+/**
+ * The fallback tree: every parquet seen this load, laid out by its own path.
+ * Not a folder -- nothing here was granted -- just what is already in hand,
+ * so the join panel has something to click when no folder is being browsed.
+ */
+export function openTreeSession() {
+  /* one file is the one already open: a panel offering only that is noise */
+  if (seen.size < 2) return false;
+  const root = snapshotNode();
+  for (const [path, entry] of seen) {
+    const parts = path.split("/").filter(Boolean);
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const seg = parts[i];
+      if (!node.children.has(seg)) node.children.set(seg, snapshotNode());
+      node = node.children.get(seg);
+      tree.expanded.add(parts.slice(0, i + 1).join("/"));
+    }
+    const leaf = parts[parts.length - 1];
+    if (!node.children.has(leaf)) node.children.set(leaf, snapshotNode());
+    node.children.get(leaf).entry = entry;
+  }
+  tree.kind = "session";
+  tree.nodes = root;
+  tree.rootName = "files opened this session";
+  showTreePanel(true);
+  renderTree();
+  return true;
+}
+
 export function openTreeSnapshot(fileList) {
   if (!fileList.length) return;
   const { root, rootName } = buildSnapshotTree(fileList);
@@ -104,6 +142,7 @@ function showTreePanel(on) {
 
 export function closeTree() {
   tree.kind = null;
+  tree.pickPath = null;
   tree.rootHandle = null;
   tree.rootName = "";
   tree.liveChildren = new Map();
@@ -130,15 +169,19 @@ function renderLiveLevel(dirPath, depth) {
   return html;
 }
 
+function isLeaf(node) {
+  return !!(node.file || node.entry);
+}
+
 function renderSnapshotLevel(node, path, depth) {
   let html = "";
   const entries = [...node.children.entries()].sort((a, b) => {
-    const ad = a[1].file ? 1 : 0, bd = b[1].file ? 1 : 0;
+    const ad = isLeaf(a[1]) ? 1 : 0, bd = isLeaf(b[1]) ? 1 : 0;
     return ad !== bd ? ad - bd : (a[0] < b[0] ? -1 : 1);
   });
   for (const [name, child] of entries) {
     const p = path ? path + "/" + name : name;
-    const kind = child.file ? "file" : "directory";
+    const kind = isLeaf(child) ? "file" : "directory";
     const isOpen = tree.expanded.has(p);
     html += treeRow(kind, name, p, depth, isOpen);
     if (kind === "directory" && isOpen) html += renderSnapshotLevel(child, p, depth + 1);
@@ -148,7 +191,7 @@ function renderSnapshotLevel(node, path, depth) {
 
 function treeRow(kind, name, path, depth, isOpen) {
   const cssKind = kind === "directory" ? "dir" : "file";
-  const on = kind === "file" && path === tree.openPath;
+  const on = kind === "file" && path === (picking() ? tree.pickPath : tree.openPath);
   return "<div class='tnode t" + cssKind + (on ? " ton" : "") + "' data-path='" + esc(path) +
     "' data-kind='" + kind + "' style='padding-left:" + (8 + depth * 14) + "px'>" +
     "<span class='tcaret" + (kind === "file" ? " tleaf" : "") + "'>" + nodeIcon(kind, isOpen) + "</span>" +
@@ -160,9 +203,11 @@ export function renderTree() {
   const who = $("treewho");
   if (!tree.kind) { body.innerHTML = ""; who.innerHTML = ""; return; }
   who.innerHTML = "<b title='" + esc(tree.rootName) + "'>" + esc(tree.rootName) + "</b>" +
-    "<span class='grow'></span><button data-tact='change'>change</button>";
+    "<span class='grow'></span>" +
+    (tree.kind === "session" ? "" : "<button data-tact='change'>change</button>");
   const html = tree.kind === "live" ? renderLiveLevel("", 0) : renderSnapshotLevel(tree.nodes, "", 0);
-  body.innerHTML = html || "<div class='tempty'>No .parquet files found here.</div>";
+  body.innerHTML = (picking() ? "<div class='tpick'>click a file to join against</div>" : "") +
+    (html || "<div class='tempty'>No .parquet files found here.</div>");
 }
 
 async function toggleDir(path) {
@@ -191,15 +236,57 @@ async function pickFile(path) {
   } else {
     let node = tree.nodes;
     for (const seg of path.split("/")) node = node.children.get(seg);
-    file = node && node.file;
+    if (!node) return;
+    if (node.entry && picking()) {          /* already in hand: no File to fetch */
+      tree.pickPath = path;
+      renderTree();
+      await openJoinCompare([node.entry], path);
+      return;
+    }
+    file = node.file;
   }
   if (!file) return;
+  if (picking()) {
+    tree.pickPath = path;
+    renderTree();
+    await openJoinCompare(entriesFromFiles([file]), path);
+    return;
+  }
   tree.openPath = path;
   renderTree();
   await openFile(file);
 }
 
+/**
+ * Opening the join panel turns this one into its file picker: whatever
+ * folder is already being browsed if there is one, and otherwise the files
+ * this load has been handed. A panel opened only for the join closes again
+ * with it; one the user opened themselves stays exactly as it was.
+ */
+function syncTreeForJoin(on) {
+  if (on) {
+    tree.wasOn = tree.on;
+    tree.pickPath = null;
+    if (!tree.on) openTreeSession();
+    else renderTree();
+    return;
+  }
+  tree.pickPath = null;
+  if (tree.on && !tree.wasOn && tree.kind === "session") closeTree();
+  else if (tree.on) renderTree();
+}
+
+/** A side B picked by dialog or drop is one more file the panel can offer,
+    and the one it should be showing as picked. */
+function syncTreeAfterPick(path) {
+  if (!join.on) return;
+  tree.pickPath = path || null;
+  if (!tree.on) openTreeSession(); else renderTree();
+}
+
 export function initTree() {
+  joinHooks.onShow = syncTreeForJoin;
+  joinHooks.onPick = syncTreeAfterPick;
   $("toggleTree").addEventListener("click", () => {
     if (tree.on) { closeTree(); return; }
     if (treeSupported()) openTreeLive();

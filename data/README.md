@@ -32,6 +32,11 @@ open without installing pyarrow first.
 side that gets hashed and `orders` is the side whose row groups get narrowed —
 the join panel reports how many of its 6 it actually read.
 
+Both at once is the thing to try: join `customers` in, then join the result
+against `products`. Open all three from `data/` (drop them on the page, or
+browse the folder) and the join panel's left-hand file list offers them
+without a dialog.
+
 **Open folder / the folder tree** — `data/events/` is the one to point
 **Folder** (or **Open folder**) at. The four parts read as one 256-row table
 with `year` and `month` as real columns that are in none of the files — they

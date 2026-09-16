@@ -87,7 +87,8 @@ them; `tools/sample-data.py` regenerates them.
   decoded — a `GROUP BY` on 2 of 60 columns only reads those 2.
 
 **Folder** in the header browses the folder a file lives in, so you can open
-a sibling without a picker dialog each time.
+a sibling without a picker dialog each time — and doubles as the **Join**
+panel's file picker (above).
 - Uses the File System Access API (`showDirectoryPicker`) where the browser
   has it — a live, lazily-expandable tree. Where it doesn't (Safari, Firefox
   as of writing), falls back to the same `webkitdirectory` picker "Open
@@ -107,13 +108,26 @@ a sibling without a picker dialog each time.
 - Row-level diff on a chosen key column(s): rows only in A, only in B, and
   changed cells (`old → new`).
 - **swap** flips which file is "open" without re-reading either.
+- Every card here is read out of the two footers, so a joined table — which
+  has no footer of its own — is named and refused rather than half-compared.
 
 **Join** combines two files into one table on a key — the opened file plus a
-second one you pick, similar to Diff's "choose file B".
+second one you pick.
+- Pick the second file from the **folder panel on the left**: opening Join
+  turns it into the join's file list — the folder you're browsing if there
+  is one, otherwise every parquet this page load has been handed (opened,
+  dropped, or picked before). Clicking one there sets it as B rather than
+  replacing the open file, and the row stays marked while it is B. Dropping
+  a file on the join panel does the same, and `choose file B` / `folder`
+  are still there. A panel that was only opened for the join closes with it.
 - Inner join on a single equality key, one column per side (they don't need
   the same name — `region` on one side to `name` on the other is normal).
-  One join at a time; the result replaces the open table, and **Undo**
-  restores the original file exactly, footer metadata included.
+  The result replaces the open table, and **Undo** restores the original
+  file exactly, footer metadata included.
+- A result can be joined again: the second join reads its keys off the
+  joined table, and since that table is already whole and has no footer,
+  neither side is sent back to the reader for row groups it hasn't got.
+  However many are chained on, one **Undo** goes back to the file.
 - The smaller file (by row count) is always read fully and hashed; the
   larger one has its row groups narrowed to the smaller side's key range
   first, the same pushdown (`clauseCanMatch`/the page index) `Scan file`
@@ -228,7 +242,7 @@ node tools/browser-push.mjs /tmp/fx/push      # drive the scan, and time it
 node tools/browser-lazy.mjs /tmp/fx/wide.parquet   # only decode what is wanted
 node tools/browser-workers.mjs /tmp/fx/*.parquet   # the other cores agree, cell for cell
 node tools/browser-tree.mjs /tmp/fx/push      # drive the folder tree, both backends, count requests
-node tools/browser-join.mjs                   # drive a join, check pushdown narrowed it, and undo
+node tools/browser-join.mjs                   # drive a join from both pickers, chain one, check pushdown narrowed it, and undo
 ```
 
 - `check.mjs` pulls the `<script>` out of `index.html` and runs it against a

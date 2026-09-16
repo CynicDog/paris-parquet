@@ -17,11 +17,33 @@ import { baseView, esc, newDisplay, num, setView, state } from "./view.js";
  * clause) and replaces the open table with the combined result, which the
  * rest of the app then treats exactly like any other opened file.
  */
-export const join = { on: false, b: null, keyA: -1, keyB: -1, before: null, result: null };
+export const join = { on: false, b: null, keyA: -1, keyB: -1, before: null, result: null, chain: null };
+
+/**
+ * The folder panel offers its files as side B while this panel is open, but
+ * it is built later than this module (see the manifest in scripts/
+ * compose.mjs), so it registers itself here rather than being imported.
+ */
+export const joinHooks = { onShow: null, onPick: null };
 
 function sideDisplayName(dataset) {
   if (!dataset) return "";
+  if (!dataset.parts.length) return "";
   return dataset.parts.length > 1 ? dataset.parts.length + " files" : dataset.parts[0].path;
+}
+
+/** A joined table lives in memory with no parts behind it: already fully
+    read, nothing to narrow, no footer to plan against. */
+function materialized(dataset) {
+  return !dataset.parts.length;
+}
+
+/** What the open table is called right now -- the file, or the chain of
+    joins already applied to it. */
+function currentAName() {
+  if (!state.table) return "";
+  if (state.table.joined) return join.chain || "the joined table";
+  return sideDisplayName(state.dataset);
 }
 
 function guessKeys(aCols, bCols) {
@@ -42,6 +64,7 @@ export function showJoin(on) {
   $("gridwrap").hidden = on || !state.view;
   $("pager").hidden = on || !state.view;
   $("toggleJoin").textContent = on ? "Table" : "Join";
+  if (joinHooks.onShow) joinHooks.onShow(on);
   if (on) renderJoin();
 }
 
@@ -60,12 +83,14 @@ export async function openJoinCompare(entries, label) {
     join.keyB = bi;
     join.result = null;
     renderJoin();
+    if (joinHooks.onPick) joinHooks.onPick(join.b.name);
   } catch (e) { showError(e); } finally { busy(false); }
 }
 
 export function renderJoin() {
   if (!state.table) return;
-  const aName = join.before ? join.before.name : sideDisplayName(state.dataset);
+  const aName = currentAName();
+  const undoName = join.before ? join.before.name : aName;
   const b = join.b;
   $("joinbar").innerHTML = "<span class='qtitle'>JOIN</span>" +
     "<span class='dside'>A <b title='" + esc(aName) + "'>" + esc(aName) + "</b></span>" +
@@ -78,12 +103,14 @@ export function renderJoin() {
 
   let body;
   if (!b) {
-    body = "<div class='dnote'>Pick a second file to join against " + esc(aName) + ".</div>";
+    body = "<div id='dropb'><div class='big'>Drop the file to join against here</div>" +
+      "<div class='hint'>Or click one in the folder panel on the left, or use " +
+      "<b>choose file B</b> above. A is the table already open:<br>" + esc(aName) + "</div></div>";
   } else if (join.result) {
     body = "<div class='jresult'>" + esc(join.result) +
-      "<br><button id='jundo'>Undo, back to " + esc(aName) + "</button></div>";
+      "<br><button id='jundo'>Undo, back to " + esc(undoName) + "</button></div>";
   } else {
-    const aCols = join.before ? join.before.table.cols : state.table.cols;
+    const aCols = state.table.cols;
     const aOpts = aCols.map((c, i) => "<option value='" + i + "'" + (i === join.keyA ? " selected" : "") +
       ">" + esc(c.name) + "</option>").join("");
     const bOpts = b.table.cols.map((c, i) => "<option value='" + i + "'" + (i === join.keyB ? " selected" : "") +
@@ -125,7 +152,7 @@ function adoptJoinedTable(dataset, table, description) {
 export async function runJoin() {
   if (!state.table || !join.b || join.keyA < 0 || join.keyB < 0) return;
   const aDatasetIn = state.dataset, aTableIn = state.table;
-  const aNameIn = join.before ? join.before.name : sideDisplayName(aDatasetIn);
+  const aNameIn = currentAName();
   const b = join.b;
   busy(true, "joining…");
   await new Promise((r) => setTimeout(r, 0));
@@ -138,9 +165,11 @@ export async function runJoin() {
     const probeSeed = aIsBuild ? b.table : aTableIn;
     const probeKeyCi = aIsBuild ? join.keyB : join.keyA;
 
-    busy(true, "reading the smaller side fully…");
-    await new Promise((r) => setTimeout(r, 0));
-    await loadMore(buildDataset, buildTable, Infinity);
+    if (!materialized(buildDataset)) {
+      busy(true, "reading the smaller side fully…");
+      await new Promise((r) => setTimeout(r, 0));
+      await loadMore(buildDataset, buildTable, Infinity);
+    }
 
     const buildKeyCol = buildTable.cols[buildKeyCi];
     const kk = sortKey(buildKeyCol.spec);
@@ -160,7 +189,9 @@ export async function runJoin() {
     }
 
     let probeTable = probeSeed;
-    if (loRaw !== null) {
+    /* a joined side is already whole and has no footer to plan against, so
+       there is nothing to narrow and nothing left to read */
+    if (loRaw !== null && !materialized(probeDataset)) {
       const probeKeySpec = probeSeed.cols[probeKeyCi].spec;
       const filter = { ci: probeKeyCi, pred: "between",
         value: textOf(loRaw, probeKeySpec), valueTo: textOf(hiRaw, probeKeySpec) };
@@ -173,9 +204,11 @@ export async function runJoin() {
         probeTable = nt;
       }
     }
-    busy(true, "reading the larger side…");
-    await new Promise((r) => setTimeout(r, 0));
-    await loadMore(probeDataset, probeTable, Infinity);
+    if (!materialized(probeDataset)) {
+      busy(true, "reading the larger side…");
+      await new Promise((r) => setTimeout(r, 0));
+      await loadMore(probeDataset, probeTable, Infinity);
+    }
     const probeKeyCol = probeTable.cols[probeKeyCi];
 
     const aCols = aIsBuild ? buildTable.cols : probeTable.cols;
@@ -214,7 +247,8 @@ export async function runJoin() {
 
     const bName = b.name;
     const description = aNameIn + " ⋈ " + bName + " on " + aCols[aKeyCi].name + " = " + bCols[bKeyCi].name;
-    const joinedDataset = { parts: [], numRows: matched, numGroups: 0, size: 0, reference: null };
+    const joinedDataset = { parts: [], columns: [], partitionCols: [], skipped: [],
+      numRows: matched, numGroups: 0, size: 0, reference: null };
     const joinedTable = {
       cols: outCols, dataset: joinedDataset, meta: null,
       nextPart: 0, nextGroup: 0, rowsLoaded: matched, groupsLoaded: 0,
@@ -223,8 +257,11 @@ export async function runJoin() {
         " out of " + num(aDatasetIn.numRows) + " (A) and " + num(b.dataset.numRows) + " (B)",
     };
 
+    /* Undo always goes back to the file, however many joins were chained
+       onto it, so the first one is the one worth remembering */
     if (!join.before) join.before = { dataset: aDatasetIn, table: aTableIn, name: aNameIn };
     join.result = joinedTable.joined;
+    join.chain = description;
     adoptJoinedTable(joinedDataset, joinedTable, description);
     renderJoin();
   } catch (e) { showError(e); } finally { busy(false); }
@@ -235,6 +272,7 @@ export function undoJoin() {
   const { dataset, table, name } = join.before;
   join.before = null;
   join.result = null;
+  join.chain = null;
   join.b = null;
   join.keyA = -1;
   join.keyB = -1;

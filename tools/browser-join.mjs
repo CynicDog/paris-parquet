@@ -178,6 +178,124 @@ await withPage(async (page) => {
   } else bad("pushdown did not narrow anything: " + JSON.stringify(plan));
 });
 
+/* ------------------------------------------ picking B from the folder panel */
+await withPage(async (page) => {
+  await page.goto("file://" + appPath);
+  await page.setInputFiles("#picker", path.join(tmp, "orders.parquet"));
+  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(200);
+
+  /* only the open file is known, so nothing useful could be listed yet */
+  if (await page.evaluate(() => document.getElementById("tree").hidden)) {
+    ok("no folder panel is forced open when the only file known is the open one");
+  } else bad("the folder panel opened with nothing to offer");
+
+  /* a B picked by dialog is one more file the panel can offer, and the one
+     it should show as picked */
+  await page.setInputFiles("#jpicker", path.join(tmp, "regions.parquet"));
+  await idle(page);
+  await page.waitForTimeout(300);
+  const listed = await page.evaluate(() => ({
+    hidden: document.getElementById("tree").hidden,
+    rows: [...document.querySelectorAll("#treebody .tnode")].map((n) => n.dataset.path).sort(),
+    banner: document.querySelector("#treebody .tpick")?.textContent || "",
+    picked: [...document.querySelectorAll("#treebody .tnode.ton")].map((n) => n.dataset.path),
+  }));
+  if (!listed.hidden && JSON.stringify(listed.rows) === '["orders.parquet","regions.parquet"]') {
+    ok("the folder panel lists the files this session has been handed");
+  } else bad("panel listing: " + JSON.stringify(listed));
+  if (/click a file to join against/.test(listed.banner)) ok("the panel says what a click will do there");
+  else bad("no pick banner: " + JSON.stringify(listed.banner));
+  if (JSON.stringify(listed.picked) === '["regions.parquet"]') ok("side B is marked in the panel");
+  else bad("B not marked: " + JSON.stringify(listed.picked));
+
+  /* clicking a file there sets B -- it must not replace the open file, the
+     way the same click does when the join panel is closed */
+  await page.click("#treebody .tnode[data-path='orders.parquet']");
+  await idle(page);
+  await page.waitForTimeout(300);
+  const afterSelf = await page.evaluate(() => ({
+    aRows: window.PARIS.state.table.rowsLoaded,
+    sides: [...document.querySelectorAll("#joinbar .dside b")].map((b) => b.textContent),
+  }));
+  if (afterSelf.aRows === 500 && afterSelf.sides[1] === "orders.parquet") {
+    ok("clicking in the panel picks B and leaves the open file alone");
+  } else bad("panel click changed the wrong side: " + JSON.stringify(afterSelf));
+
+  /* switch back and run: a panel-picked B must join exactly like a dialog one */
+  await page.click("#treebody .tnode[data-path='regions.parquet']");
+  await idle(page);
+  await page.waitForTimeout(300);
+  await page.selectOption("#jkeyA", { label: "region" });
+  await page.selectOption("#jkeyB", { label: "name" });
+  await page.click("#jrun");
+  await idle(page);
+  await page.waitForTimeout(200);
+  const rows = await page.evaluate(() => window.PARIS.state.table.rowsLoaded);
+  if (rows === 470) ok("a join run off a panel-picked B matches the dialog-picked one (470 rows)");
+  else bad("panel-picked join rows: " + rows);
+
+  /* a panel opened only for the join is put back the way it was found */
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(200);
+  if (await page.evaluate(() => document.getElementById("tree").hidden)) {
+    ok("a panel opened only for the join closes again with it");
+  } else bad("the folder panel outlived the join panel that opened it");
+});
+
+/* ------------------------------------------------------- chained joins */
+await withPage(async (page) => {
+  await page.goto("file://" + appPath);
+  await page.setInputFiles("#picker", path.join(tmp, "orders.parquet"));
+  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  await page.click("#toggleJoin");
+  await page.setInputFiles("#jpicker", path.join(tmp, "regions.parquet"));
+  await idle(page);
+  await page.selectOption("#jkeyA", { label: "region" });
+  await page.selectOption("#jkeyB", { label: "name" });
+  await page.click("#jrun");
+  await idle(page);
+  await page.waitForTimeout(200);
+
+  /* joining the result again: the joined table is already whole and has no
+     footer, so neither side may be sent back to the reader for more */
+  await page.setInputFiles("#jpicker", path.join(tmp, "small.parquet"));
+  await idle(page);
+  await page.waitForTimeout(300);
+  const aOpts = await page.evaluate(() =>
+    [...document.querySelectorAll("#jkeyA option")].map((o) => o.text));
+  if (aOpts.includes("manager")) ok("a second join picks keys off the joined table, not the file it came from");
+  else bad("A key options after a join: " + JSON.stringify(aOpts));
+
+  await page.selectOption("#jkeyA", { label: "id" });
+  await page.selectOption("#jkeyB", { label: "ref_id" });
+  await page.click("#jrun");
+  await idle(page);
+  await page.waitForTimeout(200);
+  const chained = await page.evaluate(() => {
+    const t = window.PARIS.state.table;
+    const ci = (n) => t.cols.findIndex((c) => c.name === n);
+    return { rows: t.rowsLoaded, hasManager: ci("manager") >= 0, hasLabel: ci("label") >= 0,
+      undo: document.getElementById("jundo")?.textContent || "" };
+  });
+  if (chained.hasManager && chained.hasLabel) ok("the chained result carries columns from both joins");
+  else bad("chained columns: " + JSON.stringify(chained));
+  if (/orders\.parquet/.test(chained.undo)) ok("Undo still offers the original file, not the first join's result");
+  else bad("undo label after chaining: " + JSON.stringify(chained.undo));
+
+  await page.click("#jundo");
+  await idle(page);
+  await page.waitForTimeout(300);
+  const back = await page.evaluate(() => ({
+    rows: window.PARIS.state.table.rowsLoaded, cols: window.PARIS.state.table.cols.length,
+    groups: window.PARIS.state.meta ? window.PARIS.state.meta.rowGroups.length : 0,
+  }));
+  if (back.rows === 500 && back.cols === 3 && back.groups > 1) {
+    ok("one Undo goes all the way back to the file, footer and all");
+  } else bad("after undo: " + JSON.stringify(back));
+});
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(failed ? failed + " check(s) failed" : "all checks passed");
 process.exit(failed ? 1 : 0);
