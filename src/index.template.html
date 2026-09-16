@@ -69,6 +69,9 @@ body{margin:0;background:var(--bg);color:var(--ink);
 .tnode:hover{background:var(--accent-soft)}
 .tnode.tfile.ton{background:var(--accent-soft);color:var(--accent)}
 .tnode .tcaret{flex:none;width:11px;color:var(--faint);font-size:9px;text-align:center}
+.tnode .tcaret:not(.tleaf):hover{color:var(--accent)}
+.tnode .ticon{flex:none;font-size:10px;color:var(--faint);line-height:1}
+.tnode.ton .ticon{color:var(--accent)}
 .tnode .tcaret.tleaf{visibility:hidden}
 .tnode .tname{overflow:hidden;text-overflow:ellipsis}
 .tnode.tdir .tname{color:var(--ink)}

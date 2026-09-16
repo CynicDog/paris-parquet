@@ -102,7 +102,11 @@ opened, dropped, or dragged into a join — and it is where **Join** lives.
   Open or closed is remembered across a reload.
 - **browse a folder** swaps the list for the folder a file lives in, so you
   can open siblings without a picker dialog each time, and **session** goes
-  back to the list. Uses the File System Access API (`showDirectoryPicker`)
+  back to the list. Clicking a folder there reads every parquet under it as
+  one table — `events/` with its `year=2024/month=01…` parts comes back as
+  one 256-row table with `year` and `month` as columns — while the caret
+  beside it opens the folder up instead, for looking at a single part on its
+  own. A folder drags onto a join side as that same one table. Uses the File System Access API (`showDirectoryPicker`)
   where the browser has it — a live, lazily-expandable tree. Where it
   doesn't (Safari, Firefox as of writing), falls back to the same
   `webkitdirectory` picker **Open folder as one table** uses, built into a

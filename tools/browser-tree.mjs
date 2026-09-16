@@ -81,7 +81,7 @@ await withPage(async (page) => {
   const subSel = `.tnode.tdir[data-path$='${nested.subName}']`;
   const sub = await page.$(subSel);
   if (!sub) { bad("webkitdirectory: subfolder row not found"); return; }
-  await sub.click();
+  await page.click(subSel + " .tcaret");
   await page.waitForTimeout(150);
   const fileSel = `.tnode.tfile[data-path$='${nested.fileName}']`;
   const file = await page.$(fileSel);
@@ -153,7 +153,7 @@ await withPage(async (page, _logs) => {
   const subSel = `.tnode.tdir[data-path$='${nested.subName}']`;
   const sub = await page.$(subSel);
   if (!sub) { bad("File System Access: subfolder row not found"); return; }
-  await sub.click();
+  await page.click(subSel + " .tcaret");
   await page.waitForTimeout(200);
   const fileSel = `.tnode.tfile[data-path$='${nested.fileName}']`;
   const file = await page.$(fileSel);
@@ -241,6 +241,56 @@ await withPage(async (page) => {
   }));
   if (!back.hidden && back.rail && back.rows === 2) ok("the rail opens it again, list intact");
   else bad("reopening from the rail: " + JSON.stringify(back));
+});
+
+/* ------------------------------ a folder row is a table, its caret a tree */
+await withPage(async (page) => {
+  await page.goto("file://" + appPath);
+  await page.setInputFiles("#treepicker", dir);
+  await idle(page);
+  await page.waitForTimeout(300);
+
+  /* a folder whose parts agree: fixtures.py ships one that deliberately does
+     not (two files disagreeing about a column's type), and reading that as
+     one table is refused by name -- which check-folder.mjs covers */
+  const mergeable = fs.readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && e.name !== "conflict" && e.name !== "ragged")
+    .map((e) => ({ name: e.name, files: fs.readdirSync(path.join(dir, e.name)).filter((f) => f.endsWith(".parquet")) }))
+    .find((d) => d.files.length);
+  if (!mergeable) { bad("no mergeable subfolder under " + dir); return; }
+  const parts = mergeable.files.length;
+  const rowSel = `.tnode.tdir[data-path='${mergeable.name}']`;
+
+  /* the row reads every parquet under it as one table -- what a folder of
+     parquet files is -- rather than only opening the row up */
+  await page.click(rowSel);
+  await idle(page);
+  await page.waitForTimeout(300);
+  const merged = await page.evaluate(() => ({
+    parts: window.PARIS.state.dataset.parts.length,
+    rows: window.PARIS.state.table.rowsLoaded,
+    marked: [...document.querySelectorAll("#treebody .tnode.ton")].map((n) => n.dataset.path),
+    expanded: [...document.querySelectorAll("#treebody .tnode")].length,
+  }));
+  if (merged.parts === parts && merged.rows > 0) {
+    ok(`clicking a folder reads its ${parts} part(s) as one ${merged.rows}-row table`);
+  } else bad("folder read as one table: " + JSON.stringify(merged));
+  if (merged.marked.join() === mergeable.name) ok("the folder row is marked as what is open");
+  else bad("folder not marked: " + JSON.stringify(merged.marked));
+
+  /* and the caret is still there for looking at one part on its own */
+  await page.click(rowSel + " .tcaret");
+  await page.waitForTimeout(250);
+  const fileSel = `.tnode.tfile[data-path='${mergeable.name}/${mergeable.files[0]}']`;
+  const one = await page.$(fileSel);
+  if (!one) { bad("the caret did not open the folder up"); return; }
+  ok("the caret still opens the folder up, without reading it");
+  await one.click();
+  await idle(page);
+  await page.waitForTimeout(250);
+  const single = await page.evaluate(() => window.PARIS.state.dataset.parts.length);
+  if (single === 1) ok("and one part still opens on its own");
+  else bad("a single part opened " + single + " parts");
 });
 
 console.log(failed ? failed + " check(s) failed" : "all checks passed");

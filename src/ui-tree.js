@@ -1,5 +1,5 @@
 import { $ } from "./columns.js";
-import { isParquetPath } from "./dataset.js";
+import { fileSource, isParquetPath } from "./dataset.js";
 import { join, joined, joinedAsB, joinHooks, openJoinCompare, openJoined } from "./join.js";
 import { busy, drag, entriesFromFiles, fileHooks, openEntries, openFile, seen, showError } from "./main.js";
 import { esc, state } from "./view.js";
@@ -31,6 +31,28 @@ export const TREE_DRAG = "application/x-paris-parquet-path";
 /** Marks a dragged row as one of the joins already run, not a file. */
 export const JOINED_PREFIX = "joined:";
 
+/**
+ * What a row stands for, as entries the reader can take: one file, or every
+ * parquet under a folder, since a folder here is one table.
+ */
+export async function entriesForPath(path) {
+  if (tree.kind === "live") {
+    try {
+      await liveDirHandle(path);
+      return await entriesUnder(path);
+    } catch { /* not a directory: a file, then */ }
+  } else {
+    let node = tree.nodes;
+    for (const seg of path.split("/").filter(Boolean)) {
+      if (!node) return [];
+      node = node.children.get(seg);
+    }
+    if (node && !isLeaf(node)) return entriesUnder(path);
+  }
+  const one = await entryForPath(path);
+  return one ? [one] : [];
+}
+
 /** Looks a path up in whatever the panel is showing, as an entry the reader
     can take: the session list holds them already, a browsed folder has to
     fetch the file first. */
@@ -50,6 +72,75 @@ export async function entryForPath(path) {
   if (!node) return null;
   if (node.entry) return node.entry;
   return node.file ? entriesFromFiles([node.file])[0] || null : null;
+}
+
+/** The directory handle for a path inside the granted root. */
+async function liveDirHandle(path) {
+  let handle = tree.rootHandle;
+  if (!path) return handle;
+  for (const seg of path.split("/")) handle = await handle.getDirectoryHandle(seg);
+  return handle;
+}
+
+/**
+ * Every parquet under a folder, as entries the reader can take -- the same
+ * thing dropping that folder on the page would hand it, so the parts read
+ * as one table and `year=2024/month=01` comes back as columns.
+ */
+async function entriesUnder(path) {
+  const out = [];
+  if (tree.kind === "live") {
+    const walk = async (handle, prefix) => {
+      for (const child of await listLiveDir(handle)) {
+        const p = prefix ? prefix + "/" + child.name : child.name;
+        if (child.kind === "directory") await walk(child.handle, p);
+        else out.push({ src: fileSource(await child.handle.getFile()), path: p });
+      }
+    };
+    await walk(await liveDirHandle(path), path);
+  } else {
+    let node = tree.nodes;
+    for (const seg of path.split("/").filter(Boolean)) {
+      if (!node) return out;
+      node = node.children.get(seg);
+    }
+    const walk = (n, prefix) => {
+      if (!n) return;
+      for (const [name, child] of n.children) {
+        const p = prefix ? prefix + "/" + name : name;
+        if (child.entry) out.push(child.entry);
+        else if (child.file) out.push({ src: fileSource(child.file), path: p });
+        else walk(child, p);
+      }
+    };
+    walk(node, path);
+  }
+  out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return out;
+}
+
+/**
+ * Clicking a folder reads all of it as one table -- which is what a folder
+ * of parquet files is -- while the caret beside it still opens it up, for
+ * looking at one part on its own.
+ */
+async function openFolder(path) {
+  busy(true, "reading the folder…");
+  try {
+    const entries = await entriesUnder(path);
+    const label = path.split("/").filter(Boolean).pop() || tree.rootName;
+    if (!entries.length) throw new Error('No .parquet files under "' + label + '".');
+    /* marked after the read, not before: opening one tells the panel which
+       path is open, and a folder's own path is not one of the files' */
+    if (picking()) {
+      await openJoinCompare(entries, label + "/");
+      tree.pickPath = path;
+    } else {
+      await openEntries(entries, label + "/");
+      tree.openPath = path;
+    }
+    renderTree();
+  } catch (e) { showError(e); } finally { busy(false); }
 }
 
 /** Clicking a file opens it, unless the join panel is waiting for a side B. */
@@ -267,15 +358,18 @@ function renderSnapshotLevel(node, path, depth) {
 }
 
 function treeRow(kind, name, path, depth, isOpen) {
-  const cssKind = kind === "directory" ? "dir" : "file";
-  const on = kind === "file" && path === (picking() ? tree.pickPath : tree.openPath);
-  /* a file can be dragged onto either side of the join panel; a folder
-     cannot, since a side is one file or one folder-read-as-one-table and
-     the tree has no way to say which is meant */
-  return "<div class='tnode t" + cssKind + (on ? " ton" : "") + "' data-path='" + esc(path) +
-    "' data-kind='" + kind + "'" + (kind === "file" ? " draggable='true'" : "") +
+  const dir = kind === "directory";
+  const on = path === (picking() ? tree.pickPath : tree.openPath);
+  /* a folder drags as one table, the same thing clicking it opens; the
+     caret is the only part of the row that expands it */
+  return "<div class='tnode t" + (dir ? "dir" : "file") + (on ? " ton" : "") +
+    "' data-path='" + esc(path) + "' data-kind='" + kind + "' draggable='true'" +
+    " title='" + esc(dir ? name + "/ — read every parquet in here as one table" : name) + "'" +
     " style='padding-left:" + (8 + depth * 14) + "px'>" +
-    "<span class='tcaret" + (kind === "file" ? " tleaf" : "") + "'>" + nodeIcon(kind, isOpen) + "</span>" +
+    "<span class='tcaret" + (dir ? "" : " tleaf") + "'" +
+    (dir ? " title='Open this folder up, to look at one part on its own'" : "") + ">" +
+    nodeIcon(kind, isOpen) + "</span>" +
+    "<span class='ticon'>" + (dir ? "&#9638;" : "&#9636;") + "</span>" +
     "<span class='tname'>" + esc(name) + "</span></div>";
 }
 
@@ -432,8 +526,9 @@ export function initTree() {
       return;
     }
     const path = row.dataset.path;
-    if (row.dataset.kind === "directory") toggleDir(path);
-    else pickFile(path).catch(showError);
+    if (row.dataset.kind !== "directory") { pickFile(path).catch(showError); return; }
+    if (e.target.closest(".tcaret")) toggleDir(path);   /* the caret opens it up */
+    else openFolder(path);                              /* the row reads all of it */
   });
   $("treegrip").addEventListener("pointerdown", (e) =>
     drag(e, "colsizing", (ev) => treeWidth(ev.clientX)));

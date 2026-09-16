@@ -7,7 +7,7 @@ import { keyPart, newQuery, sortKey, textOf } from "./query.js";
 import { lessThan } from "./types.js";
 import { renderMeta } from "./ui-metadata.js";
 import { renderQuery, renderQueryColumns } from "./ui-query-builder.js";
-import { entryForPath, JOINED_PREFIX, TREE_DRAG } from "./ui-tree.js";
+import { entriesForPath, JOINED_PREFIX, TREE_DRAG } from "./ui-tree.js";
 import { baseView, esc, newDisplay, num, setView, state } from "./view.js";
 
 /**
@@ -407,9 +407,11 @@ function sideDropHandlers() {
         return;
       }
       if (path) {                 /* a row dragged out of the file panel */
-        const entry = await entryForPath(path);
-        if (!entry) throw new Error('"' + path + '" is no longer available; open it again.');
-        await dropOnSide(which, [entry], path);
+        const entries = await entriesForPath(path);
+        if (!entries.length) throw new Error('"' + path + '" is no longer available; open it again.');
+        /* a folder dropped on a side is one table, named after itself */
+        const label = entries.length > 1 ? path.split("/").filter(Boolean).pop() + "/" : path;
+        await dropOnSide(which, entries, label);
         return;
       }
       const entries = await entriesFromDrop(e.dataTransfer);
