@@ -172,6 +172,9 @@ function showTreePanel(on) {
   tree.on = on;
   $("tree").hidden = !on;
   $("treegrip").hidden = !on;
+  /* closed, the panel leaves a rail on the edge it was on -- the way back
+     in belongs where the panel is, not in the header */
+  $("treerail").hidden = on;
 }
 
 /** The panel is open unless this page's user has closed it before. */
@@ -361,8 +364,7 @@ export function initTree() {
   joinHooks.onPick = syncTreeAfterPick;
   fileHooks.onSeen = syncTreeAfterSeen;
   fileHooks.onOpen = syncTreeAfterOpen;
-  $("toggleTree").addEventListener("click", () => {
-    if (tree.on) { closeTree(); rememberPanel(false); return; }
+  $("treerail").addEventListener("click", () => {
     openTreeSession();               /* never a folder grant: that is a click inside */
     rememberPanel(true);
   });
@@ -406,7 +408,7 @@ export function initTree() {
   } catch (_e) { /* fine */ }
   /* open from the start, with nothing in it yet: the panel is where files
      turn up, so it is there before the first one does */
-  if (panelWanted()) openTreeSession();
+  if (panelWanted()) openTreeSession(); else showTreePanel(false);
 }
 
 export function treeWidth(px) {

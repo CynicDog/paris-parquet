@@ -255,14 +255,16 @@ await withPage(async (page) => {
 
   /* the join is opened from inside the panel, so closing the panel takes
      the way into it with them -- the join's own close is the way out */
-  await page.click("#toggleTree");
+  await page.click("#treeclose");
   await page.waitForTimeout(200);
   const gone = await page.evaluate(() => {
     const b = document.getElementById("toggleJoin");
-    return { panelHidden: document.getElementById("tree").hidden, buttonReachable: !!b.offsetParent };
+    return { panelHidden: document.getElementById("tree").hidden,
+      railShown: !document.getElementById("treerail").hidden, buttonReachable: !!b.offsetParent };
   });
-  if (gone.panelHidden && !gone.buttonReachable) ok("closing the panel takes its Join button with it");
-  else bad("panel closed: " + JSON.stringify(gone));
+  if (gone.panelHidden && gone.railShown && !gone.buttonReachable) {
+    ok("closing the panel takes its Join button with it, leaving the rail");
+  } else bad("panel closed: " + JSON.stringify(gone));
 });
 
 /* ------------------------------------------------------- chained joins */

@@ -219,18 +219,28 @@ await withPage(async (page) => {
   if (line.includes(nested.fileName)) ok("clicking a listed file opens it");
   else bad("fileline after clicking the list: " + line);
 
-  /* and the toggle hides and shows it again without asking for a folder */
-  await page.click("#toggleTree");
+  /* closed, it leaves a rail behind: that is the way back in, and it asks
+     for no folder grant on the way */
+  await page.click("#treeclose");
   await page.waitForTimeout(200);
-  const hidden = await page.evaluate(() => document.getElementById("tree").hidden);
-  await page.click("#toggleTree");
+  const shut = await page.evaluate(() => ({
+    panel: document.getElementById("tree").hidden,
+    rail: document.getElementById("treerail").hidden,
+    inHeader: [...document.querySelectorAll("header button, header label.btn")]
+      .some((b) => /files/i.test(b.textContent)),
+  }));
+  if (shut.panel && !shut.rail && !shut.inHeader) ok("closing it leaves a rail on the edge, not a header button");
+  else bad("after closing: " + JSON.stringify(shut));
+
+  await page.click("#treerail");
   await page.waitForTimeout(200);
   const back = await page.evaluate(() => ({
     hidden: document.getElementById("tree").hidden,
+    rail: document.getElementById("treerail").hidden,
     rows: [...document.querySelectorAll("#treebody .tnode")].length,
   }));
-  if (hidden && !back.hidden && back.rows === 2) ok("the header button hides and shows the panel, list intact");
-  else bad("toggling the panel: " + JSON.stringify({ hidden, back }));
+  if (!back.hidden && back.rail && back.rows === 2) ok("the rail opens it again, list intact");
+  else bad("reopening from the rail: " + JSON.stringify(back));
 });
 
 console.log(failed ? failed + " check(s) failed" : "all checks passed");

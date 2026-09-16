@@ -37,7 +37,14 @@ body{margin:0;background:var(--bg);color:var(--ink);
   display:flex;flex-direction:row;overflow:hidden}
 #main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 
-/* ---------- folder tree ---------- */
+/* ---------- file panel ---------- */
+#treerail{flex:none;width:22px;display:flex;flex-direction:column;align-items:center;gap:7px;
+  padding-top:9px;cursor:pointer;background:var(--panel);border-right:1px solid var(--line);
+  color:var(--faint);user-select:none}
+#treerail:hover{color:var(--accent);background:var(--accent-soft)}
+#treerail .trchev{font-size:13px;line-height:1}
+#treerail .trword{writing-mode:vertical-rl;font:10px var(--mono);letter-spacing:.18em}
+
 #tree{flex:none;width:var(--treew,240px);display:flex;flex-direction:column;overflow:hidden;
   background:var(--panel);border-right:1px solid var(--line)}
 #treewho{flex:none;padding:5px 10px;font:11px var(--mono);color:var(--dim);
@@ -380,6 +387,9 @@ details[open]>summary::before{content:"▾ "}
 <style id="colstyle"></style>
 </head>
 <body>
+<div id="treerail" hidden title="Show the file panel">
+  <span class="trchev">&rsaquo;</span><span class="trword">FILES</span>
+</div>
 <aside id="tree" hidden>
   <div class="qbar">
     <span class="qtitle">FILES</span>
@@ -396,7 +406,6 @@ details[open]>summary::before{content:"▾ "}
 <div id="main">
 <header>
   <h1>paris-parquet <span>· single-file parquet viewer</span></h1>
-  <button id="toggleTree" title="Show or hide the file panel: what you have opened this session, or a folder you browse from there">Files</button>
   <input type="file" id="treepicker" webkitdirectory directory>
   <label class="btn" for="picker">Open .parquet</label>
   <input type="file" id="picker" accept=".parquet,.pq,application/octet-stream" multiple>
@@ -6706,6 +6715,9 @@ function showTreePanel(on) {
   tree.on = on;
   $("tree").hidden = !on;
   $("treegrip").hidden = !on;
+  /* closed, the panel leaves a rail on the edge it was on -- the way back
+     in belongs where the panel is, not in the header */
+  $("treerail").hidden = on;
 }
 
 /** The panel is open unless this page's user has closed it before. */
@@ -6895,8 +6907,7 @@ function initTree() {
   joinHooks.onPick = syncTreeAfterPick;
   fileHooks.onSeen = syncTreeAfterSeen;
   fileHooks.onOpen = syncTreeAfterOpen;
-  $("toggleTree").addEventListener("click", () => {
-    if (tree.on) { closeTree(); rememberPanel(false); return; }
+  $("treerail").addEventListener("click", () => {
     openTreeSession();               /* never a folder grant: that is a click inside */
     rememberPanel(true);
   });
@@ -6940,7 +6951,7 @@ function initTree() {
   } catch (_e) { /* fine */ }
   /* open from the start, with nothing in it yet: the panel is where files
      turn up, so it is there before the first one does */
-  if (panelWanted()) openTreeSession();
+  if (panelWanted()) openTreeSession(); else showTreePanel(false);
 }
 
 function treeWidth(px) {

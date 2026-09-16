@@ -97,8 +97,9 @@ is dropped. It lists every parquet the page has been handed this session —
 opened, dropped, or dragged into a join — and it is where **Join** lives.
 - A drop shows up in it immediately; clicking a row opens that file; the
   open one is marked; a folder new to the list is expanded once, so a file
-  that just arrived is visible without hunting for it. **Files** in the
-  header hides and shows the panel, and that choice is remembered.
+  that just arrived is visible without hunting for it. `close` shuts the
+  panel down to a thin rail on the same edge — click that to bring it back.
+  Open or closed is remembered across a reload.
 - **browse a folder** swaps the list for the folder a file lives in, so you
   can open siblings without a picker dialog each time, and **session** goes
   back to the list. Uses the File System Access API (`showDirectoryPicker`)
