@@ -1,5 +1,7 @@
 # fixtures are generated: python3 tools/fixtures.py /tmp/fx
 *.parquet
+# the sample corpus is checked in, so a clone has something to open
+!data/*.parquet
 *.expect.json
 node_modules/
 __pycache__/

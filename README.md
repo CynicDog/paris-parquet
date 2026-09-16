@@ -22,6 +22,11 @@ columns. Files the ecosystem leaves lying around (`_SUCCESS`, `.crc`,
 dotfiles) are ignored; a part missing a column reads as null there; two parts
 that disagree about a column's type are refused by name.
 
+`data/` holds three small files (27 KB in all) to try it on without finding
+a parquet file first — `customers`, `products` and the `orders` that reference
+both, so a join has two real keys to work with. `data/README.md` lists what to
+try on them; `tools/sample-data.py` regenerates them.
+
 ## Concepts
 
 - **Single file, no dependencies.** The whole parquet reader — thrift footer,
@@ -168,6 +173,11 @@ npm run build       # src/*.js + src/index.template.html -> index.html
 npm run lint         # biome check against src/, tools/, scripts/
 npm test              # unit tests, plus the integration suite if fixtures exist
 ```
+
+`data/` is the one place parquet files are checked in (`.gitignore` ignores
+`*.parquet` everywhere else, since fixtures are generated). `python3
+tools/sample-data.py` rewrites them; it is seeded, so an unedited run against
+the same pyarrow is byte-identical.
 
 `scripts/compose.sh` (via `scripts/compose.mjs`) is a strip-and-concatenate,
 not a bundler: it deletes the `import`/`export` statements and concatenates
