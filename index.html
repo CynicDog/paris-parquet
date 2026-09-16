@@ -342,6 +342,11 @@ table.dr td.ky{color:var(--accent)}
 .jkeys{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font:11px var(--mono);color:var(--dim);padding:6px 0}
 .jkeys select{font:11px var(--mono);background:var(--panel);color:var(--ink);border:1px solid var(--line);
   border-radius:4px;padding:2px 5px;max-width:220px}
+.jkeys button.act{background:var(--accent);border-color:var(--accent);color:var(--panel);font-weight:600;
+  padding:3px 13px;border-radius:5px}
+.jkeys button.act:hover:not(:disabled){filter:brightness(1.08)}
+.jkeys button.act:disabled{background:var(--panel);color:var(--faint);border-color:var(--line);
+  font-weight:400;cursor:default}
 .jresult{border:1px solid var(--line);border-radius:5px;padding:8px 10px;margin-top:10px;font:11px/1.6 var(--mono)}
 .chip{font:11px var(--mono);border:1px solid var(--line);background:var(--panel);color:var(--dim);
   border-radius:10px;padding:1px 9px;cursor:pointer}
@@ -6448,6 +6453,10 @@ async function runJoin() {
     join.chain = description;
     adoptJoinedTable(joinedDataset, joinedTable, description);
     renderJoin();
+    /* the join is what the panel was for: step out of the way and show the
+       table it made. Opening it again comes back to this result, Undo and
+       all, and to a second join if that is what is wanted */
+    showJoin(false);
   } catch (e) { showError(e); } finally { busy(false); }
 }
 

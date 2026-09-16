@@ -296,6 +296,10 @@ export async function runJoin() {
     join.chain = description;
     adoptJoinedTable(joinedDataset, joinedTable, description);
     renderJoin();
+    /* the join is what the panel was for: step out of the way and show the
+       table it made. Opening it again comes back to this result, Undo and
+       all, and to a second join if that is what is wanted */
+    showJoin(false);
   } catch (e) { showError(e); } finally { busy(false); }
 }
 

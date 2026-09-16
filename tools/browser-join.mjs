@@ -119,6 +119,18 @@ await withPage(async (page) => {
   if (check.sampleRegion === "east" && check.sampleManager === "Alice") ok("a sample row's B-side value is correct (id 4 -> east -> Alice)");
   else bad("sample row mismatch: " + JSON.stringify(check));
 
+  /* the panel steps out of the way once it has run: the joined table is
+     what there is to look at, and the grid is where that is looked at */
+  const afterRun = await page.evaluate(() => ({
+    join: document.getElementById("joinwrap").hidden,
+    grid: !document.getElementById("gridwrap").hidden,
+  }));
+  if (afterRun.join && afterRun.grid) ok("running the join closes the panel and shows the joined table");
+  else bad("panel after running: " + JSON.stringify(afterRun));
+
+  /* and opening it again comes back to the result, Undo and all */
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(200);
   await page.click("#jundo");
   await page.waitForTimeout(150);
   const afterUndo = await page.evaluate(() => ({
@@ -242,9 +254,8 @@ await withPage(async (page) => {
   if (rows === 470) ok("a join run off a panel-picked B matches the dialog-picked one (470 rows)");
   else bad("panel-picked join rows: " + rows);
 
-  /* closing the join leaves the panel as it was found: open, and back to
-     opening files rather than picking a side B */
-  await page.click("#toggleJoin");
+  /* the run closed the panel, so the file panel is back to opening files
+     rather than picking a side B */
   await page.waitForTimeout(200);
   const afterClose = await page.evaluate(() => ({
     hidden: document.getElementById("tree").hidden,
@@ -283,6 +294,8 @@ await withPage(async (page) => {
 
   /* joining the result again: the joined table is already whole and has no
      footer, so neither side may be sent back to the reader for more */
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(200);
   await page.setInputFiles("#jpicker", path.join(tmp, "small.parquet"));
   await idle(page);
   await page.waitForTimeout(300);
@@ -307,6 +320,8 @@ await withPage(async (page) => {
   if (/orders\.parquet/.test(chained.undo)) ok("Undo still offers the original file, not the first join's result");
   else bad("undo label after chaining: " + JSON.stringify(chained.undo));
 
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(200);
   await page.click("#jundo");
   await idle(page);
   await page.waitForTimeout(300);
@@ -421,6 +436,7 @@ await withPage(async (page) => {
     const parsed = window.PARIS.parseSql(window.PARIS.querySql(), t.cols);
     return { ok: !!parsed.query, errors: parsed.errors.map((e) => e.msg) };
   });
+  /* the grid is showing the joined table by now, not the panel */
   if (round.ok && !round.errors.length) ok("the SQL a joined table writes parses back cleanly");
   else bad("round trip: " + JSON.stringify(round.errors));
 

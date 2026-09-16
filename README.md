@@ -134,8 +134,9 @@ an empty workspace with an **A** and a **B** side to fill.
   it as B too, and that row stays marked while it is.
 - Inner join on a single equality key, one column per side (they don't need
   the same name — `region` on one side to `name` on the other is normal).
-  The result replaces the open table, and **Undo** restores the original
-  file exactly, footer metadata included.
+  **Run join** closes the panel and shows the table it made — that's what
+  the panel was for. Opening it again comes back to the result, where
+  **Undo** restores the original file exactly, footer metadata included.
 - A result can be joined again: the second join reads its keys off the
   joined table, and since that table is already whole and has no footer,
   neither side is sent back to the reader for row groups it hasn't got.
