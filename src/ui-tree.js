@@ -1,7 +1,7 @@
 import { $ } from "./columns.js";
 import { isParquetPath } from "./dataset.js";
 import { join, joinHooks, openJoinCompare } from "./join.js";
-import { busy, drag, entriesFromFiles, openFile, seen, showError } from "./main.js";
+import { busy, drag, entriesFromFiles, fileHooks, openEntries, openFile, seen, showError } from "./main.js";
 import { esc } from "./view.js";
 
 /**
@@ -22,6 +22,7 @@ export const tree = {
   openPath: null,         /* path of the file currently shown in the grid, for highlighting */
   pickPath: null,         /* path picked as the join's side B, while picking */
   wasOn: false,           /* the panel was already open before the join opened it */
+  autoExpanded: new Set(),/* dirs opened for the user once, so a collapse sticks */
 };
 
 /** Clicking a file opens it, unless the join panel is waiting for a side B. */
@@ -99,8 +100,21 @@ export async function openTreeLive() {
  * so the join panel has something to click when no folder is being browsed.
  */
 export function openTreeSession() {
-  /* one file is the one already open: a panel offering only that is noise */
-  if (seen.size < 2) return false;
+  tree.kind = "session";
+  tree.rootName = "this session";
+  buildSessionTree();
+  showTreePanel(true);
+  renderTree();
+  return true;
+}
+
+/**
+ * Rebuilds the session list from whatever the page has been handed so far.
+ * A folder new to the list is expanded once, so a file that has just
+ * arrived is visible without hunting for it; collapse it and it stays
+ * collapsed, because it is only ever expanded the first time it is seen.
+ */
+function buildSessionTree() {
   const root = snapshotNode();
   for (const [path, entry] of seen) {
     const parts = path.split("/").filter(Boolean);
@@ -109,18 +123,14 @@ export function openTreeSession() {
       const seg = parts[i];
       if (!node.children.has(seg)) node.children.set(seg, snapshotNode());
       node = node.children.get(seg);
-      tree.expanded.add(parts.slice(0, i + 1).join("/"));
+      const dir = parts.slice(0, i + 1).join("/");
+      if (!tree.autoExpanded.has(dir)) { tree.autoExpanded.add(dir); tree.expanded.add(dir); }
     }
     const leaf = parts[parts.length - 1];
     if (!node.children.has(leaf)) node.children.set(leaf, snapshotNode());
     node.children.get(leaf).entry = entry;
   }
-  tree.kind = "session";
   tree.nodes = root;
-  tree.rootName = "files opened this session";
-  showTreePanel(true);
-  renderTree();
-  return true;
 }
 
 export function openTreeSnapshot(fileList) {
@@ -140,6 +150,14 @@ function showTreePanel(on) {
   $("treegrip").hidden = !on;
 }
 
+/** The panel is open unless this page's user has closed it before. */
+function rememberPanel(on) {
+  try { localStorage.setItem("paris-parquet-tree", on ? "open" : "closed"); } catch { /* fine */ }
+}
+function panelWanted() {
+  try { return localStorage.getItem("paris-parquet-tree") !== "closed"; } catch { return true; }
+}
+
 export function closeTree() {
   tree.kind = null;
   tree.pickPath = null;
@@ -148,7 +166,16 @@ export function closeTree() {
   tree.liveChildren = new Map();
   tree.nodes = null;
   tree.expanded = new Set();
+  tree.autoExpanded = new Set();
   showTreePanel(false);
+}
+
+/** Stops browsing a folder without closing the panel: back to the session
+    list, which needs no grant and is never stale. */
+function leaveFolder() {
+  tree.rootHandle = null;
+  tree.liveChildren = new Map();
+  openTreeSession();
 }
 
 /** The node data a click needs, shared shape across "live" and "snapshot". */
@@ -202,12 +229,19 @@ export function renderTree() {
   const body = $("treebody");
   const who = $("treewho");
   if (!tree.kind) { body.innerHTML = ""; who.innerHTML = ""; return; }
+  const session = tree.kind === "session";
   who.innerHTML = "<b title='" + esc(tree.rootName) + "'>" + esc(tree.rootName) + "</b>" +
     "<span class='grow'></span>" +
-    (tree.kind === "session" ? "" : "<button data-tact='change'>change</button>");
+    (session ? "<button data-tact='browse' title='Browse a folder on disk'>browse a folder</button>"
+             : "<button data-tact='change'>change</button>" +
+               "<button data-tact='session' title='Back to the files opened this session'>session</button>");
   const html = tree.kind === "live" ? renderLiveLevel("", 0) : renderSnapshotLevel(tree.nodes, "", 0);
+  const empty = session
+    ? "<div class='tempty'>Nothing opened yet.<br>Drop a .parquet file anywhere on the page, " +
+      "or use <b>Open .parquet</b> — whatever you open shows up here.</div>"
+    : "<div class='tempty'>No .parquet files found here.</div>";
   body.innerHTML = (picking() ? "<div class='tpick'>click a file to join against</div>" : "") +
-    (html || "<div class='tempty'>No .parquet files found here.</div>");
+    (html || empty);
 }
 
 async function toggleDir(path) {
@@ -237,10 +271,16 @@ async function pickFile(path) {
     let node = tree.nodes;
     for (const seg of path.split("/")) node = node.children.get(seg);
     if (!node) return;
-    if (node.entry && picking()) {          /* already in hand: no File to fetch */
-      tree.pickPath = path;
+    if (node.entry) {                       /* already in hand: no File to fetch */
+      if (picking()) {
+        tree.pickPath = path;
+        renderTree();
+        await openJoinCompare([node.entry], path);
+        return;
+      }
+      tree.openPath = path;
       renderTree();
-      await openJoinCompare([node.entry], path);
+      await openEntries([node.entry], null);
       return;
     }
     file = node.file;
@@ -264,15 +304,15 @@ async function pickFile(path) {
  * with it; one the user opened themselves stays exactly as it was.
  */
 function syncTreeForJoin(on) {
+  tree.pickPath = null;
   if (on) {
     tree.wasOn = tree.on;
-    tree.pickPath = null;
-    if (!tree.on) openTreeSession();
-    else renderTree();
+    if (!tree.on) openTreeSession(); else renderTree();
     return;
   }
-  tree.pickPath = null;
-  if (tree.on && !tree.wasOn && tree.kind === "session") closeTree();
+  /* a panel the join opened by itself goes away again with it; one the user
+     had open (which is the default) stays exactly where it was */
+  if (tree.on && !tree.wasOn) closeTree();
   else if (tree.on) renderTree();
 }
 
@@ -284,22 +324,37 @@ function syncTreeAfterPick(path) {
   if (!tree.on) openTreeSession(); else renderTree();
 }
 
+/** Files arrive by drop, by picker, from the tree itself: the list follows. */
+function syncTreeAfterSeen() {
+  if (!tree.on || tree.kind !== "session") return;
+  buildSessionTree();
+  renderTree();
+}
+function syncTreeAfterOpen(path) {
+  tree.openPath = path || null;
+  if (tree.on && tree.kind === "session") { buildSessionTree(); renderTree(); }
+  else if (tree.on) renderTree();
+}
+
 export function initTree() {
   joinHooks.onShow = syncTreeForJoin;
   joinHooks.onPick = syncTreeAfterPick;
+  fileHooks.onSeen = syncTreeAfterSeen;
+  fileHooks.onOpen = syncTreeAfterOpen;
   $("toggleTree").addEventListener("click", () => {
-    if (tree.on) { closeTree(); return; }
-    if (treeSupported()) openTreeLive();
-    else $("treepicker").click();
+    if (tree.on) { closeTree(); rememberPanel(false); return; }
+    openTreeSession();               /* never a folder grant: that is a click inside */
+    rememberPanel(true);
   });
   $("treepicker").addEventListener("change", (e) => {
     openTreeSnapshot(e.target.files);
     e.target.value = "";
   });
-  $("treeclose").addEventListener("click", closeTree);
+  $("treeclose").addEventListener("click", () => { closeTree(); rememberPanel(false); });
   $("treewho").addEventListener("click", (e) => {
-    if (!e.target.closest("[data-tact='change']")) return;
-    if (tree.kind === "live") openTreeLive();
+    if (e.target.closest("[data-tact='session']")) { leaveFolder(); return; }
+    if (!e.target.closest("[data-tact='change'],[data-tact='browse']")) return;
+    if (treeSupported() && tree.kind !== "snapshot") openTreeLive();
     else $("treepicker").click();
   });
   $("treebody").addEventListener("click", (e) => {
@@ -315,6 +370,9 @@ export function initTree() {
     const saved = +localStorage.getItem("paris-parquet-treew");
     if (saved > 0) document.documentElement.style.setProperty("--treew", saved + "px");
   } catch (e) { /* fine */ }
+  /* open from the start, with nothing in it yet: the panel is where files
+     turn up, so it is there before the first one does */
+  if (panelWanted()) openTreeSession();
 }
 
 export function treeWidth(px) {

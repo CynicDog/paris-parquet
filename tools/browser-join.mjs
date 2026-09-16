@@ -186,10 +186,15 @@ await withPage(async (page) => {
   await page.click("#toggleJoin");
   await page.waitForTimeout(200);
 
-  /* only the open file is known, so nothing useful could be listed yet */
-  if (await page.evaluate(() => document.getElementById("tree").hidden)) {
-    ok("no folder panel is forced open when the only file known is the open one");
-  } else bad("the folder panel opened with nothing to offer");
+  /* the panel is already open -- it is open by default -- and opening the
+     join turns it into the picker rather than opening anything new */
+  const onOpen = await page.evaluate(() => ({
+    hidden: document.getElementById("tree").hidden,
+    banner: document.querySelector("#treebody .tpick")?.textContent || "",
+  }));
+  if (!onOpen.hidden && /click a file to join against/.test(onOpen.banner)) {
+    ok("the panel that is already open becomes the join's picker");
+  } else bad("panel on opening the join: " + JSON.stringify(onOpen));
 
   /* a B picked by dialog is one more file the panel can offer, and the one
      it should show as picked */
@@ -236,12 +241,28 @@ await withPage(async (page) => {
   if (rows === 470) ok("a join run off a panel-picked B matches the dialog-picked one (470 rows)");
   else bad("panel-picked join rows: " + rows);
 
-  /* a panel opened only for the join is put back the way it was found */
+  /* closing the join leaves the panel as it was found: open, and back to
+     opening files rather than picking a side B */
   await page.click("#toggleJoin");
   await page.waitForTimeout(200);
-  if (await page.evaluate(() => document.getElementById("tree").hidden)) {
-    ok("a panel opened only for the join closes again with it");
-  } else bad("the folder panel outlived the join panel that opened it");
+  const afterClose = await page.evaluate(() => ({
+    hidden: document.getElementById("tree").hidden,
+    banner: document.querySelector("#treebody .tpick")?.textContent || "",
+  }));
+  if (!afterClose.hidden && !afterClose.banner) ok("closing the join leaves the panel open, no longer picking");
+  else bad("panel after closing the join: " + JSON.stringify(afterClose));
+
+  /* but a panel the user had closed is only borrowed: it goes back to closed */
+  await page.click("#toggleTree");
+  await page.waitForTimeout(200);
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(250);
+  const borrowed = await page.evaluate(() => document.getElementById("tree").hidden);
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(250);
+  const returned = await page.evaluate(() => document.getElementById("tree").hidden);
+  if (!borrowed && returned) ok("a panel the user had closed is opened for the join and closed again after");
+  else bad("borrowed panel: " + JSON.stringify({ borrowed, returned }));
 });
 
 /* ------------------------------------------------------- chained joins */
@@ -294,6 +315,60 @@ await withPage(async (page) => {
   if (back.rows === 500 && back.cols === 3 && back.groups > 1) {
     ok("one Undo goes all the way back to the file, footer and all");
   } else bad("after undo: " + JSON.stringify(back));
+});
+
+/* ------------------------------------------- what the SQL panel writes */
+await withPage(async (page) => {
+  await page.goto("file://" + appPath);
+  await page.setInputFiles("#picker", path.join(tmp, "orders.parquet"));
+  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  const plain = await page.evaluate(() => window.PARIS.querySql());
+  if (/FROM orders/.test(plain)) ok("a plain file reads FROM <the file>");
+  else bad("plain FROM: " + plain);
+
+  await page.click("#toggleJoin");
+  await page.setInputFiles("#jpicker", path.join(tmp, "regions.parquet"));
+  await idle(page);
+  await page.selectOption("#jkeyA", { label: "region" });
+  await page.selectOption("#jkeyB", { label: "name" });
+  await page.click("#jrun");
+  await idle(page);
+  await page.waitForTimeout(200);
+
+  /* the FROM clause must name both files and the key each side, rather than
+     a single table that nothing on disk corresponds to */
+  const sql = await page.evaluate(() => window.PARIS.querySql());
+  if (/FROM orders\nINNER JOIN regions ON region = regions\.name/.test(sql)) {
+    ok("a joined table writes both file names and the join key");
+  } else bad("joined SQL: " + JSON.stringify(sql));
+
+  /* and it must read back: the panel is bidirectional, so what it writes
+     has to parse, join clause included */
+  const round = await page.evaluate(() => {
+    const t = window.PARIS.state.table;
+    const parsed = window.PARIS.parseSql(window.PARIS.querySql(), t.cols);
+    return { ok: !!parsed.query, errors: parsed.errors.map((e) => e.msg) };
+  });
+  if (round.ok && !round.errors.length) ok("the SQL a joined table writes parses back cleanly");
+  else bad("round trip: " + JSON.stringify(round.errors));
+
+  /* a join clause that is not the applied one is refused by name, the same
+     way an unrepresentable WHERE is, instead of quietly being ignored */
+  const wrong = await page.evaluate(() => window.PARIS.parseSql(
+    "SELECT *\nFROM orders\nINNER JOIN small ON id = small.ref_id",
+    window.PARIS.state.table.cols).errors.map((e) => e.msg));
+  if (wrong.length && /not the join this table came from/.test(wrong[0])) {
+    ok("a join clause that is not the applied one is refused");
+  } else bad("made-up join clause accepted: " + JSON.stringify(wrong));
+
+  /* with no join applied, a join is still refused outright */
+  await page.setInputFiles("#picker", path.join(tmp, "orders.parquet"));
+  await idle(page);
+  const onPlain = await page.evaluate(() => window.PARIS.parseSql(
+    "SELECT *\nFROM orders\nJOIN regions ON region = regions.name",
+    window.PARIS.state.table.cols).errors.map((e) => e.msg));
+  if (onPlain.length && /Join panel/.test(onPlain[0])) ok("a join over a plain file is still refused");
+  else bad("join over a plain file: " + JSON.stringify(onPlain));
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

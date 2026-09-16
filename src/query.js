@@ -548,11 +548,40 @@ export function sqlLiteral(text, spec) {
   if (spec.kind === "bool") return /^(true|t|1|y|yes)$/i.test(String(text).trim()) ? "TRUE" : "FALSE";
   return "'" + String(text).replace(/'/g, "''") + "'";
 }
+/** A file name as a table name: "orders.parquet" reads as orders. */
+/** Normalizes a JOIN description so the written and the read-back form of
+    the same join compare equal, whatever the spacing, case or quoting. */
+export function joinClauseText(text) {
+  return String(text).replace(/["]/g, "").replace(/\s*([.=])\s*/g, "$1")
+    .replace(/\s+/g, " ").trim().toUpperCase();
+}
+
+export function sqlTableName(name) {
+  return String(name || "parquet").replace(/\.[^.]*$/, "");
+}
+
+/**
+ * The FROM clause. A joined table is the one case with more than one file
+ * behind it, and it says so -- both names and the key each side -- rather
+ * than inventing a single table that nothing on disk corresponds to. The
+ * left-hand key is unqualified because it belongs to the table built so
+ * far (which after a chain is not any one file), and B's key column is
+ * dropped from the result, so it is qualified to stay unambiguous.
+ */
+export function sqlFromLines(table) {
+  const src = state.src ? state.src.name : "";
+  const lines = ["FROM " + sqlIdent(sqlTableName(table.joinFrom || src || "parquet"))];
+  for (const step of table.joinSteps || []) {
+    const b = sqlIdent(sqlTableName(step.table));
+    lines.push("INNER JOIN " + b + " ON " + sqlIdent(step.aCol) + " = " + b + "." + sqlIdent(step.bCol));
+  }
+  return lines;
+}
+
 export function querySql() {
   const q = state.query, table = state.table;
   if (!table) return "";
   const cols = table.cols;
-  const from = (state.src && state.src.name ? state.src.name : "parquet").replace(/\.[^.]*$/, "");
   const lines = [];
   if (q.mode === "agg" && (q.groupBy.length || q.metrics.length)) {
     const sel = q.groupBy.map((ci) => sqlIdent(cols[ci].name));
@@ -568,7 +597,7 @@ export function querySql() {
   } else {
     lines.push("SELECT *");
   }
-  lines.push("FROM " + sqlIdent(from));
+  for (const line of sqlFromLines(table)) lines.push(line);
   let pending = false;
   q.filters.forEach((f, i) => {
     const col = cols[f.ci];
@@ -745,11 +774,32 @@ export function parseSql(text, cols) {
   }
 
   if (eatKw("FROM")) {
+    const fromTok = peek();
     if (peek().t === "name") p++;
     else fail("expected a table name after FROM");
     if (isOp(",") || isKw("JOIN") || isKw("INNER") || isKw("LEFT") || isKw("RIGHT") ||
         isKw("FULL") || isKw("CROSS")) {
-      fail("one file at a time: joins are not supported");
+      /* a join is run in the Join panel, not from here: the clause the
+         builder writes describes the one already applied, so it is read
+         back and checked rather than acted on. Anything else is refused
+         by name, the way an unrepresentable WHERE is */
+      let applied = null;
+      if (state.table) applied = state.table.joinSteps ? state.table : null;
+      if (!applied) fail("one file at a time: joins are set up in the Join panel, not here");
+      else {
+        const want = joinClauseText(sqlFromLines(applied).slice(1).join(" "));
+        const got = [];
+        while (isKw("INNER") || isKw("JOIN") || isKw("ON") || isOp(".") || isOp("=") ||
+               peek().t === "name") {
+          got.push(peek().t === "kw" ? peek().v : String(peek().v));
+          step();
+        }
+        if (joinClauseText(got.join(" ")) !== want) {
+          fail("that is not the join this table came from. It is " +
+            sqlFromLines(applied).join(" ") +
+            " — set in the Join panel, which is also where it can be changed.", fromTok);
+        }
+      }
     }
   } else fail("expected FROM");
 

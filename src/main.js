@@ -86,8 +86,18 @@ export function isParquetFile(f) { return isParquetPath(f.webkitRelativePath || 
  * is persisted: a reload starts empty, like the folder grant does.
  */
 export const seen = new Map();
+
+/**
+ * The folder panel keeps its own list of these, and is built after this
+ * module (see the manifest in scripts/compose.mjs), so it registers here
+ * rather than being imported.
+ */
+export const fileHooks = { onSeen: null, onOpen: null };
+
 export function remember(entries) {
-  for (const e of entries) if (!seen.has(e.path)) seen.set(e.path, e);
+  let added = 0;
+  for (const e of entries) if (!seen.has(e.path)) { seen.set(e.path, e); added++; }
+  if (added && fileHooks.onSeen) fileHooks.onSeen();
   return entries;
 }
 
@@ -192,6 +202,7 @@ export async function openEntries(entries, label) {
     diff.rows = null;
     diff.keys = [];
     adoptDataset(dataset, table, name, parts > 1 && named, true);
+    if (fileHooks.onOpen) fileHooks.onOpen(entries.length === 1 ? entries[0].path : null);
   } catch (e) {
     $("gridwrap").hidden = true;
     $("pager").hidden = true;

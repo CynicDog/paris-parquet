@@ -67,6 +67,12 @@ them; `tools/sample-data.py` regenerates them.
   column's values become new output columns. *Rollup* and *cube* add
   SQL-standard subtotal rows instead (rollup nests by position, cube adds
   every combination); a dropped column shows as `null`, same as SQL.
+- A joined table says so in its `FROM`: both file names and the key each
+  side (`FROM orders` / `INNER JOIN customers ON customer_id =
+  customers.customer_id`), one `INNER JOIN` line per join in a chain. The
+  clause describes the join the Join panel applied — it reads back, and one
+  naming some *other* join is refused by name rather than quietly ignored,
+  since editing it there doesn't re-join anything.
 - The SQL panel is **bidirectional**: edit the text and the zones follow,
   drag a chip and the text follows. It's checked against the file's schema
   live, and anything the zones can't hold — a join, `HAVING`, `NOT`, a

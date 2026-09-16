@@ -43,6 +43,7 @@ body{margin:0;background:var(--bg);color:var(--ink);
   border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:6px;overflow:hidden}
 #treewho b{color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #treewho button{font:10px var(--mono);padding:1px 6px}
+#treewho{gap:5px}
 #treebody{flex:1;overflow:auto;padding:4px 0}
 #treebody .tempty{padding:14px 12px;color:var(--faint);font:11px/1.5 var(--mono)}
 #treebody .tpick{padding:5px 10px 6px;margin-bottom:2px;border-bottom:1px solid var(--line2);
@@ -365,7 +366,7 @@ details[open]>summary::before{content:"▾ "}
 <body>
 <aside id="tree" hidden>
   <div class="qbar">
-    <span class="qtitle">FOLDER</span>
+    <span class="qtitle">FILES</span>
     <span class="grow"></span>
     <button id="treeclose" title="Stop browsing this folder">close</button>
   </div>
@@ -376,11 +377,11 @@ details[open]>summary::before{content:"▾ "}
 <div id="main">
 <header>
   <h1>paris-parquet <span>· single-file parquet viewer</span></h1>
-  <button id="toggleTree" title="Browse the folder a file lives in, to open siblings without a picker each time">Folder</button>
+  <button id="toggleTree" title="Show or hide the file panel: what you have opened this session, or a folder you browse from there">Files</button>
   <input type="file" id="treepicker" webkitdirectory directory>
   <label class="btn" for="picker">Open .parquet</label>
   <input type="file" id="picker" accept=".parquet,.pq,application/octet-stream" multiple>
-  <label class="btn" for="dirpicker" title="Open a folder of parquet files as one table">Open folder</label>
+  <label class="btn" for="dirpicker" title="Read every parquet file in a folder as one table (partitions become columns)">Open folder as one table</label>
   <input type="file" id="dirpicker" webkitdirectory directory>
   <input type="file" id="bpicker" accept=".parquet,.pq,application/octet-stream" multiple>
   <input type="file" id="bdirpicker" webkitdirectory directory>

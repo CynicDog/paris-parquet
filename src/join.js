@@ -247,6 +247,13 @@ export async function runJoin() {
 
     const bName = b.name;
     const description = aNameIn + " ⋈ " + bName + " on " + aCols[aKeyCi].name + " = " + bCols[bKeyCi].name;
+    /* what the SQL panel writes as the FROM/JOIN clause: the files by name
+       and the key each side, rather than a table out of nowhere. Chaining a
+       join onto a joined table appends a step instead of starting over */
+    const joinFrom = aTableIn.joinFrom || (join.before ? join.before.name : aNameIn);
+    const joinSteps = (aTableIn.joinSteps || []).concat([
+      { table: bName, aCol: aCols[aKeyCi].name, bCol: bCols[bKeyCi].name },
+    ]);
     const joinedDataset = { parts: [], columns: [], partitionCols: [], skipped: [],
       numRows: matched, numGroups: 0, size: 0, reference: null };
     const joinedTable = {
@@ -255,6 +262,7 @@ export async function runJoin() {
       reads: [], need: null, truncated: false,
       joined: description + " — " + num(matched) + " matched row" + (matched === 1 ? "" : "s") +
         " out of " + num(aDatasetIn.numRows) + " (A) and " + num(b.dataset.numRows) + " (B)",
+      joinFrom, joinSteps,
     };
 
     /* Undo always goes back to the file, however many joins were chained

@@ -185,7 +185,9 @@ for (const sql of handWritten) {
 const refusals = [
   [`SELECT nosuchcol FROM t`, /no column named/],
   [`SELECT scoree FROM t`, /did you mean/],
-  [`SELECT * FROM t JOIN u ON t.a = u.a`, /joins are not supported/],
+  /* a join is set up in the Join panel; SQL describes one that is applied,
+     and over a plain file there is none to describe */
+  [`SELECT * FROM t JOIN u ON t.a = u.a`, /joins are set up in the Join panel/],
   [`SELECT * FROM t WHERE (cat = 'a' OR cat = 'b') AND score > 1`, /cannot be held/],
   [`SELECT * FROM t WHERE NOT score > 1`, /NOT cannot be held/],
   [`SELECT cat, score FROM t GROUP BY cat`, /not grouped/],
