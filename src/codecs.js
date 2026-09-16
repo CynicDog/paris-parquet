@@ -82,7 +82,7 @@ export function lz4HadoopDecompress(src, expected) {
     }
     if (o === expected) return out;
     throw new Error("frame");
-  } catch (e) {
+  } catch (_e) {
     return lz4BlockDecompress(src, expected);   // some writers emit a bare block
   }
 }
@@ -106,7 +106,7 @@ export async function inflate(src, format) {
 }
 export async function gzipDecompress(src) {
   try { return await inflate(src, "gzip"); }
-  catch (e) { try { return await inflate(src, "deflate"); } catch (e2) { return await inflate(src, "deflate-raw"); } }
+  catch (_e) { try { return await inflate(src, "deflate"); } catch (_e2) { return await inflate(src, "deflate-raw"); } }
 }
 
 export const POW2 = new Float64Array(64);
@@ -372,12 +372,12 @@ export function zstdFrame(src, p, grow, getOut, setO, getO) {
     const last = h & 1, type = (h >> 1) & 3, size = h >> 3;
     if (type === 0) {                                            // raw
       grow(size);
-      const out = getOut(); let o = getO();
+      const out = getOut(); const o = getO();
       out.set(src.subarray(p, p + size), o);
       setO(o + size); p += size;
     } else if (type === 1) {                                     // rle
       grow(size);
-      const out = getOut(); let o = getO();
+      const out = getOut(); const o = getO();
       out.fill(src[p], o, o + size);
       setO(o + size); p += 1;
     } else if (type === 2) {
@@ -532,7 +532,7 @@ export async function decompress(codec, src, uncompressedSize) {
     case "LZ4": return lz4HadoopDecompress(src, uncompressedSize);
     case "BROTLI":
       try { return await inflate(src, "brotli"); }
-      catch (e) { throw new Error("BROTLI pages need a brotli decoder this browser does not expose."); }
+      catch (_e) { throw new Error("BROTLI pages need a brotli decoder this browser does not expose."); }
     default:
       throw new Error("Unsupported compression codec: " + codec + ".");
   }

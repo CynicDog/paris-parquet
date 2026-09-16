@@ -45,7 +45,7 @@ export function looksUtf8(values) {
     if (!(v instanceof Uint8Array)) return false;
     if (v.length === 0) continue;
     let s;
-    try { s = strictUtf8.decode(v); } catch (e) { return false; }
+    try { s = strictUtf8.decode(v); } catch (_e) { return false; }
     if (CONTROL.test(s)) return false;
     checked++;
   }
@@ -197,7 +197,7 @@ export function jsonish(v, spec) {
     if (inner.kind === "number" && typeof x === "number") return x;
     return fmtValue(x, inner);
   };
-  try { return JSON.stringify(walk(v)); } catch (e) { return String(v); }
+  try { return JSON.stringify(walk(v)); } catch (_e) { return String(v); }
 }
 
 export const BINS = 24;
@@ -220,7 +220,7 @@ export function lessThan(a, b) {
   const x = numeric(a), y = numeric(b);
   if (x !== y) return x < y;
   if (typeof a === "bigint" || typeof b === "bigint") {
-    try { return BigInt(a) < BigInt(b); } catch (e) { return false; }
+    try { return BigInt(a) < BigInt(b); } catch (_e) { return false; }
   }
   return false;
 }

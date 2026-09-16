@@ -2,7 +2,7 @@ import { Cursor } from "./bytes.js";
 import { $, loadMore } from "./columns.js";
 import { newTable } from "./dataset.js";
 import { intersectRanges, mergeRanges, rangeCount, readColumnIndex, readOffsetIndex, unionRanges } from "./encoding.js";
-import { FIRST_ROWS, busy, showError, updateButtons } from "./main.js";
+import { busy, FIRST_ROWS, showError, updateButtons } from "./main.js";
 import { compileFilter, parseOperand, runQuery, sortKey, textOf } from "./query.js";
 import { thriftStruct } from "./thrift.js";
 import { rawStat, renderMeta } from "./ui-metadata.js";
@@ -73,7 +73,7 @@ export function fillBounds(out, loB, hiB, leaf, spec) {
   try {
     lo = spec.convert(rawStat(loB, leaf));
     hi = spec.convert(rawStat(hiB, leaf));
-  } catch (e) { return out; }
+  } catch (_e) { return out; }
   const key = sortKey(spec);
   if (key) {
     lo = key(lo);
@@ -238,7 +238,7 @@ export async function readBloom(src, chunk) {
     const start = off + c.p;
     if (start + numBytes > src.size) return null;
     chunk.bloom = await src.read(start, start + numBytes);
-  } catch (e) { chunk.bloom = null; }
+  } catch (_e) { chunk.bloom = null; }
   return chunk.bloom;
 }
 /**
@@ -332,7 +332,10 @@ export async function planScan(dataset, query, table, onProgress) {
           const chunk = chunkOf(rg, col);
           if (!chunk || chunk.meta.bloomFilterOffset == null) continue;
           const data = await readBloom(part.src, chunk);
-          if (data && !bloomHas(data, xxh64(bytes))) (ruled || (ruled = new Set())).add(f);
+          if (data && !bloomHas(data, xxh64(bytes))) {
+            if (!ruled) ruled = new Set();
+            ruled.add(f);
+          }
         }
       }
       if (ruled && !anyGroupMatches(groups, (f) => !ruled.has(f) && statsSay(f))) {

@@ -25,7 +25,7 @@ export function poolStart() {
       pool.workers.push(w);
       pool.free.push(w);
     }
-  } catch (e) { poolStop(); }
+  } catch (_e) { poolStop(); }
 }
 /** Anything unexpected and the main thread takes the work back. */
 export function poolStop() {
@@ -33,7 +33,7 @@ export function poolStop() {
   for (const job of pool.jobs.values()) job.reject(new Error("the decoding worker stopped"));
   pool.jobs.clear();
   for (const job of pool.waiting.splice(0)) job.reject(new Error("the decoding worker stopped"));
-  for (const w of pool.workers.splice(0)) { try { w.terminate(); } catch (e) { /* going anyway */ } }
+  for (const w of pool.workers.splice(0)) { try { w.terminate(); } catch (_e) { /* going anyway */ } }
   pool.free.length = 0;
 }
 export function poolDone(w, msg) {

@@ -1,12 +1,13 @@
 import { $, loadMore } from "./columns.js";
 import { newTable, readDataset } from "./dataset.js";
 import { diff, showDiff } from "./diff.js";
-import { adoptDataset, entriesFromFiles, busy, showError, FIRST_ROWS } from "./main.js";
+import { adoptDataset, busy, entriesFromDrop, entriesFromFiles, FIRST_ROWS, openEntries, showError } from "./main.js";
 import { planScan } from "./pushdown.js";
 import { keyPart, newQuery, sortKey, textOf } from "./query.js";
 import { lessThan } from "./types.js";
 import { renderMeta } from "./ui-metadata.js";
 import { renderQuery, renderQueryColumns } from "./ui-query-builder.js";
+import { entryForPath, TREE_DRAG } from "./ui-tree.js";
 import { baseView, esc, newDisplay, num, setView, state } from "./view.js";
 
 /**
@@ -63,7 +64,11 @@ export function showJoin(on) {
   $("joinwrap").hidden = !on;
   $("gridwrap").hidden = on || !state.view;
   $("pager").hidden = on || !state.view;
-  $("toggleJoin").textContent = on ? "Table" : "Join";
+  /* with nothing open the page shows its own drop zone; the join panel
+     takes the view over while it is up, and hands it back after */
+  $("drop").hidden = on || !!state.table;
+  $("toggleJoin").textContent = on ? "⋈ Close join" : "⋈ Join two files";
+  $("toggleJoin").classList.toggle("on", on);
   if (joinHooks.onShow) joinHooks.onShow(on);
   if (on) renderJoin();
 }
@@ -87,27 +92,43 @@ export async function openJoinCompare(entries, label) {
   } catch (e) { showError(e); } finally { busy(false); }
 }
 
+/** One side of the join, as a place a file can be dropped. */
+function sideCard(which, name, rows, pickerId) {
+  const filled = !!name;
+  return "<div class='jside" + (filled ? " jfilled" : "") + "' data-jside='" + which + "'>" +
+    "<span class='jlabel'>" + which + "</span>" +
+    (filled
+      ? "<span class='jname' title='" + esc(name) + "'>" + esc(name) + "</span>" +
+        "<span class='jrows'>" + (rows == null ? "" : num(rows) + " rows") + "</span>"
+      : "<span class='jname'>drag a file here</span>" +
+        "<span class='jrows'>from the panel on the left, or off your desktop</span>") +
+    "<label class='btn' for='" + pickerId + "'>" + (filled ? "choose another" : "choose a file") + "</label>" +
+    "</div>";
+}
+
 export function renderJoin() {
-  if (!state.table) return;
   const aName = currentAName();
   const undoName = join.before ? join.before.name : aName;
   const b = join.b;
   $("joinbar").innerHTML = "<span class='qtitle'>JOIN</span>" +
-    "<span class='dside'>A <b title='" + esc(aName) + "'>" + esc(aName) + "</b></span>" +
-    "<span class='muted'>with</span>" +
-    (b ? "<span class='dside'>B <b title='" + esc(b.name) + "'>" + esc(b.name) + "</b></span>" +
-         "<label class='btn' for='jpicker'>choose another</label>"
-       : "<label class='btn' for='jpicker'>choose file B</label>") +
-    "<label class='btn' for='jdirpicker' title='Pick a folder; every parquet file in it reads as one table'>folder</label>" +
+    "<span class='muted'>two files on a key, inner join</span>" +
+    "<label class='btn' for='jdirpicker' title='Pick a folder; every parquet file in it reads as one table'>folder as B</label>" +
     "<span class='grow'></span><button id='joinclose'>close</button>";
 
+  const sides = "<div class='jsides'>" +
+    sideCard("A", state.table ? aName : "", state.table ? state.table.rowsLoaded : null, "picker") +
+    "<span class='jcross'>&#8904;</span>" +
+    sideCard("B", b ? b.name : "", b ? b.table.rowsLoaded : null, "jpicker") + "</div>";
+
   let body;
-  if (!b) {
-    body = "<div id='dropb'><div class='big'>Drop the file to join against here</div>" +
-      "<div class='hint'>Or click one in the folder panel on the left, or use " +
-      "<b>choose file B</b> above. A is the table already open:<br>" + esc(aName) + "</div></div>";
+  if (!state.table || !b) {
+    body = sides + "<div class='dnote'>" +
+      (state.table
+        ? "Drag the file to join against into <b>B</b> — from the file panel on the left, or straight off your desktop."
+        : "Drag a file into <b>A</b> and another into <b>B</b>. A is whichever table is open, so dropping one there opens it.") +
+      "</div>";
   } else if (join.result) {
-    body = "<div class='jresult'>" + esc(join.result) +
+    body = sides + "<div class='jresult'>" + esc(join.result) +
       "<br><button id='jundo'>Undo, back to " + esc(undoName) + "</button></div>";
   } else {
     const aCols = state.table.cols;
@@ -115,7 +136,7 @@ export function renderJoin() {
       ">" + esc(c.name) + "</option>").join("");
     const bOpts = b.table.cols.map((c, i) => "<option value='" + i + "'" + (i === join.keyB ? " selected" : "") +
       ">" + esc(c.name) + "</option>").join("");
-    body = "<div class='jkeys'>join <b>" + esc(aName) + "</b>.<select id='jkeyA'>" +
+    body = sides + "<div class='jkeys'>join <b>" + esc(aName) + "</b>.<select id='jkeyA'>" +
       "<option value='-1'>(pick a column)</option>" + aOpts + "</select>" +
       " to <b>" + esc(b.name) + "</b>.<select id='jkeyB'>" +
       "<option value='-1'>(pick a column)</option>" + bOpts + "</select>" +
@@ -180,7 +201,10 @@ export async function runJoin() {
       if (v === null || v === undefined) continue;
       const k = keyPart(v);
       let list = hash.get(k);
-      if (!list) hash.set(k, (list = []));
+      if (!list) {
+        list = [];
+        hash.set(k, list);
+      }
       list.push(r);
       if (kk) {
         if (loRaw === null || lessThan(v, loRaw)) loRaw = v;
@@ -290,8 +314,66 @@ export function undoJoin() {
   showJoin(false);
 }
 
+/**
+ * A file dropped on a side: B is the other side of the join, A is whatever
+ * table is open, so dropping one there opens it. Either way the panel stays
+ * up and picks the keys back up where it left off.
+ */
+export async function dropOnSide(which, entries, label) {
+  if (!entries.length) return;
+  if (which === "B") { await openJoinCompare(entries, label); return; }
+  await openEntries(entries, label);
+  /* opening a file closes nothing: the panel is still the view, and B (if
+     any) is still B, so only the keys have to be guessed again */
+  if (join.b && state.table) {
+    const [ai, bi] = guessKeys(state.table.cols, join.b.table.cols);
+    join.keyA = ai;
+    join.keyB = bi;
+    join.result = null;
+  }
+  showJoin(true);
+}
+
+function sideDropHandlers() {
+  const zone = (e) => e.target.closest(".jside[data-jside]");
+  $("joinbody").addEventListener("dragover", (e) => {
+    const el = zone(e);
+    if (!el) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    el.classList.add("jover");
+  });
+  $("joinbody").addEventListener("dragleave", (e) => {
+    const el = zone(e);
+    if (el) el.classList.remove("jover");
+  });
+  $("joinbody").addEventListener("drop", async (e) => {
+    const el = zone(e);
+    if (!el) return;
+    e.preventDefault();
+    e.stopPropagation();          /* not a new file for the page: a side */
+    el.classList.remove("jover");
+    const which = el.dataset.jside;
+    const path = e.dataTransfer.getData(TREE_DRAG);
+    busy(true, "reading…");
+    try {
+      if (path) {                 /* a row dragged out of the file panel */
+        const entry = await entryForPath(path);
+        if (!entry) throw new Error('"' + path + '" is no longer available; open it again.');
+        await dropOnSide(which, [entry], path);
+        return;
+      }
+      const entries = await entriesFromDrop(e.dataTransfer);
+      if (!entries.length) throw new Error("Nothing here ends in .parquet.");
+      const folder = entries[0].path.indexOf("/") > 0 ? entries[0].path.split("/")[0] : null;
+      await dropOnSide(which, entries, folder);
+    } catch (err) { showError(err); } finally { busy(false); }
+  });
+}
+
 export function initJoin() {
   $("toggleJoin").addEventListener("click", () => showJoin(!join.on));
+  sideDropHandlers();
   const fromPicker = (e, isDir) => {
     const entries = entriesFromFiles(e.target.files);
     const first = e.target.files[0];

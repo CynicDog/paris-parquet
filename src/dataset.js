@@ -17,7 +17,7 @@ export function isParquetPath(path) {
   if (!name || name[0] === "." || name[0] === "_") return false;   /* _SUCCESS, .crc, hidden */
   return /\.(parquet|parq|pq)$/i.test(name);
 }
-export const unHive = (s) => { try { return decodeURIComponent(s); } catch (e) { return s; } };
+export const unHive = (s) => { try { return decodeURIComponent(s); } catch (_e) { return s; } };
 /** Hive lays partition values in the path: year=2024/month=01/part-0.parquet */
 export function hivePartition(path) {
   const out = [];
@@ -174,7 +174,7 @@ export async function sniffUtf8(dataset, col, atHand, isFirstGroup) {
         const raw = await readColumnChunk(part.src, chunk, leaf);
         if (raw.values.length) values = raw.values;
       }
-    } catch (e) { /* unreadable there; what is at hand will have to do */ }
+    } catch (_e) { /* unreadable there; what is at hand will have to do */ }
   }
   const yes = looksUtf8(values);
   dataset.utf8.set(col.key, yes);

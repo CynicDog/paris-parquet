@@ -7,8 +7,9 @@
  * huffman and treeless literals, repeated FSE tables and long match offsets
  * all get exercised.
  */
-import zlib from "node:zlib";
+
 import path from "node:path";
+import zlib from "node:zlib";
 import { loadApp } from "./check.mjs";
 
 const PARIS = loadApp(path.join(path.dirname(new URL(import.meta.url).pathname), "..", "index.html"));

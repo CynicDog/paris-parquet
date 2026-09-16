@@ -47,6 +47,11 @@ body{margin:0;background:var(--bg);color:var(--ink);
 #treewho{gap:5px}
 #treebody{flex:1;overflow:auto;padding:4px 0}
 #treebody .tempty{padding:14px 12px;color:var(--faint);font:11px/1.5 var(--mono)}
+#treeacts{flex:none;padding:6px 8px;border-top:1px solid var(--line2)}
+#treeacts button{width:100%;font:11px var(--mono);padding:4px 8px;text-align:center}
+#treeacts button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.tnode[draggable="true"]{cursor:grab}
+.tnode.tdragging{opacity:.45}
 #treebody .tpick{padding:5px 10px 6px;margin-bottom:2px;border-bottom:1px solid var(--line2);
   font:10px var(--mono);color:var(--accent);letter-spacing:.03em;text-transform:uppercase}
 .tnode{display:flex;align-items:center;gap:4px;padding:2px 8px;font:11px var(--mono);
@@ -317,6 +322,16 @@ table.dr td.ky{color:var(--accent)}
   position:sticky;top:0;background:var(--panel);z-index:3;font:11px var(--mono);color:var(--dim);flex-wrap:wrap}
 #joinbar .btn,#joinbar button{padding:1px 8px;font-size:11px}
 #joinbody{padding:10px 14px 18px}
+.jsides{display:flex;align-items:stretch;gap:10px;padding:8px 0 4px;flex-wrap:wrap}
+.jside{flex:1 1 220px;min-height:82px;border:1px dashed var(--line);border-radius:6px;padding:9px 11px;
+  display:flex;flex-direction:column;gap:3px;justify-content:center;font:11px/1.5 var(--mono);color:var(--dim)}
+.jside .jlabel{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.jside .jname{color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jside .jrows{color:var(--faint)}
+.jside.jfilled{border-style:solid}
+.jside.jover{border-color:var(--accent);background:var(--accent-soft);border-style:solid}
+.jside .btn{align-self:flex-start;margin-top:3px;font-size:10px;padding:1px 7px}
+.jcross{flex:none;align-self:center;font-size:15px;color:var(--faint)}
 .jkeys{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font:11px var(--mono);color:var(--dim);padding:6px 0}
 .jkeys select{font:11px var(--mono);background:var(--panel);color:var(--ink);border:1px solid var(--line);
   border-radius:4px;padding:2px 5px;max-width:220px}
@@ -373,6 +388,9 @@ details[open]>summary::before{content:"▾ "}
   </div>
   <div id="treewho"></div>
   <div id="treebody"></div>
+  <div id="treeacts">
+    <button id="toggleJoin" title="Join two of these files on a key">&#8904; Join two files</button>
+  </div>
 </aside>
 <div id="treegrip" hidden title="Drag to resize the folder panel"></div>
 <div id="main">
@@ -393,7 +411,6 @@ details[open]>summary::before{content:"▾ "}
   <button id="more" hidden>Load more rows</button>
   <button id="all" hidden>Load all</button>
   <button id="toggleDiff" hidden title="Compare this file with another one">Diff</button>
-  <button id="toggleJoin" hidden title="Join this file with another one on a key">Join</button>
   <button id="toggleCols" hidden>Columns</button>
   <button id="toggleQuery" hidden>Query</button>
   <button id="toggleMeta" hidden>Hide metadata</button>
@@ -698,8 +715,8 @@ function parseColumnChunk(c) {
     columnIndexLength: c[7] ?? null,
     offsetIndexOffset: c[4] ?? null,
     offsetIndexLength: c[5] ?? null,
-    cryptoMetadata: c[8] ? true : false,
-    encryptedMetadata: c[9] ? true : false,
+    cryptoMetadata: !!c[8],
+    encryptedMetadata: !!c[9],
     meta: md ? {
       type: PTYPE[md[1]],
       encodings: (md[2] || []).map((e) => ENC[e] || "ENC_" + e),
@@ -815,7 +832,7 @@ function lz4HadoopDecompress(src, expected) {
     }
     if (o === expected) return out;
     throw new Error("frame");
-  } catch (e) {
+  } catch (_e) {
     return lz4BlockDecompress(src, expected);   // some writers emit a bare block
   }
 }
@@ -839,7 +856,7 @@ async function inflate(src, format) {
 }
 async function gzipDecompress(src) {
   try { return await inflate(src, "gzip"); }
-  catch (e) { try { return await inflate(src, "deflate"); } catch (e2) { return await inflate(src, "deflate-raw"); } }
+  catch (_e) { try { return await inflate(src, "deflate"); } catch (_e2) { return await inflate(src, "deflate-raw"); } }
 }
 
 const POW2 = new Float64Array(64);
@@ -1105,12 +1122,12 @@ function zstdFrame(src, p, grow, getOut, setO, getO) {
     const last = h & 1, type = (h >> 1) & 3, size = h >> 3;
     if (type === 0) {                                            // raw
       grow(size);
-      const out = getOut(); let o = getO();
+      const out = getOut(); const o = getO();
       out.set(src.subarray(p, p + size), o);
       setO(o + size); p += size;
     } else if (type === 1) {                                     // rle
       grow(size);
-      const out = getOut(); let o = getO();
+      const out = getOut(); const o = getO();
       out.fill(src[p], o, o + size);
       setO(o + size); p += 1;
     } else if (type === 2) {
@@ -1265,7 +1282,7 @@ async function decompress(codec, src, uncompressedSize) {
     case "LZ4": return lz4HadoopDecompress(src, uncompressedSize);
     case "BROTLI":
       try { return await inflate(src, "brotli"); }
-      catch (e) { throw new Error("BROTLI pages need a brotli decoder this browser does not expose."); }
+      catch (_e) { throw new Error("BROTLI pages need a brotli decoder this browser does not expose."); }
     default:
       throw new Error("Unsupported compression codec: " + codec + ".");
   }
@@ -1327,7 +1344,7 @@ function bitPackedLegacy(b, pos, end, width, count) {
 }
 
 /** PLAIN. Appends `count` physical values to `out`. */
-function decodePlain(b, pos, end, type, count, typeLength, out) {
+function decodePlain(b, pos, _end, type, count, typeLength, out) {
   const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
   switch (type) {
     case "BOOLEAN":
@@ -1372,11 +1389,11 @@ function decodePlain(b, pos, end, type, count, typeLength, out) {
 const same = (v) => v;
 
 /** DELTA_BINARY_PACKED. Returns {values, pos}; int64 accumulates in BigInt. */
-function deltaBinaryPacked(b, pos, end, count, big) {
+function deltaBinaryPacked(b, pos, _end, _count, big) {
   const rv = () => { let shift = 1, v = 0, by; do { by = b[pos++]; v += (by & 0x7f) * shift; shift *= 128; } while (by & 0x80); return v; };
   const zz = () => { const v = rv(); return v % 2 ? -(v + 1) / 2 : v / 2; };
   const blockSize = rv(), miniPerBlock = rv(), total = rv();
-  let first = zz();
+  const first = zz();
   const perMini = blockSize / miniPerBlock;
   const out = [];
   let cur = big ? BigInt(first) : first;
@@ -1404,12 +1421,13 @@ function deltaBinaryPacked(b, pos, end, count, big) {
           bits -= w;
           if (big) d = BigInt(d);
         } else {
-          let lo, hi;
           while (bits < 32) { buf += b[bp++] * POW2[bits]; bits += 8; }
-          lo = buf % POW2[32]; buf = (buf - lo) / POW2[32]; bits -= 32;
+          const lo = buf % POW2[32];
+          buf = (buf - lo) / POW2[32]; bits -= 32;
           const rest = w - 32;
           while (bits < rest) { buf += b[bp++] * POW2[bits]; bits += 8; }
-          hi = buf % POW2[rest]; buf = (buf - hi) / POW2[rest]; bits -= rest;
+          const hi = buf % POW2[rest];
+          buf = (buf - hi) / POW2[rest]; bits -= rest;
           d = big ? BigInt(lo) + (BigInt(hi) << 32n) : lo + hi * POW2[32];
         }
         if (out.length < total) { cur = cur + minDelta + d; out.push(cur); }
@@ -1637,7 +1655,7 @@ async function readOffsetIndex(src, chunk) {
     const out = list.map((p) => ({ offset: p[1], size: p[2] | 0, row: p[3] }));
     for (const p of out) if (!(p.offset >= 0) || !(p.size > 0) || !(p.row >= 0)) return null;
     chunk.offsets = out;
-  } catch (e) { chunk.offsets = null; }
+  } catch (_e) { chunk.offsets = null; }
   return chunk.offsets;
 }
 async function readColumnIndex(src, chunk) {
@@ -1653,7 +1671,7 @@ async function readColumnIndex(src, chunk) {
     if (!nullPages || !mins || !maxes) return null;
     if (mins.length !== nullPages.length || maxes.length !== nullPages.length) return null;
     chunk.pageStats = { nullPages, mins, maxes, nullCounts: st[5] || null };
-  } catch (e) { chunk.pageStats = null; }
+  } catch (_e) { chunk.pageStats = null; }
   return chunk.pageStats;
 }
 
@@ -1699,7 +1717,7 @@ async function readRowsRanges(src, chunk, leaf, ranges, numRows, convert) {
   const locs = leaf.maxRep === 0 ? await readOffsetIndex(src, chunk) : null;
   if (locs && locs.length) {
     try { return await readPagesRanges(src, chunk, leaf, locs, ranges, numRows, convert); }
-    catch (e) { chunk.offsets = null; }   /* an index we cannot follow: read it all */
+    catch (_e) { chunk.offsets = null; }   /* an index we cannot follow: read it all */
   }
   const raw = await readColumnChunk(src, chunk, leaf, convert);
   const all = assemble(leaf, raw.values, raw.defs, raw.reps, null);
@@ -1838,7 +1856,7 @@ function looksUtf8(values) {
     if (!(v instanceof Uint8Array)) return false;
     if (v.length === 0) continue;
     let s;
-    try { s = strictUtf8.decode(v); } catch (e) { return false; }
+    try { s = strictUtf8.decode(v); } catch (_e) { return false; }
     if (CONTROL.test(s)) return false;
     checked++;
   }
@@ -1990,7 +2008,7 @@ function jsonish(v, spec) {
     if (inner.kind === "number" && typeof x === "number") return x;
     return fmtValue(x, inner);
   };
-  try { return JSON.stringify(walk(v)); } catch (e) { return String(v); }
+  try { return JSON.stringify(walk(v)); } catch (_e) { return String(v); }
 }
 
 const BINS = 24;
@@ -2013,7 +2031,7 @@ function lessThan(a, b) {
   const x = numeric(a), y = numeric(b);
   if (x !== y) return x < y;
   if (typeof a === "bigint" || typeof b === "bigint") {
-    try { return BigInt(a) < BigInt(b); } catch (e) { return false; }
+    try { return BigInt(a) < BigInt(b); } catch (_e) { return false; }
   }
   return false;
 }
@@ -2120,7 +2138,7 @@ function isParquetPath(path) {
   if (!name || name[0] === "." || name[0] === "_") return false;   /* _SUCCESS, .crc, hidden */
   return /\.(parquet|parq|pq)$/i.test(name);
 }
-const unHive = (s) => { try { return decodeURIComponent(s); } catch (e) { return s; } };
+const unHive = (s) => { try { return decodeURIComponent(s); } catch (_e) { return s; } };
 /** Hive lays partition values in the path: year=2024/month=01/part-0.parquet */
 function hivePartition(path) {
   const out = [];
@@ -2277,7 +2295,7 @@ async function sniffUtf8(dataset, col, atHand, isFirstGroup) {
         const raw = await readColumnChunk(part.src, chunk, leaf);
         if (raw.values.length) values = raw.values;
       }
-    } catch (e) { /* unreadable there; what is at hand will have to do */ }
+    } catch (_e) { /* unreadable there; what is at hand will have to do */ }
   }
   const yes = looksUtf8(values);
   dataset.utf8.set(col.key, yes);
@@ -2307,7 +2325,7 @@ function poolStart() {
       pool.workers.push(w);
       pool.free.push(w);
     }
-  } catch (e) { poolStop(); }
+  } catch (_e) { poolStop(); }
 }
 /** Anything unexpected and the main thread takes the work back. */
 function poolStop() {
@@ -2315,7 +2333,7 @@ function poolStop() {
   for (const job of pool.jobs.values()) job.reject(new Error("the decoding worker stopped"));
   pool.jobs.clear();
   for (const job of pool.waiting.splice(0)) job.reject(new Error("the decoding worker stopped"));
-  for (const w of pool.workers.splice(0)) { try { w.terminate(); } catch (e) { /* going anyway */ } }
+  for (const w of pool.workers.splice(0)) { try { w.terminate(); } catch (_e) { /* going anyway */ } }
   pool.free.length = 0;
 }
 function poolDone(w, msg) {
@@ -2760,7 +2778,7 @@ const state = { src: null, meta: null, table: null, view: null, page: 0, pageSiz
  * a display concern only — every column stays decoded and queryable.
  */
 function newDisplay(cols) {
-  return { order: cols.map((c, i) => i), hidden: new Set(), pinned: new Set() };
+  return { order: cols.map((_c, i) => i), hidden: new Set(), pinned: new Set() };
 }
 function displayOrder() {
   const d = state.display;
@@ -2936,7 +2954,7 @@ function renderPager() {
     const anchor = pageBounds()[0];
     state.pageSize = size;
     state.page = isFinite(size) ? Math.floor(anchor / size) : 0;
-    try { localStorage.setItem("paris-parquet-pagesize", String(size)); } catch (err) { /* fine */ }
+    try { localStorage.setItem("paris-parquet-pagesize", String(size)); } catch (_err) { /* fine */ }
     $("gridwrap").scrollTop = 0;
     state.first = -1;
     renderRows(true);
@@ -2999,7 +3017,7 @@ function exportParts(format, from, to) {
     return parts;
   }
   parts.push(cols.map((c) => csvField(c.name, sep)).join(sep) + "\n");
-  let row = new Array(n);
+  const row = new Array(n);
   for (let r = from; r < to; r++) {
     for (let ci = 0; ci < n; ci++) row[ci] = csvField(exportText(viewValue(view, ci, r), cols[ci].spec), sep);
     parts.push(row.join(sep) + "\n");
@@ -3282,7 +3300,7 @@ function initPicker() {
       case "cpall": d.hidden.clear(); break;
       case "cponly": {
         /* leaving everything hidden would be a blank grid, so keep the first */
-        d.hidden = new Set(state.table.cols.map((c, i) => i).filter((i) => i !== displayOrder()[0]));
+        d.hidden = new Set(state.table.cols.map((_c, i) => i).filter((i) => i !== displayOrder()[0]));
         break;
       }
       case "cpclose": togglePicker(false); return;
@@ -3363,7 +3381,7 @@ function inspectText(v, spec) {
       if (inner.kind === "binary" && x instanceof Uint8Array) return hex(x);
       return fmtValue(x, inner);
     };
-    try { return JSON.stringify(walk(v), null, 2); } catch (e) { return String(v); }
+    try { return JSON.stringify(walk(v), null, 2); } catch (_e) { return String(v); }
   }
   return fmtValue(v, spec);
 }
@@ -3401,7 +3419,7 @@ function openInspector(viewRow, ci, cell) {
   el.hidden = false;
   const box = cell.getBoundingClientRect();
   const w = el.offsetWidth, h = el.offsetHeight;
-  let left = Math.min(box.left, window.innerWidth - w - 8);
+  const left = Math.min(box.left, window.innerWidth - w - 8);
   let top = box.bottom + 4;
   if (top + h > window.innerHeight - 8) top = Math.max(8, box.top - h - 4);
   el.style.left = Math.max(8, left) + "px";
@@ -3439,13 +3457,13 @@ function showStat(raw, spec, max) {
   try {
     const elem = spec.nested ? Object.assign({}, spec, { kind: spec.elementKind }) : spec;
     t = fmtValue(spec.convert(raw), elem);
-  } catch (e) { t = raw instanceof Uint8Array ? hex(raw, 16) : String(raw); }
+  } catch (_e) { t = raw instanceof Uint8Array ? hex(raw, 16) : String(raw); }
   const cut = max || 60;
   return t == null ? null : (t.length > cut ? t.slice(0, cut) + "..." : t);
 }
 function statValue(bytes, leaf, spec) {
   if (!bytes || !bytes.length) return null;
-  try { return showStat(rawStat(bytes, leaf), spec); } catch (e) { return hex(bytes, 16); }
+  try { return showStat(rawStat(bytes, leaf), spec); } catch (_e) { return hex(bytes, 16); }
 }
 
 function schemaTree(meta) {
@@ -3558,7 +3576,7 @@ function renderMeta() {
 
   if (partCount > 1) {
     let fileRows = "";
-    dataset.parts.forEach((part, i) => {
+    dataset.parts.forEach((part, _i) => {
       const pv = part.partition.map((p) => p.key + "=" + (p.value === null ? "(null)" : p.value)).join(" ");
       fileRows += "<tr><td title='" + esc(part.path) + "'>" + esc(part.path) + "</td><td class='n'>" +
         num(part.rows) + "</td><td class='n'>" + bytesHuman(part.size) + "</td><td class='n'>" +
@@ -3588,9 +3606,9 @@ function renderMeta() {
 
   let colRows = "";
   const firstGroup = meta.rowGroups[0];
-  const partitionNames = dataset ? dataset.partitionCols.map((c) => c.name) : [];
+  const _partitionNames = dataset ? dataset.partitionCols.map((c) => c.name) : [];
   const byPath = new Map();
-  if (firstGroup) firstGroup.columns.forEach((c, i) => { if (c.meta) byPath.set(c.meta.path.join(" "), c); });
+  if (firstGroup) firstGroup.columns.forEach((c, _i) => { if (c.meta) byPath.set(c.meta.path.join(" "), c); });
   leaves.forEach((leaf, i) => {
     const a = agg[i];
     const spec = table.cols[i] ? table.cols[i].spec : typeSpec(leaf);
@@ -3621,7 +3639,7 @@ function renderMeta() {
 
   let pg = "";
   const seen = new Set();
-  meta.rowGroups.forEach((rg) => rg.columns.forEach((c, i) => {
+  meta.rowGroups.forEach((rg) => { rg.columns.forEach((c, i) => {
     if (!c.meta) return;
     for (const s of c.meta.encodingStats) {
       const name = leaves[i] ? leaves[i].path.join(".") : String(i);
@@ -3630,7 +3648,7 @@ function renderMeta() {
       seen.add(key);
       pg += "<tr><td>" + esc(name) + "</td><td>" + esc(s.pageType) + "</td><td>" + esc(s.encoding) + "</td></tr>";
     }
-  }));
+  }); });
   if (pg) {
     cards.push("<div class='mcard'><h3>page encodings</h3><details><summary>per column and page type</summary>" +
       "<table class='kvt'><tr><th>column</th><th>page</th><th>encoding</th></tr>" + pg + "</table></details></div>");
@@ -3675,6 +3693,11 @@ const AGGS = ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MIN", "MAX"];
 const AGG_SHORT = { COUNT: "COUNT", COUNT_DISTINCT: "CNTD", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "MAX" };
 const AGG_BY_NAME = { COUNT: "COUNT", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "MAX" };
 let qid = 0;
+/** Ids for the builder's own chips: unique per page load, nothing more. */
+function nextQid(prefix) {
+  qid++;
+  return prefix + qid;
+}
 
 function newQuery() {
   return { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], groupMode: "", metrics: [], limit: null };
@@ -3872,7 +3895,10 @@ function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n) {
           a.sum = t;
         }
       }
-      else if (kind === "COUNT_DISTINCT") { (a.set || (a.set = new Set())).add(keyPart(v)); }
+      else if (kind === "COUNT_DISTINCT") {
+        if (!a.set) a.set = new Set();
+        a.set.add(keyPart(v));
+      }
       else if (kind === "MIN" || kind === "MAX") {
         const cmpLess = mKeys[m]
           ? (x, y) => lessThan(x, y)
@@ -4123,7 +4149,7 @@ function aggSortIndex(q, s) {
   return m >= 0 ? q.groupBy.length + m : -1;
 }
 /** In aggregate mode, ORDER BY can only mean one of the output columns. */
-function aggSort(q, cols, outCols) {
+function aggSort(q, _cols, outCols) {
   const order = [];
   for (const s of q.sort) {
     const at = aggSortIndex(q, s);
@@ -4152,7 +4178,7 @@ function toggleSort(viewIdx, additive) {
   if (ci < 0) return;
   const same = (s) => (mid ? s.mid === mid : !s.mid && s.ci === ci);
   const at = q.sort.findIndex(same);
-  const fresh = () => ({ id: "s" + ++qid, ci, dir: "ASC", mid });
+  const fresh = () => ({ id: nextQid("s"), ci, dir: "ASC", mid });
   if (!additive) {
     if (at < 0) q.sort = [fresh()];
     else if (q.sort[at].dir === "ASC") q.sort = [Object.assign(q.sort[at], { dir: "DESC" })];
@@ -4308,8 +4334,7 @@ const SQL_SCAN = /\s+|--[^\n]*|\/\*[\s\S]*?\*\/|'(?:[^']|'')*'|"(?:[^"]|"")*"|[A
 function sqlTokenize(text) {
   const out = [];
   SQL_SCAN.lastIndex = 0;
-  let m;
-  while ((m = SQL_SCAN.exec(text))) {
+  for (let m = SQL_SCAN.exec(text); m; m = SQL_SCAN.exec(text)) {
     const raw = m[0], at = m.index;
     const c = raw[0];
     if (/\s/.test(c) || raw.startsWith("--") || raw.startsWith("/*")) continue;
@@ -4374,7 +4399,7 @@ function parseSql(text, cols) {
 
   const resolve = (tok) => {
     const name = tok.v;
-    let i = names.indexOf(name);
+    const i = names.indexOf(name);
     if (i >= 0) return i;
     const lower = name.toLowerCase();
     const hits = [];
@@ -4554,7 +4579,7 @@ function parseSql(text, cols) {
     if (groups) {
       groups.forEach((g, gi) => {
         g.forEach((f, fi) => {
-          f.id = "f" + ++qid;
+          f.id = nextQid("f");
           f.linker = fi === 0 && gi > 0 ? "OR" : "AND";
           q.filters.push(f);
         });
@@ -4585,7 +4610,7 @@ function parseSql(text, cols) {
   const agg = selectAggs.length > 0 || q.groupBy.length > 0;
   if (agg) {
     q.mode = "agg";
-    q.metrics = selectAggs.map((m) => ({ id: "m" + ++qid, ci: m.ci, agg: m.agg, alias: m.alias }));
+    q.metrics = selectAggs.map((m) => ({ id: nextQid("m"), ci: m.ci, agg: m.agg, alias: m.alias }));
     if (starSelect) fail("SELECT * cannot be mixed with grouping; list the columns");
     for (const s of selectPlain) {
       if (q.groupBy.indexOf(s.ci) < 0) {
@@ -4619,18 +4644,18 @@ function parseSql(text, cols) {
         if (eatOp("*")) ci = 0; else if (peek().t === "name") ci = resolve((step(), tokAt(p - 1)));
         if (!eatOp(")")) fail("expected )");
         const m = q.metrics.find((x) => x.ci === ci && x.agg === kind);
-        if (m) entry = { id: "s" + ++qid, ci: m.ci, mid: m.id, dir: "ASC" };
+        if (m) entry = { id: nextQid("s"), ci: m.ci, mid: m.id, dir: "ASC" };
         else fail("ORDER BY " + fn + "(...) does not match anything selected", fnTok);
       } else if (t.t === "name") {
         step();
         const alias = q.metrics.find((m) => m.alias && m.alias === t.v);
-        if (alias) entry = { id: "s" + ++qid, ci: alias.ci, mid: alias.id, dir: "ASC" };
+        if (alias) entry = { id: nextQid("s"), ci: alias.ci, mid: alias.id, dir: "ASC" };
         else {
           const ci = resolve(t);
           if (ci >= 0) {
             if (agg && q.groupBy.indexOf(ci) < 0 && !q.metrics.some((m) => m.ci === ci)) {
               fail('"' + t.v + '" is not selected, so it cannot be ordered by', t);
-            } else entry = { id: "s" + ++qid, ci, dir: "ASC" };
+            } else entry = { id: nextQid("s"), ci, dir: "ASC" };
           }
         }
       } else { fail("expected a column in ORDER BY", t); break; }
@@ -4839,9 +4864,9 @@ function addToZone(zoneId, ci) {
       if (q.groupBy.indexOf(ci) < 0) q.groupBy.push(ci);
       if (q.groupMode === "CUBE" && q.groupBy.length > CUBE_MAX_COLS) q.groupMode = "ROLLUP";
       break;
-    case "metrics": q.metrics.push({ id: "m" + ++qid, ci, agg: "COUNT", alias: "" }); break;
-    case "where": q.filters.push({ id: "f" + ++qid, ci, pred: "eq", value: "", valueTo: "", linker: "AND" }); break;
-    case "sort": if (!q.sort.some((s) => s.ci === ci)) q.sort.push({ id: "s" + ++qid, ci, dir: "ASC" }); break;
+    case "metrics": q.metrics.push({ id: nextQid("m"), ci, agg: "COUNT", alias: "" }); break;
+    case "where": q.filters.push({ id: nextQid("f"), ci, pred: "eq", value: "", valueTo: "", linker: "AND" }); break;
+    case "sort": if (!q.sort.some((s) => s.ci === ci)) q.sort.push({ id: nextQid("s"), ci, dir: "ASC" }); break;
     default: return;
   }
   renderQuery();
@@ -4969,7 +4994,7 @@ function queryHeight(px) {
   const room = Math.max(120, window.innerHeight - 260);
   const h = Math.max(120, Math.min(Math.round(px), room));
   document.documentElement.style.setProperty("--queryh", h + "px");
-  try { localStorage.setItem("paris-parquet-queryh", String(h)); } catch (e) { /* fine */ }
+  try { localStorage.setItem("paris-parquet-queryh", String(h)); } catch (_e) { /* fine */ }
   renderRows(true);
   return h;
 }
@@ -5042,7 +5067,7 @@ function fillBounds(out, loB, hiB, leaf, spec) {
   try {
     lo = spec.convert(rawStat(loB, leaf));
     hi = spec.convert(rawStat(hiB, leaf));
-  } catch (e) { return out; }
+  } catch (_e) { return out; }
   const key = sortKey(spec);
   if (key) {
     lo = key(lo);
@@ -5207,7 +5232,7 @@ async function readBloom(src, chunk) {
     const start = off + c.p;
     if (start + numBytes > src.size) return null;
     chunk.bloom = await src.read(start, start + numBytes);
-  } catch (e) { chunk.bloom = null; }
+  } catch (_e) { chunk.bloom = null; }
   return chunk.bloom;
 }
 /**
@@ -5301,7 +5326,10 @@ async function planScan(dataset, query, table, onProgress) {
           const chunk = chunkOf(rg, col);
           if (!chunk || chunk.meta.bloomFilterOffset == null) continue;
           const data = await readBloom(part.src, chunk);
-          if (data && !bloomHas(data, xxh64(bytes))) (ruled || (ruled = new Set())).add(f);
+          if (data && !bloomHas(data, xxh64(bytes))) {
+            if (!ruled) ruled = new Set();
+            ruled.add(f);
+          }
         }
       }
       if (ruled && !anyGroupMatches(groups, (f) => !ruled.has(f) && statsSay(f))) {
@@ -5473,8 +5501,8 @@ const shapeText = (s) => s.phys + " · " + s.type + " · " + s.rep;
 /** Columns added, removed, retyped — and the pairs that look like a rename. */
 function schemaDiff(aT, bT) {
   const A = new Map(), B = new Map();
-  aT.cols.forEach((col, i) => A.set(col.key, { col, i, shape: colShape(col) }));
-  bT.cols.forEach((col, i) => B.set(col.key, { col, i, shape: colShape(col) }));
+  aT.cols.forEach((col, i) => { A.set(col.key, { col, i, shape: colShape(col) }); });
+  bT.cols.forEach((col, i) => { B.set(col.key, { col, i, shape: colShape(col) }); });
   const added = [], removed = [], retyped = [], common = [];
   for (const b of B.values()) if (!A.has(b.col.key)) added.push(b);
   for (const a of A.values()) {
@@ -5588,7 +5616,7 @@ function columnStats(dataset, col) {
         try {
           if (lo && lo.length) { const v = rawStat(lo, leaf); if (min === null || cmp(v, min) < 0) min = v; }
           if (hi && hi.length) { const v = rawStat(hi, leaf); if (max === null || cmp(v, max) > 0) max = v; }
-        } catch (e) { unreadable = true; }
+        } catch (_e) { unreadable = true; }
       }
     }
   }
@@ -5727,7 +5755,11 @@ function rowDiff(aT, bT, keyKeys) {
     let cells = null;
     for (let c = 0; c < value.length; c++) {
       const v = value[c];
-      if (!v.eq(v.A[r], v.B[br])) { (cells || (cells = [])).push(c); perCol[c]++; }
+      if (!v.eq(v.A[r], v.B[br])) {
+        if (!cells) cells = [];
+        cells.push(c);
+        perCol[c]++;
+      }
     }
     if (cells) changed.push({ ar: r, br, cells }); else same++;
   }
@@ -5973,7 +6005,7 @@ function renderDiff() {
   }
   /* growing or scanning the open file leaves columns nobody asked for behind;
      a diff wants all of them */
-  if (needFilled(state.table.cols.map((c, i) => i), renderDiff)) return;
+  if (needFilled(state.table.cols.map((_c, i) => i), renderDiff)) return;
   const A = sideA(), B = diff.b;
   $("diffbar").innerHTML = [
     "<span class='qtitle'>COMPARE</span>",
@@ -6030,7 +6062,7 @@ async function openCompare(entries, label) {
     diff.cap = 200;
     busy(true, "decoding the rest of this file to compare it…");
     await new Promise((r) => setTimeout(r, 0));
-    await fillColumns(state.dataset, state.table, state.table.cols.map((c, i) => i));
+    await fillColumns(state.dataset, state.table, state.table.cols.map((_c, i) => i));
     diff.keys = suggestKey(state.table, table);
     renderDiff();
   } catch (e) {
@@ -6064,7 +6096,7 @@ async function loadAllBoth() {
   try {
     state.table.need = null;                       /* the diff wants every column */
     await loadMore(state.dataset, state.table, Infinity);
-    await fillColumns(state.dataset, state.table, state.table.cols.map((c, i) => i));
+    await fillColumns(state.dataset, state.table, state.table.cols.map((_c, i) => i));
     if (diff.b) await loadMore(diff.b.dataset, diff.b.table, Infinity);
     refreshView(true);
     renderMeta();
@@ -6175,7 +6207,11 @@ function showJoin(on) {
   $("joinwrap").hidden = !on;
   $("gridwrap").hidden = on || !state.view;
   $("pager").hidden = on || !state.view;
-  $("toggleJoin").textContent = on ? "Table" : "Join";
+  /* with nothing open the page shows its own drop zone; the join panel
+     takes the view over while it is up, and hands it back after */
+  $("drop").hidden = on || !!state.table;
+  $("toggleJoin").textContent = on ? "⋈ Close join" : "⋈ Join two files";
+  $("toggleJoin").classList.toggle("on", on);
   if (joinHooks.onShow) joinHooks.onShow(on);
   if (on) renderJoin();
 }
@@ -6199,27 +6235,43 @@ async function openJoinCompare(entries, label) {
   } catch (e) { showError(e); } finally { busy(false); }
 }
 
+/** One side of the join, as a place a file can be dropped. */
+function sideCard(which, name, rows, pickerId) {
+  const filled = !!name;
+  return "<div class='jside" + (filled ? " jfilled" : "") + "' data-jside='" + which + "'>" +
+    "<span class='jlabel'>" + which + "</span>" +
+    (filled
+      ? "<span class='jname' title='" + esc(name) + "'>" + esc(name) + "</span>" +
+        "<span class='jrows'>" + (rows == null ? "" : num(rows) + " rows") + "</span>"
+      : "<span class='jname'>drag a file here</span>" +
+        "<span class='jrows'>from the panel on the left, or off your desktop</span>") +
+    "<label class='btn' for='" + pickerId + "'>" + (filled ? "choose another" : "choose a file") + "</label>" +
+    "</div>";
+}
+
 function renderJoin() {
-  if (!state.table) return;
   const aName = currentAName();
   const undoName = join.before ? join.before.name : aName;
   const b = join.b;
   $("joinbar").innerHTML = "<span class='qtitle'>JOIN</span>" +
-    "<span class='dside'>A <b title='" + esc(aName) + "'>" + esc(aName) + "</b></span>" +
-    "<span class='muted'>with</span>" +
-    (b ? "<span class='dside'>B <b title='" + esc(b.name) + "'>" + esc(b.name) + "</b></span>" +
-         "<label class='btn' for='jpicker'>choose another</label>"
-       : "<label class='btn' for='jpicker'>choose file B</label>") +
-    "<label class='btn' for='jdirpicker' title='Pick a folder; every parquet file in it reads as one table'>folder</label>" +
+    "<span class='muted'>two files on a key, inner join</span>" +
+    "<label class='btn' for='jdirpicker' title='Pick a folder; every parquet file in it reads as one table'>folder as B</label>" +
     "<span class='grow'></span><button id='joinclose'>close</button>";
 
+  const sides = "<div class='jsides'>" +
+    sideCard("A", state.table ? aName : "", state.table ? state.table.rowsLoaded : null, "picker") +
+    "<span class='jcross'>&#8904;</span>" +
+    sideCard("B", b ? b.name : "", b ? b.table.rowsLoaded : null, "jpicker") + "</div>";
+
   let body;
-  if (!b) {
-    body = "<div id='dropb'><div class='big'>Drop the file to join against here</div>" +
-      "<div class='hint'>Or click one in the folder panel on the left, or use " +
-      "<b>choose file B</b> above. A is the table already open:<br>" + esc(aName) + "</div></div>";
+  if (!state.table || !b) {
+    body = sides + "<div class='dnote'>" +
+      (state.table
+        ? "Drag the file to join against into <b>B</b> — from the file panel on the left, or straight off your desktop."
+        : "Drag a file into <b>A</b> and another into <b>B</b>. A is whichever table is open, so dropping one there opens it.") +
+      "</div>";
   } else if (join.result) {
-    body = "<div class='jresult'>" + esc(join.result) +
+    body = sides + "<div class='jresult'>" + esc(join.result) +
       "<br><button id='jundo'>Undo, back to " + esc(undoName) + "</button></div>";
   } else {
     const aCols = state.table.cols;
@@ -6227,7 +6279,7 @@ function renderJoin() {
       ">" + esc(c.name) + "</option>").join("");
     const bOpts = b.table.cols.map((c, i) => "<option value='" + i + "'" + (i === join.keyB ? " selected" : "") +
       ">" + esc(c.name) + "</option>").join("");
-    body = "<div class='jkeys'>join <b>" + esc(aName) + "</b>.<select id='jkeyA'>" +
+    body = sides + "<div class='jkeys'>join <b>" + esc(aName) + "</b>.<select id='jkeyA'>" +
       "<option value='-1'>(pick a column)</option>" + aOpts + "</select>" +
       " to <b>" + esc(b.name) + "</b>.<select id='jkeyB'>" +
       "<option value='-1'>(pick a column)</option>" + bOpts + "</select>" +
@@ -6292,7 +6344,10 @@ async function runJoin() {
       if (v === null || v === undefined) continue;
       const k = keyPart(v);
       let list = hash.get(k);
-      if (!list) hash.set(k, (list = []));
+      if (!list) {
+        list = [];
+        hash.set(k, list);
+      }
       list.push(r);
       if (kk) {
         if (loRaw === null || lessThan(v, loRaw)) loRaw = v;
@@ -6402,8 +6457,66 @@ function undoJoin() {
   showJoin(false);
 }
 
+/**
+ * A file dropped on a side: B is the other side of the join, A is whatever
+ * table is open, so dropping one there opens it. Either way the panel stays
+ * up and picks the keys back up where it left off.
+ */
+async function dropOnSide(which, entries, label) {
+  if (!entries.length) return;
+  if (which === "B") { await openJoinCompare(entries, label); return; }
+  await openEntries(entries, label);
+  /* opening a file closes nothing: the panel is still the view, and B (if
+     any) is still B, so only the keys have to be guessed again */
+  if (join.b && state.table) {
+    const [ai, bi] = guessKeys(state.table.cols, join.b.table.cols);
+    join.keyA = ai;
+    join.keyB = bi;
+    join.result = null;
+  }
+  showJoin(true);
+}
+
+function sideDropHandlers() {
+  const zone = (e) => e.target.closest(".jside[data-jside]");
+  $("joinbody").addEventListener("dragover", (e) => {
+    const el = zone(e);
+    if (!el) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    el.classList.add("jover");
+  });
+  $("joinbody").addEventListener("dragleave", (e) => {
+    const el = zone(e);
+    if (el) el.classList.remove("jover");
+  });
+  $("joinbody").addEventListener("drop", async (e) => {
+    const el = zone(e);
+    if (!el) return;
+    e.preventDefault();
+    e.stopPropagation();          /* not a new file for the page: a side */
+    el.classList.remove("jover");
+    const which = el.dataset.jside;
+    const path = e.dataTransfer.getData(TREE_DRAG);
+    busy(true, "reading…");
+    try {
+      if (path) {                 /* a row dragged out of the file panel */
+        const entry = await entryForPath(path);
+        if (!entry) throw new Error('"' + path + '" is no longer available; open it again.');
+        await dropOnSide(which, [entry], path);
+        return;
+      }
+      const entries = await entriesFromDrop(e.dataTransfer);
+      if (!entries.length) throw new Error("Nothing here ends in .parquet.");
+      const folder = entries[0].path.indexOf("/") > 0 ? entries[0].path.split("/")[0] : null;
+      await dropOnSide(which, entries, folder);
+    } catch (err) { showError(err); } finally { busy(false); }
+  });
+}
+
 function initJoin() {
   $("toggleJoin").addEventListener("click", () => showJoin(!join.on));
+  sideDropHandlers();
   const fromPicker = (e, isDir) => {
     const entries = entriesFromFiles(e.target.files);
     const first = e.target.files[0];
@@ -6442,9 +6555,33 @@ const tree = {
   expanded: new Set(),
   openPath: null,         /* path of the file currently shown in the grid, for highlighting */
   pickPath: null,         /* path picked as the join's side B, while picking */
-  wasOn: false,           /* the panel was already open before the join opened it */
   autoExpanded: new Set(),/* dirs opened for the user once, so a collapse sticks */
 };
+
+/** Marks a drag as one of ours, so a join side can tell a row being dragged
+    in from a file being dragged in off the desktop. */
+const TREE_DRAG = "application/x-paris-parquet-path";
+
+/** Looks a path up in whatever the panel is showing, as an entry the reader
+    can take: the session list holds them already, a browsed folder has to
+    fetch the file first. */
+async function entryForPath(path) {
+  if (tree.kind === "live") {
+    const parts = path.split("/");
+    let dir = tree.rootHandle;
+    for (let i = 0; i < parts.length - 1; i++) dir = await dir.getDirectoryHandle(parts[i]);
+    const handle = await dir.getFileHandle(parts[parts.length - 1]);
+    return entriesFromFiles([await handle.getFile()])[0] || null;
+  }
+  let node = tree.nodes;
+  for (const seg of path.split("/")) {
+    if (!node) return null;
+    node = node.children.get(seg);
+  }
+  if (!node) return null;
+  if (node.entry) return node.entry;
+  return node.file ? entriesFromFiles([node.file])[0] || null : null;
+}
 
 /** Clicking a file opens it, unless the join panel is waiting for a side B. */
 function picking() {
@@ -6499,7 +6636,7 @@ async function openTreeLive() {
   let handle;
   try {
     handle = await window.showDirectoryPicker({ mode: "read" });
-  } catch (e) {
+  } catch (_e) {
     return; /* the user cancelled the native picker -- not an error */
   }
   tree.kind = "live";
@@ -6640,8 +6777,12 @@ function renderSnapshotLevel(node, path, depth) {
 function treeRow(kind, name, path, depth, isOpen) {
   const cssKind = kind === "directory" ? "dir" : "file";
   const on = kind === "file" && path === (picking() ? tree.pickPath : tree.openPath);
+  /* a file can be dragged onto either side of the join panel; a folder
+     cannot, since a side is one file or one folder-read-as-one-table and
+     the tree has no way to say which is meant */
   return "<div class='tnode t" + cssKind + (on ? " ton" : "") + "' data-path='" + esc(path) +
-    "' data-kind='" + kind + "' style='padding-left:" + (8 + depth * 14) + "px'>" +
+    "' data-kind='" + kind + "'" + (kind === "file" ? " draggable='true'" : "") +
+    " style='padding-left:" + (8 + depth * 14) + "px'>" +
     "<span class='tcaret" + (kind === "file" ? " tleaf" : "") + "'>" + nodeIcon(kind, isOpen) + "</span>" +
     "<span class='tname'>" + esc(name) + "</span></div>";
 }
@@ -6719,22 +6860,14 @@ async function pickFile(path) {
 }
 
 /**
- * Opening the join panel turns this one into its file picker: whatever
- * folder is already being browsed if there is one, and otherwise the files
- * this load has been handed. A panel opened only for the join closes again
- * with it; one the user opened themselves stays exactly as it was.
+ * While the join panel is up, this one is its file list: clicking a file
+ * picks it as side B instead of opening it, and the picked row is marked.
  */
-function syncTreeForJoin(on) {
+function syncTreeForJoin() {
+  /* the join is opened from a button inside this panel, so the panel is
+     always already up: all that changes is what clicking a file does */
   tree.pickPath = null;
-  if (on) {
-    tree.wasOn = tree.on;
-    if (!tree.on) openTreeSession(); else renderTree();
-    return;
-  }
-  /* a panel the join opened by itself goes away again with it; one the user
-     had open (which is the default) stays exactly where it was */
-  if (tree.on && !tree.wasOn) closeTree();
-  else if (tree.on) renderTree();
+  if (tree.on) renderTree();
 }
 
 /** A side B picked by dialog or drop is one more file the panel can offer,
@@ -6778,6 +6911,20 @@ function initTree() {
     if (treeSupported() && tree.kind !== "snapshot") openTreeLive();
     else $("treepicker").click();
   });
+  /* dragging a row is how a file reaches a join side: the path is all the
+     other end needs, since every file here is one this page already holds */
+  $("treebody").addEventListener("dragstart", (e) => {
+    const row = e.target.closest(".tnode[draggable='true']");
+    if (!row) return;
+    e.dataTransfer.setData("text/plain", row.dataset.path);
+    e.dataTransfer.setData(TREE_DRAG, row.dataset.path);
+    e.dataTransfer.effectAllowed = "copy";
+    row.classList.add("tdragging");
+  });
+  $("treebody").addEventListener("dragend", (e) => {
+    const row = e.target.closest(".tnode");
+    if (row) row.classList.remove("tdragging");
+  });
   $("treebody").addEventListener("click", (e) => {
     const row = e.target.closest(".tnode");
     if (!row) return;
@@ -6790,7 +6937,7 @@ function initTree() {
   try {
     const saved = +localStorage.getItem("paris-parquet-treew");
     if (saved > 0) document.documentElement.style.setProperty("--treew", saved + "px");
-  } catch (e) { /* fine */ }
+  } catch (_e) { /* fine */ }
   /* open from the start, with nothing in it yet: the panel is where files
      turn up, so it is there before the first one does */
   if (panelWanted()) openTreeSession();
@@ -6800,7 +6947,7 @@ function treeWidth(px) {
   const room = Math.max(160, window.innerWidth - 300);
   const w = Math.max(160, Math.min(Math.round(px), room));
   document.documentElement.style.setProperty("--treew", w + "px");
-  try { localStorage.setItem("paris-parquet-treew", String(w)); } catch (e) { /* fine */ }
+  try { localStorage.setItem("paris-parquet-treew", String(w)); } catch (_e) { /* fine */ }
   return w;
 }
 
@@ -6816,7 +6963,7 @@ function metaHeight(px) {
   const room = Math.max(90, window.innerHeight - 220);
   const h = Math.max(58, Math.min(Math.round(px), room));
   document.documentElement.style.setProperty("--metah", h + "px");
-  try { localStorage.setItem("paris-parquet-metah", String(h)); } catch (e) { /* fine */ }
+  try { localStorage.setItem("paris-parquet-metah", String(h)); } catch (_e) { /* fine */ }
   renderRows(true);
   return h;
 }
@@ -6841,13 +6988,13 @@ function applyTheme(name) {
   else root.setAttribute("data-theme", name);
   $("theme").textContent = name;
   /* file:// pages may refuse storage entirely; the choice just won't persist */
-  try { localStorage.setItem("paris-parquet-theme", name); } catch (e) { /* fine */ }
+  try { localStorage.setItem("paris-parquet-theme", name); } catch (_e) { /* fine */ }
 }
 function storedTheme() {
   try {
     const v = localStorage.getItem("paris-parquet-theme");
     return THEMES.indexOf(v) >= 0 ? v : "auto";
-  } catch (e) { return "auto"; }
+  } catch (_e) { return "auto"; }
 }
 function showError(e) {
   const old = $("err");
@@ -6969,7 +7116,7 @@ async function openEntries(entries, label) {
   try {
     if (!entries.length) throw new Error("No .parquet files here.");
     let parts = 0;
-    const dataset = await readDataset(entries, async (i, n, path) => {
+    const dataset = await readDataset(entries, async (i, n, _path) => {
       parts = n;
       if (n > 1 && (i % 16 === 0 || i === n - 1)) {
         busy(true, "reading footers… " + (i + 1) + " of " + n);
@@ -7017,7 +7164,7 @@ async function openEntries(entries, label) {
     /* the footer usually parses even when a page does not, and it is the part
        that explains why: codec, encodings, encryption, who wrote the file */
     if (state.meta && state.table) {
-      try { renderMeta(); $("toggleMeta").hidden = false; } catch (e2) { /* nothing to show */ }
+      try { renderMeta(); $("toggleMeta").hidden = false; } catch (_e2) { /* nothing to show */ }
     }
   } finally {
     busy(false);
@@ -7033,7 +7180,8 @@ function updateButtons() {
   $("toggleQuery").hidden = !t;
   $("toggleCols").hidden = !t;
   $("toggleDiff").hidden = !t;
-  $("toggleJoin").hidden = !t;
+  /* the join panel takes its two sides by drop, so it is reachable with
+     nothing open yet -- its button lives in the file panel, not here */
   if (t && $("toggleQuery").textContent === "Query" && $("query").hidden) {
     $("query").hidden = false;
     $("qgrip").hidden = false;
@@ -7091,15 +7239,15 @@ function init() {
   try {
     const qh = +localStorage.getItem("paris-parquet-queryh");
     if (qh > 0) document.documentElement.style.setProperty("--queryh", qh + "px");
-  } catch (e) { /* fine */ }
+  } catch (_e) { /* fine */ }
   try {
     const size = Number(localStorage.getItem("paris-parquet-pagesize"));
     if (PAGE_SIZES.indexOf(size) >= 0 || size === Infinity) state.pageSize = size;
-  } catch (e) { /* fine */ }
+  } catch (_e) { /* fine */ }
   try {
     const saved = +localStorage.getItem("paris-parquet-metah");
     if (saved > 0) document.documentElement.style.setProperty("--metah", saved + "px");
-  } catch (e) { /* fine */ }
+  } catch (_e) { /* fine */ }
   $("mgrip").addEventListener("pointerdown", (e) =>
     drag(e, "rowsizing", (ev) => metaHeight(window.innerHeight - ev.clientY)));
   $("gridwrap").addEventListener("pointerdown", (e) => {

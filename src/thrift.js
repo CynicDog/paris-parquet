@@ -214,8 +214,8 @@ export function parseColumnChunk(c) {
     columnIndexLength: c[7] ?? null,
     offsetIndexOffset: c[4] ?? null,
     offsetIndexLength: c[5] ?? null,
-    cryptoMetadata: c[8] ? true : false,
-    encryptedMetadata: c[9] ? true : false,
+    cryptoMetadata: !!c[8],
+    encryptedMetadata: !!c[9],
     meta: md ? {
       type: PTYPE[md[1]],
       encodings: (md[2] || []).map((e) => ENC[e] || "ENC_" + e),

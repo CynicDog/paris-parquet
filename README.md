@@ -92,19 +92,25 @@ them; `tools/sample-data.py` regenerates them.
 - A hidden column can still be filtered/grouped/sorted on, but isn't
   decoded — a `GROUP BY` on 2 of 60 columns only reads those 2.
 
-**Folder** in the header browses the folder a file lives in, so you can open
-a sibling without a picker dialog each time — and doubles as the **Join**
-panel's file picker (above).
-- Uses the File System Access API (`showDirectoryPicker`) where the browser
-  has it — a live, lazily-expandable tree. Where it doesn't (Safari, Firefox
-  as of writing), falls back to the same `webkitdirectory` picker "Open
-  folder" already uses, built into a one-time snapshot tree instead.
-- This is its own explicit grant, separate from drag-and-drop, which stays
-  exactly as frictionless and permission-free as it's always been — dropping
-  a file never hands you its folder. The tree panel always names the folder
-  it's browsing, with a `change` to pick a different one and `close` to stop;
-  nothing is persisted across a reload, so browsing again after one always
-  asks again.
+**The file panel** on the left is open from the start, before the first file
+is dropped. It lists every parquet the page has been handed this session —
+opened, dropped, or dragged into a join — and it is where **Join** lives.
+- A drop shows up in it immediately; clicking a row opens that file; the
+  open one is marked; a folder new to the list is expanded once, so a file
+  that just arrived is visible without hunting for it. **Files** in the
+  header hides and shows the panel, and that choice is remembered.
+- **browse a folder** swaps the list for the folder a file lives in, so you
+  can open siblings without a picker dialog each time, and **session** goes
+  back to the list. Uses the File System Access API (`showDirectoryPicker`)
+  where the browser has it — a live, lazily-expandable tree. Where it
+  doesn't (Safari, Firefox as of writing), falls back to the same
+  `webkitdirectory` picker **Open folder as one table** uses, built into a
+  one-time snapshot tree instead.
+- Browsing a folder is its own explicit grant, separate from drag-and-drop,
+  which stays exactly as frictionless and permission-free as it's always
+  been — dropping a file never hands you its folder. Nothing is persisted
+  across a reload beyond whether the panel is open: the session list starts
+  empty and a folder has to be granted again.
 
 **Diff**
 - Compare two files: schema changes (added/removed/retyped columns, a
@@ -117,15 +123,14 @@ panel's file picker (above).
 - Every card here is read out of the two footers, so a joined table — which
   has no footer of its own — is named and refused rather than half-compared.
 
-**Join** combines two files into one table on a key — the opened file plus a
-second one you pick.
-- Pick the second file from the **folder panel on the left**: opening Join
-  turns it into the join's file list — the folder you're browsing if there
-  is one, otherwise every parquet this page load has been handed (opened,
-  dropped, or picked before). Clicking one there sets it as B rather than
-  replacing the open file, and the row stays marked while it is B. Dropping
-  a file on the join panel does the same, and `choose file B` / `folder`
-  are still there. A panel that was only opened for the join closes with it.
+**Join** combines two files into one table on a key. Its button is in the
+file panel rather than the header, and works with nothing open yet: it gives
+an empty workspace with an **A** and a **B** side to fill.
+- **Drag a file from the panel onto a side.** A is whichever table is open,
+  so dropping one there opens it; B is the other side of the join. A file
+  dragged straight off the desktop lands the same way, and each side keeps a
+  `choose a file` picker. While Join is up, clicking a row in the panel sets
+  it as B too, and that row stays marked while it is.
 - Inner join on a single equality key, one column per side (they don't need
   the same name — `region` on one side to `name` on the other is normal).
   The result replaces the open table, and **Undo** restores the original
@@ -208,13 +213,27 @@ global scope — the same shape the file has always shipped in. That fixed
 order is why the modules use real imports for Biome and editors to check,
 but don't need a real module resolver to build.
 
-`biome.json` turns lint on for real, tuned to the codebase's own style
-rather than the defaults wholesale (dense string-concatenation over template
-literals, the `x !== x` NaN check, deliberate control-character ranges in
-byte/encoding regexes are all quieted; genuine correctness rules —
-unused imports/variables, suspicious equality, assignment-in-expression —
-stay on). The formatter is off on purpose: reformatting the existing style is
-a separate decision from turning lint on, not bundled into this pass.
+`biome.json` turns lint on for real, and `npm run lint` is clean — a finding
+is a finding, not background noise. It is tuned to the codebase's own style
+rather than the defaults wholesale; what is off, and why:
+
+| rule | why |
+|---|---|
+| `useTemplate` | dense string concatenation is how the HTML here is built |
+| `useExponentiationOperator` | `Math.pow` reads better in the bit-packing maths |
+| `noSelfCompare` | `x !== x` is the NaN check |
+| `noControlCharactersInRegex` | byte and encoding regexes mean those ranges |
+| `noGlobalIsFinite` | the coercing `isFinite` is the one meant: it takes the page size (which may be `Infinity`), parsed operands and dataset strings alike, where `Number.isFinite` would answer false for all of them |
+| `noCommaOperator` | the SQL parser advances with `(step(), tokAt(p - 1))`, one step-and-read rather than two statements around a temp |
+| `useOptionalChain` | `a && a.b` is not `a?.b` — the first yields `a` when `a` is falsy, and call sites pass that on |
+
+Everything else is on, including the correctness rules that actually caught
+things: unused imports and variables, suspicious equality, assignment in an
+expression, `forEach` callbacks returning a value, and assigning to an
+imported binding (which a real module would refuse — the builder's chip ids
+come from `nextQid()` now rather than bumping an imported counter). The
+formatter is off on purpose: reformatting the existing style is a separate
+decision from turning lint on, not bundled into this pass.
 
 ## Tests
 

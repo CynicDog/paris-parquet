@@ -4,8 +4,9 @@
  *
  *   node tools/browser.mjs file.parquet [--shot out.png] [--wide]
  */
-import path from "node:path";
+
 import { createRequire } from "node:module";
+import path from "node:path";
 
 /* createRequire honours NODE_PATH, so a global playwright install works */
 const { chromium } = createRequire(import.meta.url)("playwright");

@@ -14,8 +14,8 @@
  * tools/fixtures.py's push/ output (folders of parquet files) fits.
  */
 import fs from "node:fs";
-import path from "node:path";
 import { createRequire } from "node:module";
+import path from "node:path";
 
 const { chromium } = createRequire(import.meta.url)("playwright");
 const dir = process.argv[2] || "/tmp/fx/push";
@@ -107,7 +107,7 @@ await withPage(async (page) => {
 });
 
 /* ------------------------------------------------ File System Access path */
-await withPage(async (page, logs) => {
+await withPage(async (page, _logs) => {
   const tree = readTree(dir, path.basename(dir));
   await page.addInitScript((treeData) => {
     function b64ToBytes(b64) {

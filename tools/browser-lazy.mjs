@@ -7,8 +7,9 @@
  * Reading fewer columns is only worth anything if the ones you do read are
  * still right, so every check here ends at the cells on screen.
  */
-import path from "node:path";
+
 import { createRequire } from "node:module";
+import path from "node:path";
 
 const { chromium } = createRequire(import.meta.url)("playwright");
 const args = process.argv.slice(2);
@@ -96,7 +97,7 @@ await idle();
 await page.evaluate(() => {
   /* hide everything but the first column, the way the picker does */
   const P = window.PARIS;
-  P.state.display.hidden = new Set(P.state.table.cols.map((c, i) => i).filter((i) => i !== 0));
+  P.state.display.hidden = new Set(P.state.table.cols.map((_c, i) => i).filter((i) => i !== 0));
 });
 await page.evaluate(async () => {
   const P = window.PARIS;
@@ -125,9 +126,9 @@ await page.goto("file://" + appPath);
 await page.setInputFiles("#picker", file);
 await idle();
 const name = await page.evaluate(() => window.PARIS.state.table.cols[3].name);
-await page.evaluate((n) => {
+await page.evaluate((_n) => {
   const P = window.PARIS;
-  P.state.display.hidden = new Set(P.state.table.cols.map((c, i) => i).filter((i) => i !== 0 && i !== 1));
+  P.state.display.hidden = new Set(P.state.table.cols.map((_c, i) => i).filter((i) => i !== 0 && i !== 1));
 }, name);
 await page.fill("#qsql", `SELECT * FROM x WHERE "${name}" IS NOT NULL`);
 await page.dispatchEvent("#qsql", "input");

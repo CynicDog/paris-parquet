@@ -11,7 +11,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { loadApp, appPath } from "./check.mjs";
+import { appPath, loadApp } from "./check.mjs";
 
 const PARIS = loadApp(appPath);
 const dir = process.argv[2] || "/tmp/fx/diff";

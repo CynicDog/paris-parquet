@@ -10,13 +10,18 @@
     "enabled": true,
     "rules": {
       "recommended": true,
+      "complexity": {
+        "useOptionalChain": "off",
+        "noCommaOperator": "off"
+      },
       "style": {
         "useTemplate": "off",
         "useExponentiationOperator": "off"
       },
       "suspicious": {
         "noSelfCompare": "off",
-        "noControlCharactersInRegex": "off"
+        "noControlCharactersInRegex": "off",
+        "noGlobalIsFinite": "off"
       }
     }
   }

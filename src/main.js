@@ -2,8 +2,8 @@ import { decompress, gzipDecompress, lz4BlockDecompress, snappyDecompress, zstdD
 import { $, fillColumns, groupsLeft, loadMore, readColumnRows, rowsAhead, unfilled } from "./columns.js";
 import { fileSource, hivePartition, isParquetPath, newTable, readDataset } from "./dataset.js";
 import { cellEq, cellKey, colShape, columnStats, datasetShape, diff, initDiff, openCompare, renderDiff, rowDiff, schemaDiff, suggestKey } from "./diff.js";
-import { initJoin, join, openJoinCompare } from "./join.js";
 import { assemble, intersectRanges, mergeRanges, rangeCount, readColumnChunk, readColumnIndex, readOffsetIndex, readPage, readRowsRanges, unionRanges } from "./encoding.js";
+import { initJoin, join, openJoinCompare } from "./join.js";
 import { bloomBytes, bloomHas, chunkBounds, clauseCanMatch, clauseGroups, clauseRanges, planReport, planScan, readBloom, showPlan, xxh64 } from "./pushdown.js";
 import { aggregate, compileFilter, newQuery, parseSql, querySql, runQuery, sqlTokenize, toggleSort } from "./query.js";
 import { readFooter } from "./thrift.js";
@@ -12,7 +12,7 @@ import { closeInspector, initPicker, openInspector, refreshView, renderRows } fr
 import { rawStat, renderMeta, showStat, statValue } from "./ui-metadata.js";
 import { adoptSql, initQuery, renderQuery, renderQueryColumns } from "./ui-query-builder.js";
 import { initTree } from "./ui-tree.js";
-import { COL_W, PAGE_SIZES, baseView, bytesHuman, displayCols, esc, exportParts, neededColumns, newDisplay, num, queryColumns, setView, state, viewValue } from "./view.js";
+import { baseView, bytesHuman, COL_W, displayCols, esc, exportParts, neededColumns, newDisplay, num, PAGE_SIZES, queryColumns, setView, state, viewValue } from "./view.js";
 import { pool, poolStart, workerCan, workerMain } from "./workers.js";
 
 export function columnWidth(index, px) {
@@ -27,7 +27,7 @@ export function metaHeight(px) {
   const room = Math.max(90, window.innerHeight - 220);
   const h = Math.max(58, Math.min(Math.round(px), room));
   document.documentElement.style.setProperty("--metah", h + "px");
-  try { localStorage.setItem("paris-parquet-metah", String(h)); } catch (e) { /* fine */ }
+  try { localStorage.setItem("paris-parquet-metah", String(h)); } catch (_e) { /* fine */ }
   renderRows(true);
   return h;
 }
@@ -52,13 +52,13 @@ export function applyTheme(name) {
   else root.setAttribute("data-theme", name);
   $("theme").textContent = name;
   /* file:// pages may refuse storage entirely; the choice just won't persist */
-  try { localStorage.setItem("paris-parquet-theme", name); } catch (e) { /* fine */ }
+  try { localStorage.setItem("paris-parquet-theme", name); } catch (_e) { /* fine */ }
 }
 export function storedTheme() {
   try {
     const v = localStorage.getItem("paris-parquet-theme");
     return THEMES.indexOf(v) >= 0 ? v : "auto";
-  } catch (e) { return "auto"; }
+  } catch (_e) { return "auto"; }
 }
 export function showError(e) {
   const old = $("err");
@@ -180,7 +180,7 @@ export async function openEntries(entries, label) {
   try {
     if (!entries.length) throw new Error("No .parquet files here.");
     let parts = 0;
-    const dataset = await readDataset(entries, async (i, n, path) => {
+    const dataset = await readDataset(entries, async (i, n, _path) => {
       parts = n;
       if (n > 1 && (i % 16 === 0 || i === n - 1)) {
         busy(true, "reading footers… " + (i + 1) + " of " + n);
@@ -228,7 +228,7 @@ export async function openEntries(entries, label) {
     /* the footer usually parses even when a page does not, and it is the part
        that explains why: codec, encodings, encryption, who wrote the file */
     if (state.meta && state.table) {
-      try { renderMeta(); $("toggleMeta").hidden = false; } catch (e2) { /* nothing to show */ }
+      try { renderMeta(); $("toggleMeta").hidden = false; } catch (_e2) { /* nothing to show */ }
     }
   } finally {
     busy(false);
@@ -244,7 +244,8 @@ export function updateButtons() {
   $("toggleQuery").hidden = !t;
   $("toggleCols").hidden = !t;
   $("toggleDiff").hidden = !t;
-  $("toggleJoin").hidden = !t;
+  /* the join panel takes its two sides by drop, so it is reachable with
+     nothing open yet -- its button lives in the file panel, not here */
   if (t && $("toggleQuery").textContent === "Query" && $("query").hidden) {
     $("query").hidden = false;
     $("qgrip").hidden = false;
@@ -302,15 +303,15 @@ export function init() {
   try {
     const qh = +localStorage.getItem("paris-parquet-queryh");
     if (qh > 0) document.documentElement.style.setProperty("--queryh", qh + "px");
-  } catch (e) { /* fine */ }
+  } catch (_e) { /* fine */ }
   try {
     const size = Number(localStorage.getItem("paris-parquet-pagesize"));
     if (PAGE_SIZES.indexOf(size) >= 0 || size === Infinity) state.pageSize = size;
-  } catch (e) { /* fine */ }
+  } catch (_e) { /* fine */ }
   try {
     const saved = +localStorage.getItem("paris-parquet-metah");
     if (saved > 0) document.documentElement.style.setProperty("--metah", saved + "px");
-  } catch (e) { /* fine */ }
+  } catch (_e) { /* fine */ }
   $("mgrip").addEventListener("pointerdown", (e) =>
     drag(e, "rowsizing", (ev) => metaHeight(window.innerHeight - ev.clientY)));
   $("gridwrap").addEventListener("pointerdown", (e) => {

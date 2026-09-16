@@ -1,5 +1,5 @@
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import { clauseCanMatch } from "./pushdown.js";
 
 const numSpec = { kind: "number", label: "int32", physical: "INT32", convert: (v) => v };

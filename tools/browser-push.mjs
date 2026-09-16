@@ -5,8 +5,9 @@
  *
  *   NODE_PATH=/opt/node22/lib/node_modules node tools/browser-push.mjs /tmp/fx/push
  */
-import path from "node:path";
+
 import { createRequire } from "node:module";
+import path from "node:path";
 
 const { chromium } = createRequire(import.meta.url)("playwright");
 const args = process.argv.slice(2);

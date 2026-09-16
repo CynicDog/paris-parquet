@@ -1,5 +1,5 @@
 import { Cursor } from "./bytes.js";
-import { POW2, bitWidth, decompress, u32le } from "./codecs.js";
+import { bitWidth, decompress, POW2, u32le } from "./codecs.js";
 import { ENC, PAGE_TYPE, thriftStruct } from "./thrift.js";
 
 export function rleHybrid(b, pos, end, width, count, out) {
@@ -53,7 +53,7 @@ export function bitPackedLegacy(b, pos, end, width, count) {
 }
 
 /** PLAIN. Appends `count` physical values to `out`. */
-export function decodePlain(b, pos, end, type, count, typeLength, out) {
+export function decodePlain(b, pos, _end, type, count, typeLength, out) {
   const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
   switch (type) {
     case "BOOLEAN":
@@ -98,11 +98,11 @@ export function decodePlain(b, pos, end, type, count, typeLength, out) {
 export const same = (v) => v;
 
 /** DELTA_BINARY_PACKED. Returns {values, pos}; int64 accumulates in BigInt. */
-export function deltaBinaryPacked(b, pos, end, count, big) {
+export function deltaBinaryPacked(b, pos, _end, _count, big) {
   const rv = () => { let shift = 1, v = 0, by; do { by = b[pos++]; v += (by & 0x7f) * shift; shift *= 128; } while (by & 0x80); return v; };
   const zz = () => { const v = rv(); return v % 2 ? -(v + 1) / 2 : v / 2; };
   const blockSize = rv(), miniPerBlock = rv(), total = rv();
-  let first = zz();
+  const first = zz();
   const perMini = blockSize / miniPerBlock;
   const out = [];
   let cur = big ? BigInt(first) : first;
@@ -130,12 +130,13 @@ export function deltaBinaryPacked(b, pos, end, count, big) {
           bits -= w;
           if (big) d = BigInt(d);
         } else {
-          let lo, hi;
           while (bits < 32) { buf += b[bp++] * POW2[bits]; bits += 8; }
-          lo = buf % POW2[32]; buf = (buf - lo) / POW2[32]; bits -= 32;
+          const lo = buf % POW2[32];
+          buf = (buf - lo) / POW2[32]; bits -= 32;
           const rest = w - 32;
           while (bits < rest) { buf += b[bp++] * POW2[bits]; bits += 8; }
-          hi = buf % POW2[rest]; buf = (buf - hi) / POW2[rest]; bits -= rest;
+          const hi = buf % POW2[rest];
+          buf = (buf - hi) / POW2[rest]; bits -= rest;
           d = big ? BigInt(lo) + (BigInt(hi) << 32n) : lo + hi * POW2[32];
         }
         if (out.length < total) { cur = cur + minDelta + d; out.push(cur); }
@@ -363,7 +364,7 @@ export async function readOffsetIndex(src, chunk) {
     const out = list.map((p) => ({ offset: p[1], size: p[2] | 0, row: p[3] }));
     for (const p of out) if (!(p.offset >= 0) || !(p.size > 0) || !(p.row >= 0)) return null;
     chunk.offsets = out;
-  } catch (e) { chunk.offsets = null; }
+  } catch (_e) { chunk.offsets = null; }
   return chunk.offsets;
 }
 export async function readColumnIndex(src, chunk) {
@@ -379,7 +380,7 @@ export async function readColumnIndex(src, chunk) {
     if (!nullPages || !mins || !maxes) return null;
     if (mins.length !== nullPages.length || maxes.length !== nullPages.length) return null;
     chunk.pageStats = { nullPages, mins, maxes, nullCounts: st[5] || null };
-  } catch (e) { chunk.pageStats = null; }
+  } catch (_e) { chunk.pageStats = null; }
   return chunk.pageStats;
 }
 
@@ -425,7 +426,7 @@ export async function readRowsRanges(src, chunk, leaf, ranges, numRows, convert)
   const locs = leaf.maxRep === 0 ? await readOffsetIndex(src, chunk) : null;
   if (locs && locs.length) {
     try { return await readPagesRanges(src, chunk, leaf, locs, ranges, numRows, convert); }
-    catch (e) { chunk.offsets = null; }   /* an index we cannot follow: read it all */
+    catch (_e) { chunk.offsets = null; }   /* an index we cannot follow: read it all */
   }
   const raw = await readColumnChunk(src, chunk, leaf, convert);
   const all = assemble(leaf, raw.values, raw.defs, raw.reps, null);

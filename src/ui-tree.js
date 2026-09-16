@@ -21,9 +21,33 @@ export const tree = {
   expanded: new Set(),
   openPath: null,         /* path of the file currently shown in the grid, for highlighting */
   pickPath: null,         /* path picked as the join's side B, while picking */
-  wasOn: false,           /* the panel was already open before the join opened it */
   autoExpanded: new Set(),/* dirs opened for the user once, so a collapse sticks */
 };
+
+/** Marks a drag as one of ours, so a join side can tell a row being dragged
+    in from a file being dragged in off the desktop. */
+export const TREE_DRAG = "application/x-paris-parquet-path";
+
+/** Looks a path up in whatever the panel is showing, as an entry the reader
+    can take: the session list holds them already, a browsed folder has to
+    fetch the file first. */
+export async function entryForPath(path) {
+  if (tree.kind === "live") {
+    const parts = path.split("/");
+    let dir = tree.rootHandle;
+    for (let i = 0; i < parts.length - 1; i++) dir = await dir.getDirectoryHandle(parts[i]);
+    const handle = await dir.getFileHandle(parts[parts.length - 1]);
+    return entriesFromFiles([await handle.getFile()])[0] || null;
+  }
+  let node = tree.nodes;
+  for (const seg of path.split("/")) {
+    if (!node) return null;
+    node = node.children.get(seg);
+  }
+  if (!node) return null;
+  if (node.entry) return node.entry;
+  return node.file ? entriesFromFiles([node.file])[0] || null : null;
+}
 
 /** Clicking a file opens it, unless the join panel is waiting for a side B. */
 function picking() {
@@ -78,7 +102,7 @@ export async function openTreeLive() {
   let handle;
   try {
     handle = await window.showDirectoryPicker({ mode: "read" });
-  } catch (e) {
+  } catch (_e) {
     return; /* the user cancelled the native picker -- not an error */
   }
   tree.kind = "live";
@@ -219,8 +243,12 @@ function renderSnapshotLevel(node, path, depth) {
 function treeRow(kind, name, path, depth, isOpen) {
   const cssKind = kind === "directory" ? "dir" : "file";
   const on = kind === "file" && path === (picking() ? tree.pickPath : tree.openPath);
+  /* a file can be dragged onto either side of the join panel; a folder
+     cannot, since a side is one file or one folder-read-as-one-table and
+     the tree has no way to say which is meant */
   return "<div class='tnode t" + cssKind + (on ? " ton" : "") + "' data-path='" + esc(path) +
-    "' data-kind='" + kind + "' style='padding-left:" + (8 + depth * 14) + "px'>" +
+    "' data-kind='" + kind + "'" + (kind === "file" ? " draggable='true'" : "") +
+    " style='padding-left:" + (8 + depth * 14) + "px'>" +
     "<span class='tcaret" + (kind === "file" ? " tleaf" : "") + "'>" + nodeIcon(kind, isOpen) + "</span>" +
     "<span class='tname'>" + esc(name) + "</span></div>";
 }
@@ -298,22 +326,14 @@ async function pickFile(path) {
 }
 
 /**
- * Opening the join panel turns this one into its file picker: whatever
- * folder is already being browsed if there is one, and otherwise the files
- * this load has been handed. A panel opened only for the join closes again
- * with it; one the user opened themselves stays exactly as it was.
+ * While the join panel is up, this one is its file list: clicking a file
+ * picks it as side B instead of opening it, and the picked row is marked.
  */
-function syncTreeForJoin(on) {
+function syncTreeForJoin() {
+  /* the join is opened from a button inside this panel, so the panel is
+     always already up: all that changes is what clicking a file does */
   tree.pickPath = null;
-  if (on) {
-    tree.wasOn = tree.on;
-    if (!tree.on) openTreeSession(); else renderTree();
-    return;
-  }
-  /* a panel the join opened by itself goes away again with it; one the user
-     had open (which is the default) stays exactly where it was */
-  if (tree.on && !tree.wasOn) closeTree();
-  else if (tree.on) renderTree();
+  if (tree.on) renderTree();
 }
 
 /** A side B picked by dialog or drop is one more file the panel can offer,
@@ -357,6 +377,20 @@ export function initTree() {
     if (treeSupported() && tree.kind !== "snapshot") openTreeLive();
     else $("treepicker").click();
   });
+  /* dragging a row is how a file reaches a join side: the path is all the
+     other end needs, since every file here is one this page already holds */
+  $("treebody").addEventListener("dragstart", (e) => {
+    const row = e.target.closest(".tnode[draggable='true']");
+    if (!row) return;
+    e.dataTransfer.setData("text/plain", row.dataset.path);
+    e.dataTransfer.setData(TREE_DRAG, row.dataset.path);
+    e.dataTransfer.effectAllowed = "copy";
+    row.classList.add("tdragging");
+  });
+  $("treebody").addEventListener("dragend", (e) => {
+    const row = e.target.closest(".tnode");
+    if (row) row.classList.remove("tdragging");
+  });
   $("treebody").addEventListener("click", (e) => {
     const row = e.target.closest(".tnode");
     if (!row) return;
@@ -369,7 +403,7 @@ export function initTree() {
   try {
     const saved = +localStorage.getItem("paris-parquet-treew");
     if (saved > 0) document.documentElement.style.setProperty("--treew", saved + "px");
-  } catch (e) { /* fine */ }
+  } catch (_e) { /* fine */ }
   /* open from the start, with nothing in it yet: the panel is where files
      turn up, so it is there before the first one does */
   if (panelWanted()) openTreeSession();
@@ -379,6 +413,6 @@ export function treeWidth(px) {
   const room = Math.max(160, window.innerWidth - 300);
   const w = Math.max(160, Math.min(Math.round(px), room));
   document.documentElement.style.setProperty("--treew", w + "px");
-  try { localStorage.setItem("paris-parquet-treew", String(w)); } catch (e) { /* fine */ }
+  try { localStorage.setItem("paris-parquet-treew", String(w)); } catch (_e) { /* fine */ }
   return w;
 }

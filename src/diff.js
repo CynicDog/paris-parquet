@@ -1,7 +1,7 @@
 import { $, fillColumns, loadMore } from "./columns.js";
 import { newTable, readDataset } from "./dataset.js";
 import { join, showJoin } from "./join.js";
-import { FIRST_ROWS, adoptDataset, busy, entriesFromFiles, showError, updateButtons } from "./main.js";
+import { adoptDataset, busy, entriesFromFiles, FIRST_ROWS, showError, updateButtons } from "./main.js";
 import { beBigInt, fmtValue, jsonish } from "./types.js";
 import { refreshView } from "./ui-grid.js";
 import { datasetName, rawStat, renderMeta, showStat } from "./ui-metadata.js";
@@ -24,8 +24,8 @@ export const shapeText = (s) => s.phys + " · " + s.type + " · " + s.rep;
 /** Columns added, removed, retyped — and the pairs that look like a rename. */
 export function schemaDiff(aT, bT) {
   const A = new Map(), B = new Map();
-  aT.cols.forEach((col, i) => A.set(col.key, { col, i, shape: colShape(col) }));
-  bT.cols.forEach((col, i) => B.set(col.key, { col, i, shape: colShape(col) }));
+  aT.cols.forEach((col, i) => { A.set(col.key, { col, i, shape: colShape(col) }); });
+  bT.cols.forEach((col, i) => { B.set(col.key, { col, i, shape: colShape(col) }); });
   const added = [], removed = [], retyped = [], common = [];
   for (const b of B.values()) if (!A.has(b.col.key)) added.push(b);
   for (const a of A.values()) {
@@ -139,7 +139,7 @@ export function columnStats(dataset, col) {
         try {
           if (lo && lo.length) { const v = rawStat(lo, leaf); if (min === null || cmp(v, min) < 0) min = v; }
           if (hi && hi.length) { const v = rawStat(hi, leaf); if (max === null || cmp(v, max) > 0) max = v; }
-        } catch (e) { unreadable = true; }
+        } catch (_e) { unreadable = true; }
       }
     }
   }
@@ -278,7 +278,11 @@ export function rowDiff(aT, bT, keyKeys) {
     let cells = null;
     for (let c = 0; c < value.length; c++) {
       const v = value[c];
-      if (!v.eq(v.A[r], v.B[br])) { (cells || (cells = [])).push(c); perCol[c]++; }
+      if (!v.eq(v.A[r], v.B[br])) {
+        if (!cells) cells = [];
+        cells.push(c);
+        perCol[c]++;
+      }
     }
     if (cells) changed.push({ ar: r, br, cells }); else same++;
   }
@@ -524,7 +528,7 @@ export function renderDiff() {
   }
   /* growing or scanning the open file leaves columns nobody asked for behind;
      a diff wants all of them */
-  if (needFilled(state.table.cols.map((c, i) => i), renderDiff)) return;
+  if (needFilled(state.table.cols.map((_c, i) => i), renderDiff)) return;
   const A = sideA(), B = diff.b;
   $("diffbar").innerHTML = [
     "<span class='qtitle'>COMPARE</span>",
@@ -581,7 +585,7 @@ export async function openCompare(entries, label) {
     diff.cap = 200;
     busy(true, "decoding the rest of this file to compare it…");
     await new Promise((r) => setTimeout(r, 0));
-    await fillColumns(state.dataset, state.table, state.table.cols.map((c, i) => i));
+    await fillColumns(state.dataset, state.table, state.table.cols.map((_c, i) => i));
     diff.keys = suggestKey(state.table, table);
     renderDiff();
   } catch (e) {
@@ -615,7 +619,7 @@ export async function loadAllBoth() {
   try {
     state.table.need = null;                       /* the diff wants every column */
     await loadMore(state.dataset, state.table, Infinity);
-    await fillColumns(state.dataset, state.table, state.table.cols.map((c, i) => i));
+    await fillColumns(state.dataset, state.table, state.table.cols.map((_c, i) => i));
     if (diff.b) await loadMore(diff.b.dataset, diff.b.table, Infinity);
     refreshView(true);
     renderMeta();

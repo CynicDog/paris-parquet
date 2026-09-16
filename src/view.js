@@ -35,7 +35,7 @@ export const state = { src: null, meta: null, table: null, view: null, page: 0, 
  * a display concern only — every column stays decoded and queryable.
  */
 export function newDisplay(cols) {
-  return { order: cols.map((c, i) => i), hidden: new Set(), pinned: new Set() };
+  return { order: cols.map((_c, i) => i), hidden: new Set(), pinned: new Set() };
 }
 export function displayOrder() {
   const d = state.display;
@@ -211,7 +211,7 @@ export function renderPager() {
     const anchor = pageBounds()[0];
     state.pageSize = size;
     state.page = isFinite(size) ? Math.floor(anchor / size) : 0;
-    try { localStorage.setItem("paris-parquet-pagesize", String(size)); } catch (err) { /* fine */ }
+    try { localStorage.setItem("paris-parquet-pagesize", String(size)); } catch (_err) { /* fine */ }
     $("gridwrap").scrollTop = 0;
     state.first = -1;
     renderRows(true);
@@ -274,7 +274,7 @@ export function exportParts(format, from, to) {
     return parts;
   }
   parts.push(cols.map((c) => csvField(c.name, sep)).join(sep) + "\n");
-  let row = new Array(n);
+  const row = new Array(n);
   for (let r = from; r < to; r++) {
     for (let ci = 0; ci < n; ci++) row[ci] = csvField(exportText(viewValue(view, ci, r), cols[ci].spec), sep);
     parts.push(row.join(sep) + "\n");

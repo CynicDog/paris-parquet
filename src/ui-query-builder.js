@@ -1,7 +1,7 @@
 import { $ } from "./columns.js";
 import { drag } from "./main.js";
 import { runScan, updateScanButton } from "./pushdown.js";
-import { AGGS, AGG_SHORT, CUBE_MAX_COLS, NO_OPERAND, PREDS, filterIssue, newQuery, parseSql, qid, querySql, resetQuery, runQuery } from "./query.js";
+import { AGG_SHORT, AGGS, CUBE_MAX_COLS, filterIssue, NO_OPERAND, newQuery, nextQid, PREDS, parseSql, querySql, resetQuery, runQuery } from "./query.js";
 import { renderRows } from "./ui-grid.js";
 import { esc, state } from "./view.js";
 
@@ -174,9 +174,9 @@ export function addToZone(zoneId, ci) {
       if (q.groupBy.indexOf(ci) < 0) q.groupBy.push(ci);
       if (q.groupMode === "CUBE" && q.groupBy.length > CUBE_MAX_COLS) q.groupMode = "ROLLUP";
       break;
-    case "metrics": q.metrics.push({ id: "m" + ++qid, ci, agg: "COUNT", alias: "" }); break;
-    case "where": q.filters.push({ id: "f" + ++qid, ci, pred: "eq", value: "", valueTo: "", linker: "AND" }); break;
-    case "sort": if (!q.sort.some((s) => s.ci === ci)) q.sort.push({ id: "s" + ++qid, ci, dir: "ASC" }); break;
+    case "metrics": q.metrics.push({ id: nextQid("m"), ci, agg: "COUNT", alias: "" }); break;
+    case "where": q.filters.push({ id: nextQid("f"), ci, pred: "eq", value: "", valueTo: "", linker: "AND" }); break;
+    case "sort": if (!q.sort.some((s) => s.ci === ci)) q.sort.push({ id: nextQid("s"), ci, dir: "ASC" }); break;
     default: return;
   }
   renderQuery();
@@ -304,7 +304,7 @@ export function queryHeight(px) {
   const room = Math.max(120, window.innerHeight - 260);
   const h = Math.max(120, Math.min(Math.round(px), room));
   document.documentElement.style.setProperty("--queryh", h + "px");
-  try { localStorage.setItem("paris-parquet-queryh", String(h)); } catch (e) { /* fine */ }
+  try { localStorage.setItem("paris-parquet-queryh", String(h)); } catch (_e) { /* fine */ }
   renderRows(true);
   return h;
 }

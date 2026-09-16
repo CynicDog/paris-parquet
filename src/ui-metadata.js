@@ -23,13 +23,13 @@ export function showStat(raw, spec, max) {
   try {
     const elem = spec.nested ? Object.assign({}, spec, { kind: spec.elementKind }) : spec;
     t = fmtValue(spec.convert(raw), elem);
-  } catch (e) { t = raw instanceof Uint8Array ? hex(raw, 16) : String(raw); }
+  } catch (_e) { t = raw instanceof Uint8Array ? hex(raw, 16) : String(raw); }
   const cut = max || 60;
   return t == null ? null : (t.length > cut ? t.slice(0, cut) + "..." : t);
 }
 export function statValue(bytes, leaf, spec) {
   if (!bytes || !bytes.length) return null;
-  try { return showStat(rawStat(bytes, leaf), spec); } catch (e) { return hex(bytes, 16); }
+  try { return showStat(rawStat(bytes, leaf), spec); } catch (_e) { return hex(bytes, 16); }
 }
 
 export function schemaTree(meta) {
@@ -142,7 +142,7 @@ export function renderMeta() {
 
   if (partCount > 1) {
     let fileRows = "";
-    dataset.parts.forEach((part, i) => {
+    dataset.parts.forEach((part, _i) => {
       const pv = part.partition.map((p) => p.key + "=" + (p.value === null ? "(null)" : p.value)).join(" ");
       fileRows += "<tr><td title='" + esc(part.path) + "'>" + esc(part.path) + "</td><td class='n'>" +
         num(part.rows) + "</td><td class='n'>" + bytesHuman(part.size) + "</td><td class='n'>" +
@@ -172,9 +172,9 @@ export function renderMeta() {
 
   let colRows = "";
   const firstGroup = meta.rowGroups[0];
-  const partitionNames = dataset ? dataset.partitionCols.map((c) => c.name) : [];
+  const _partitionNames = dataset ? dataset.partitionCols.map((c) => c.name) : [];
   const byPath = new Map();
-  if (firstGroup) firstGroup.columns.forEach((c, i) => { if (c.meta) byPath.set(c.meta.path.join(" "), c); });
+  if (firstGroup) firstGroup.columns.forEach((c, _i) => { if (c.meta) byPath.set(c.meta.path.join(" "), c); });
   leaves.forEach((leaf, i) => {
     const a = agg[i];
     const spec = table.cols[i] ? table.cols[i].spec : typeSpec(leaf);
@@ -205,7 +205,7 @@ export function renderMeta() {
 
   let pg = "";
   const seen = new Set();
-  meta.rowGroups.forEach((rg) => rg.columns.forEach((c, i) => {
+  meta.rowGroups.forEach((rg) => { rg.columns.forEach((c, i) => {
     if (!c.meta) return;
     for (const s of c.meta.encodingStats) {
       const name = leaves[i] ? leaves[i].path.join(".") : String(i);
@@ -214,7 +214,7 @@ export function renderMeta() {
       seen.add(key);
       pg += "<tr><td>" + esc(name) + "</td><td>" + esc(s.pageType) + "</td><td>" + esc(s.encoding) + "</td></tr>";
     }
-  }));
+  }); });
   if (pg) {
     cards.push("<div class='mcard'><h3>page encodings</h3><details><summary>per column and page type</summary>" +
       "<table class='kvt'><tr><th>column</th><th>page</th><th>encoding</th></tr>" + pg + "</table></details></div>");

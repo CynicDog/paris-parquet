@@ -46,6 +46,11 @@ body{margin:0;background:var(--bg);color:var(--ink);
 #treewho{gap:5px}
 #treebody{flex:1;overflow:auto;padding:4px 0}
 #treebody .tempty{padding:14px 12px;color:var(--faint);font:11px/1.5 var(--mono)}
+#treeacts{flex:none;padding:6px 8px;border-top:1px solid var(--line2)}
+#treeacts button{width:100%;font:11px var(--mono);padding:4px 8px;text-align:center}
+#treeacts button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.tnode[draggable="true"]{cursor:grab}
+.tnode.tdragging{opacity:.45}
 #treebody .tpick{padding:5px 10px 6px;margin-bottom:2px;border-bottom:1px solid var(--line2);
   font:10px var(--mono);color:var(--accent);letter-spacing:.03em;text-transform:uppercase}
 .tnode{display:flex;align-items:center;gap:4px;padding:2px 8px;font:11px var(--mono);
@@ -316,6 +321,16 @@ table.dr td.ky{color:var(--accent)}
   position:sticky;top:0;background:var(--panel);z-index:3;font:11px var(--mono);color:var(--dim);flex-wrap:wrap}
 #joinbar .btn,#joinbar button{padding:1px 8px;font-size:11px}
 #joinbody{padding:10px 14px 18px}
+.jsides{display:flex;align-items:stretch;gap:10px;padding:8px 0 4px;flex-wrap:wrap}
+.jside{flex:1 1 220px;min-height:82px;border:1px dashed var(--line);border-radius:6px;padding:9px 11px;
+  display:flex;flex-direction:column;gap:3px;justify-content:center;font:11px/1.5 var(--mono);color:var(--dim)}
+.jside .jlabel{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.jside .jname{color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jside .jrows{color:var(--faint)}
+.jside.jfilled{border-style:solid}
+.jside.jover{border-color:var(--accent);background:var(--accent-soft);border-style:solid}
+.jside .btn{align-self:flex-start;margin-top:3px;font-size:10px;padding:1px 7px}
+.jcross{flex:none;align-self:center;font-size:15px;color:var(--faint)}
 .jkeys{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font:11px var(--mono);color:var(--dim);padding:6px 0}
 .jkeys select{font:11px var(--mono);background:var(--panel);color:var(--ink);border:1px solid var(--line);
   border-radius:4px;padding:2px 5px;max-width:220px}
@@ -372,6 +387,9 @@ details[open]>summary::before{content:"▾ "}
   </div>
   <div id="treewho"></div>
   <div id="treebody"></div>
+  <div id="treeacts">
+    <button id="toggleJoin" title="Join two of these files on a key">&#8904; Join two files</button>
+  </div>
 </aside>
 <div id="treegrip" hidden title="Drag to resize the folder panel"></div>
 <div id="main">
@@ -392,7 +410,6 @@ details[open]>summary::before{content:"▾ "}
   <button id="more" hidden>Load more rows</button>
   <button id="all" hidden>Load all</button>
   <button id="toggleDiff" hidden title="Compare this file with another one">Diff</button>
-  <button id="toggleJoin" hidden title="Join this file with another one on a key">Join</button>
   <button id="toggleCols" hidden>Columns</button>
   <button id="toggleQuery" hidden>Query</button>
   <button id="toggleMeta" hidden>Hide metadata</button>

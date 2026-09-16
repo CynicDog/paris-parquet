@@ -73,7 +73,7 @@ async function checkFile(PARIS, file) {
   const src = source(file);
   const t0 = Date.now();
   const dataset = await PARIS.readDataset([{ src, path: src.name }]);
-  const meta = dataset.reference;
+  const _meta = dataset.reference;
   const table = PARIS.newTable(dataset);
   await PARIS.loadMore(dataset, table, Infinity);
   const ms = Date.now() - t0;

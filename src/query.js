@@ -2,7 +2,7 @@ import { $ } from "./columns.js";
 import { showPlan, unscan, updateScanButton } from "./pushdown.js";
 import { fmtValue, lessThan, numeric } from "./types.js";
 import { renderQuery } from "./ui-query-builder.js";
-import { baseView, displayCols, needFilled, neededColumns, num, setView, state } from "./view.js";
+import { baseView, displayCols, neededColumns, needFilled, num, setView, state } from "./view.js";
 
 export const PREDS = [
   { id: "eq", label: "=", sql: "=" },
@@ -20,7 +20,12 @@ export const NO_OPERAND = { null: 1, notnull: 1 };
 export const AGGS = ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MIN", "MAX"];
 export const AGG_SHORT = { COUNT: "COUNT", COUNT_DISTINCT: "CNTD", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "MAX" };
 export const AGG_BY_NAME = { COUNT: "COUNT", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "MAX" };
-export let qid = 0;
+let qid = 0;
+/** Ids for the builder's own chips: unique per page load, nothing more. */
+export function nextQid(prefix) {
+  qid++;
+  return prefix + qid;
+}
 
 export function newQuery() {
   return { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], groupMode: "", metrics: [], limit: null };
@@ -218,7 +223,10 @@ export function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, inde
           a.sum = t;
         }
       }
-      else if (kind === "COUNT_DISTINCT") { (a.set || (a.set = new Set())).add(keyPart(v)); }
+      else if (kind === "COUNT_DISTINCT") {
+        if (!a.set) a.set = new Set();
+        a.set.add(keyPart(v));
+      }
       else if (kind === "MIN" || kind === "MAX") {
         const cmpLess = mKeys[m]
           ? (x, y) => lessThan(x, y)
@@ -469,7 +477,7 @@ export function aggSortIndex(q, s) {
   return m >= 0 ? q.groupBy.length + m : -1;
 }
 /** In aggregate mode, ORDER BY can only mean one of the output columns. */
-export function aggSort(q, cols, outCols) {
+export function aggSort(q, _cols, outCols) {
   const order = [];
   for (const s of q.sort) {
     const at = aggSortIndex(q, s);
@@ -498,7 +506,7 @@ export function toggleSort(viewIdx, additive) {
   if (ci < 0) return;
   const same = (s) => (mid ? s.mid === mid : !s.mid && s.ci === ci);
   const at = q.sort.findIndex(same);
-  const fresh = () => ({ id: "s" + ++qid, ci, dir: "ASC", mid });
+  const fresh = () => ({ id: nextQid("s"), ci, dir: "ASC", mid });
   if (!additive) {
     if (at < 0) q.sort = [fresh()];
     else if (q.sort[at].dir === "ASC") q.sort = [Object.assign(q.sort[at], { dir: "DESC" })];
@@ -654,8 +662,7 @@ export const SQL_SCAN = /\s+|--[^\n]*|\/\*[\s\S]*?\*\/|'(?:[^']|'')*'|"(?:[^"]|"
 export function sqlTokenize(text) {
   const out = [];
   SQL_SCAN.lastIndex = 0;
-  let m;
-  while ((m = SQL_SCAN.exec(text))) {
+  for (let m = SQL_SCAN.exec(text); m; m = SQL_SCAN.exec(text)) {
     const raw = m[0], at = m.index;
     const c = raw[0];
     if (/\s/.test(c) || raw.startsWith("--") || raw.startsWith("/*")) continue;
@@ -720,7 +727,7 @@ export function parseSql(text, cols) {
 
   const resolve = (tok) => {
     const name = tok.v;
-    let i = names.indexOf(name);
+    const i = names.indexOf(name);
     if (i >= 0) return i;
     const lower = name.toLowerCase();
     const hits = [];
@@ -900,7 +907,7 @@ export function parseSql(text, cols) {
     if (groups) {
       groups.forEach((g, gi) => {
         g.forEach((f, fi) => {
-          f.id = "f" + ++qid;
+          f.id = nextQid("f");
           f.linker = fi === 0 && gi > 0 ? "OR" : "AND";
           q.filters.push(f);
         });
@@ -931,7 +938,7 @@ export function parseSql(text, cols) {
   const agg = selectAggs.length > 0 || q.groupBy.length > 0;
   if (agg) {
     q.mode = "agg";
-    q.metrics = selectAggs.map((m) => ({ id: "m" + ++qid, ci: m.ci, agg: m.agg, alias: m.alias }));
+    q.metrics = selectAggs.map((m) => ({ id: nextQid("m"), ci: m.ci, agg: m.agg, alias: m.alias }));
     if (starSelect) fail("SELECT * cannot be mixed with grouping; list the columns");
     for (const s of selectPlain) {
       if (q.groupBy.indexOf(s.ci) < 0) {
@@ -965,18 +972,18 @@ export function parseSql(text, cols) {
         if (eatOp("*")) ci = 0; else if (peek().t === "name") ci = resolve((step(), tokAt(p - 1)));
         if (!eatOp(")")) fail("expected )");
         const m = q.metrics.find((x) => x.ci === ci && x.agg === kind);
-        if (m) entry = { id: "s" + ++qid, ci: m.ci, mid: m.id, dir: "ASC" };
+        if (m) entry = { id: nextQid("s"), ci: m.ci, mid: m.id, dir: "ASC" };
         else fail("ORDER BY " + fn + "(...) does not match anything selected", fnTok);
       } else if (t.t === "name") {
         step();
         const alias = q.metrics.find((m) => m.alias && m.alias === t.v);
-        if (alias) entry = { id: "s" + ++qid, ci: alias.ci, mid: alias.id, dir: "ASC" };
+        if (alias) entry = { id: nextQid("s"), ci: alias.ci, mid: alias.id, dir: "ASC" };
         else {
           const ci = resolve(t);
           if (ci >= 0) {
             if (agg && q.groupBy.indexOf(ci) < 0 && !q.metrics.some((m) => m.ci === ci)) {
               fail('"' + t.v + '" is not selected, so it cannot be ordered by', t);
-            } else entry = { id: "s" + ++qid, ci, dir: "ASC" };
+            } else entry = { id: nextQid("s"), ci, dir: "ASC" };
           }
         }
       } else { fail("expected a column in ORDER BY", t); break; }

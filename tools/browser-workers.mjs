@@ -10,8 +10,9 @@
  * buffer, so this is also where those two shapes are checked against the
  * plain arrays the main thread builds.
  */
-import path from "node:path";
+
 import { createRequire } from "node:module";
+import path from "node:path";
 
 const { chromium } = createRequire(import.meta.url)("playwright");
 const files = process.argv.slice(2).filter((a) => !a.startsWith("--"));

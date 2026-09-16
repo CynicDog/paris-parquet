@@ -1,9 +1,9 @@
 import { $ } from "./columns.js";
 import { diff } from "./diff.js";
 import { runQuery, sortMark } from "./query.js";
-import { HEX, fmtValue, hex } from "./types.js";
+import { fmtValue, HEX, hex } from "./types.js";
 import { typeTag } from "./ui-query-builder.js";
-import { CELL_BUDGET, COL_W, ROW_H, baseView, bytesHuman, displayOrder, esc, needFilled, num, pageBounds, pct, pinnedCount, renderPager, setView, state, viewValue, wantedColumns } from "./view.js";
+import { baseView, bytesHuman, CELL_BUDGET, COL_W, displayOrder, esc, needFilled, num, pageBounds, pct, pinnedCount, ROW_H, renderPager, setView, state, viewValue, wantedColumns } from "./view.js";
 
 export function summaryCard(col) {
   const s = col.summary, spec = col.spec;
@@ -237,7 +237,7 @@ export function initPicker() {
       case "cpall": d.hidden.clear(); break;
       case "cponly": {
         /* leaving everything hidden would be a blank grid, so keep the first */
-        d.hidden = new Set(state.table.cols.map((c, i) => i).filter((i) => i !== displayOrder()[0]));
+        d.hidden = new Set(state.table.cols.map((_c, i) => i).filter((i) => i !== displayOrder()[0]));
         break;
       }
       case "cpclose": togglePicker(false); return;
@@ -318,7 +318,7 @@ export function inspectText(v, spec) {
       if (inner.kind === "binary" && x instanceof Uint8Array) return hex(x);
       return fmtValue(x, inner);
     };
-    try { return JSON.stringify(walk(v), null, 2); } catch (e) { return String(v); }
+    try { return JSON.stringify(walk(v), null, 2); } catch (_e) { return String(v); }
   }
   return fmtValue(v, spec);
 }
@@ -356,7 +356,7 @@ export function openInspector(viewRow, ci, cell) {
   el.hidden = false;
   const box = cell.getBoundingClientRect();
   const w = el.offsetWidth, h = el.offsetHeight;
-  let left = Math.min(box.left, window.innerWidth - w - 8);
+  const left = Math.min(box.left, window.innerWidth - w - 8);
   let top = box.bottom + 4;
   if (top + h > window.innerHeight - 8) top = Math.max(8, box.top - h - 4);
   el.style.left = Math.max(8, left) + "px";

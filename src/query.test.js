@@ -1,6 +1,6 @@
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import { groupingSets, aggregate, sqlTokenize, parseSql, querySql } from "./query.js";
+import { test } from "node:test";
+import { aggregate, groupingSets, parseSql, sqlTokenize } from "./query.js";
 
 const numSpec = { kind: "number", label: "int32", physical: "INT32", convert: (v) => v };
 const strSpec = { kind: "string", label: "string", physical: "BYTE_ARRAY", convert: (v) => v };

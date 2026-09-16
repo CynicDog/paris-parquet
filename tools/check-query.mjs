@@ -10,7 +10,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { loadApp, appPath } from "./check.mjs";
+import { appPath, loadApp } from "./check.mjs";
 
 const PARIS = loadApp(appPath);
 const here = path.dirname(new URL(import.meta.url).pathname);
@@ -82,7 +82,7 @@ function cases(cols) {
       });
     }
     q("select subset + order", (x) => {
-      x.select = cols.map((c, i) => i).filter((i) => simple(cols[i])).slice(0, 3);
+      x.select = cols.map((_c, i) => i).filter((i) => simple(cols[i])).slice(0, 3);
       totalOrder(x, ci, "ASC");
       x.limit = 30;
     });
@@ -151,7 +151,7 @@ function cases(cols) {
   }
   /* SELECT * would hand duckdb the nested columns too, which have no
      comparable rendering here, so those files always select explicitly */
-  const plain = cols.map((c, i) => i).filter((i) => simple(cols[i]));
+  const plain = cols.map((_c, i) => i).filter((i) => simple(cols[i]));
   if (plain.length !== cols.length) {
     return out.map((c) => ({
       name: c.name,
@@ -209,7 +209,7 @@ async function checkFile(file) {
     for (let r = 0; r < duck.rows; r++) theirs.push(duck.columns.map((c2) => c2.values[r]));
     /* SUM and AVG over floats depend on summation order, so their last bit or
        two may differ from duckdb's; everything else must match exactly. */
-    const soft = view.cols.map((c, i) => {
+    const soft = view.cols.map((_c, i) => {
       if (q.mode !== "agg") return false;
       const m = q.metrics[i - q.groupBy.length];
       return !!m && (m.agg === "SUM" || m.agg === "AVG");

@@ -12,7 +12,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { loadApp, appPath } from "./check.mjs";
+import { appPath, loadApp } from "./check.mjs";
 
 const PARIS = loadApp(appPath);
 const here = path.dirname(new URL(import.meta.url).pathname);
@@ -43,7 +43,7 @@ const bad = (name, detail) => { failed++; console.log("FAIL " + name + "\n      
 /* ---------------------------------------------------------- round trip */
 const blank = () => ({ active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], metrics: [], limit: null });
 const states = [
-  ["select all", (q) => {}],
+  ["select all", (_q) => {}],
   ["select some", (q) => { q.select = [0, 2, 1]; }],
   ["one filter", (q) => { q.filters = [{ id: "a", ci: ix("score"), pred: "gt", value: "70", linker: "AND" }]; }],
   ["every predicate", (q) => {
@@ -158,7 +158,7 @@ for (const sql of handWritten) {
      may differ from duckdb's; everything else must match exactly. (Checked
      against math.fsum: this engine's compensated sum is the exactly-rounded
      one, and duckdb is the side that is 1 ulp out.) */
-  const soft = view.cols.map((c, i) => {
+  const soft = view.cols.map((_c, i) => {
     const q2 = res.query;
     if (!q2 || q2.mode !== "agg") return false;
     const m = q2.metrics[i - q2.groupBy.length];

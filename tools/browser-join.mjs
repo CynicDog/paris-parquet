@@ -14,11 +14,12 @@
  * rows that deliberately have no match) that isn't a natural byproduct of
  * the general-purpose fixture generator.
  */
+
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
-import { createRequire } from "node:module";
 
 const { chromium } = createRequire(import.meta.url)("playwright");
 const here = path.dirname(new URL(import.meta.url).pathname);
@@ -222,7 +223,7 @@ await withPage(async (page) => {
   await page.waitForTimeout(300);
   const afterSelf = await page.evaluate(() => ({
     aRows: window.PARIS.state.table.rowsLoaded,
-    sides: [...document.querySelectorAll("#joinbar .dside b")].map((b) => b.textContent),
+    sides: [...document.querySelectorAll(".jside .jname")].map((n) => n.textContent),
   }));
   if (afterSelf.aRows === 500 && afterSelf.sides[1] === "orders.parquet") {
     ok("clicking in the panel picks B and leaves the open file alone");
@@ -252,17 +253,16 @@ await withPage(async (page) => {
   if (!afterClose.hidden && !afterClose.banner) ok("closing the join leaves the panel open, no longer picking");
   else bad("panel after closing the join: " + JSON.stringify(afterClose));
 
-  /* but a panel the user had closed is only borrowed: it goes back to closed */
+  /* the join is opened from inside the panel, so closing the panel takes
+     the way into it with them -- the join's own close is the way out */
   await page.click("#toggleTree");
   await page.waitForTimeout(200);
-  await page.click("#toggleJoin");
-  await page.waitForTimeout(250);
-  const borrowed = await page.evaluate(() => document.getElementById("tree").hidden);
-  await page.click("#toggleJoin");
-  await page.waitForTimeout(250);
-  const returned = await page.evaluate(() => document.getElementById("tree").hidden);
-  if (!borrowed && returned) ok("a panel the user had closed is opened for the join and closed again after");
-  else bad("borrowed panel: " + JSON.stringify({ borrowed, returned }));
+  const gone = await page.evaluate(() => {
+    const b = document.getElementById("toggleJoin");
+    return { panelHidden: document.getElementById("tree").hidden, buttonReachable: !!b.offsetParent };
+  });
+  if (gone.panelHidden && !gone.buttonReachable) ok("closing the panel takes its Join button with it");
+  else bad("panel closed: " + JSON.stringify(gone));
 });
 
 /* ------------------------------------------------------- chained joins */
@@ -315,6 +315,76 @@ await withPage(async (page) => {
   if (back.rows === 500 && back.cols === 3 && back.groups > 1) {
     ok("one Undo goes all the way back to the file, footer and all");
   } else bad("after undo: " + JSON.stringify(back));
+});
+
+/* ------------------------------------- dragging a file onto a join side */
+await withPage(async (page) => {
+  await page.goto("file://" + appPath);
+  await page.waitForTimeout(200);
+
+  /* the button is in the file panel now, and works with nothing open */
+  const button = await page.evaluate(() => {
+    const b = document.getElementById("toggleJoin");
+    return { inPanel: !!b && !!b.closest("#tree"), hidden: !b || b.hidden,
+      inHeader: [...document.querySelectorAll("header button, header label.btn")]
+        .some((x) => /join/i.test(x.textContent)) };
+  });
+  if (button.inPanel && !button.hidden && !button.inHeader) {
+    ok("Join sits in the file panel, reachable before anything is open");
+  } else bad("where the join button is: " + JSON.stringify(button));
+
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(200);
+  const blank = await page.evaluate(() => ({
+    shown: !document.getElementById("joinwrap").hidden,
+    dropHidden: document.getElementById("drop").hidden,
+    sides: [...document.querySelectorAll(".jside")].map((s) => s.dataset.jside),
+  }));
+  if (blank.shown && blank.dropHidden && blank.sides.join() === "A,B") {
+    ok("with no file open the panel is a blank A / B workspace");
+  } else bad("blank workspace: " + JSON.stringify(blank));
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(150);
+
+  /* two files in the list, then drag each onto a side */
+  await page.setInputFiles("#picker", path.join(tmp, "regions.parquet"));
+  await idle(page);
+  await page.setInputFiles("#picker", path.join(tmp, "orders.parquet"));
+  await idle(page);
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(250);
+
+  const dragTo = async (rowPath, side) => {
+    await page.evaluate(([p, sd]) => {
+      const row = document.querySelector("#treebody .tnode[data-path='" + p + "']");
+      const zone = document.querySelector(".jside[data-jside='" + sd + "']");
+      const dt = new DataTransfer();
+      row.dispatchEvent(new DragEvent("dragstart", { dataTransfer: dt, bubbles: true }));
+      zone.dispatchEvent(new DragEvent("dragover", { dataTransfer: dt, bubbles: true, cancelable: true }));
+      zone.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }, [rowPath, side]);
+    await idle(page);
+    await page.waitForTimeout(350);
+  };
+  await dragTo("regions.parquet", "B");
+  await dragTo("orders.parquet", "A");
+  const filled = await page.evaluate(() => ({
+    names: [...document.querySelectorAll(".jside .jname")].map((n) => n.textContent),
+    aRows: window.PARIS.state.table.rowsLoaded,
+    stillOpen: !document.getElementById("joinwrap").hidden,
+  }));
+  if (filled.names.join(" / ") === "orders.parquet / regions.parquet" && filled.aRows === 500 && filled.stillOpen) {
+    ok("a file dragged from the panel fills the side it is dropped on");
+  } else bad("sides after dragging: " + JSON.stringify(filled));
+
+  await page.selectOption("#jkeyA", { label: "region" });
+  await page.selectOption("#jkeyB", { label: "name" });
+  await page.click("#jrun");
+  await idle(page);
+  await page.waitForTimeout(200);
+  const rows = await page.evaluate(() => window.PARIS.state.table.rowsLoaded);
+  if (rows === 470) ok("a join over two dragged-in sides matches the picked one (470 rows)");
+  else bad("dragged-in join rows: " + rows);
 });
 
 /* ------------------------------------------- what the SQL panel writes */
