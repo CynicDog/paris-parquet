@@ -127,6 +127,10 @@ opened, dropped, or dragged into a join — and it is where **Join** lives.
 **Join** combines two files into one table on a key. Its button is in the
 file panel rather than the header, and works with nothing open yet: it gives
 an empty workspace with an **A** and a **B** side to fill.
+- Every join run is listed back in the file panel under **joined**, beside
+  the files. Click one to put that table back on screen, or drag it onto a
+  side to join it again — it is already whole and in memory, so nothing is
+  re-read to do either.
 - **Drag a file from the panel onto a side.** A is whichever table is open,
   so dropping one there opens it; B is the other side of the join. A file
   dragged straight off the desktop lands the same way, and each side keeps a

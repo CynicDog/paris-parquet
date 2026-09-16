@@ -61,6 +61,10 @@ body{margin:0;background:var(--bg);color:var(--ink);
 .tnode.tdragging{opacity:.45}
 #treebody .tpick{padding:5px 10px 6px;margin-bottom:2px;border-bottom:1px solid var(--line2);
   font:10px var(--mono);color:var(--accent);letter-spacing:.03em;text-transform:uppercase}
+#treebody .tsect{margin-top:8px;padding:5px 10px 4px;border-top:1px solid var(--line2);
+  font:10px var(--mono);color:var(--faint);letter-spacing:.14em;text-transform:uppercase}
+.tnode.tjoined .tname{color:var(--dim)}
+.tnode.tjoined .tname::before{content:"\22C8  ";color:var(--faint)}
 .tnode{display:flex;align-items:center;gap:4px;padding:2px 8px;font:11px var(--mono);
   white-space:nowrap;cursor:pointer;user-select:none}
 .tnode:hover{background:var(--accent-soft)}
@@ -6182,7 +6186,44 @@ const join = { on: false, b: null, keyA: -1, keyB: -1, before: null, result: nul
  * it is built later than this module (see the manifest in scripts/
  * compose.mjs), so it registers itself here rather than being imported.
  */
-const joinHooks = { onShow: null, onPick: null };
+const joinHooks = { onShow: null, onPick: null, onResult: null };
+
+/**
+ * Every join run this page load, in the order they were made. A result is
+ * a table like any other -- already whole, in memory, no file behind it --
+ * so the file panel can list them beside the files and hand one back to be
+ * opened, joined against, or joined onto.
+ */
+const joined = [];
+let joinSeq = 0;
+
+/** Puts a result back on screen, from the panel's list of them. */
+function openJoined(id) {
+  const j = joined.find((x) => x.id === id);
+  if (!j) return;
+  if (!join.before && state.table && state.dataset.parts.length) {
+    join.before = { dataset: state.dataset, table: state.table, name: sideDisplayName(state.dataset) };
+  }
+  join.chain = j.name;
+  join.result = j.table.joined;
+  adoptJoinedTable(j.dataset, j.table, j.name);
+  if (joinHooks.onResult) joinHooks.onResult();
+}
+
+/** The same result as the other side of a new join. */
+function joinedAsB(id) {
+  const j = joined.find((x) => x.id === id);
+  if (!j) return false;
+  join.b = { dataset: j.dataset, table: j.table, name: j.name };
+  if (state.table) {
+    const [ai, bi] = guessKeys(state.table.cols, j.table.cols);
+    join.keyA = ai;
+    join.keyB = bi;
+  }
+  join.result = null;
+  renderJoin();
+  return true;
+}
 
 function sideDisplayName(dataset) {
   if (!dataset) return "";
@@ -6451,6 +6492,9 @@ async function runJoin() {
     if (!join.before) join.before = { dataset: aDatasetIn, table: aTableIn, name: aNameIn };
     join.result = joinedTable.joined;
     join.chain = description;
+    joinSeq++;
+    joined.push({ id: "j" + joinSeq, name: description, dataset: joinedDataset, table: joinedTable });
+    if (joinHooks.onResult) joinHooks.onResult();
     adoptJoinedTable(joinedDataset, joinedTable, description);
     renderJoin();
     /* the join is what the panel was for: step out of the way and show the
@@ -6518,6 +6562,11 @@ function sideDropHandlers() {
     const path = e.dataTransfer.getData(TREE_DRAG);
     busy(true, "reading…");
     try {
+      if (path.startsWith(JOINED_PREFIX)) {      /* a join already run */
+        const id = path.slice(JOINED_PREFIX.length);
+        if (which === "B") joinedAsB(id); else openJoined(id);
+        return;
+      }
       if (path) {                 /* a row dragged out of the file panel */
         const entry = await entryForPath(path);
         if (!entry) throw new Error('"' + path + '" is no longer available; open it again.');
@@ -6579,6 +6628,9 @@ const tree = {
 /** Marks a drag as one of ours, so a join side can tell a row being dragged
     in from a file being dragged in off the desktop. */
 const TREE_DRAG = "application/x-paris-parquet-path";
+
+/** Marks a dragged row as one of the joins already run, not a file. */
+const JOINED_PREFIX = "joined:";
 
 /** Looks a path up in whatever the panel is showing, as an entry the reader
     can take: the session list holds them already, a browsed folder has to
@@ -6775,6 +6827,26 @@ function renderLiveLevel(dirPath, depth) {
   return html;
 }
 
+/**
+ * The joins run this page load, listed under the files they came from. The
+ * row is the short form -- the files, without extensions or the key each
+ * side -- since the panel is narrow; the whole description is the title.
+ */
+function joinedLabel(name) {
+  return name.split(" ⋈ ").map((part) => part.replace(/ on .*/, "").replace(/\.[^.]*$/, "")).join(" ⋈ ");
+}
+function renderJoinedSection() {
+  if (!joined.length) return "";
+  let html = "<div class='tsect'>joined</div>";
+  for (const j of joined) {
+    const on = picking() ? (join.b && join.b.table === j.table) : state.table === j.table;
+    html += "<div class='tnode tfile tjoined" + (on ? " ton" : "") + "' data-joined='" + esc(j.id) +
+      "' draggable='true' title='" + esc(j.name) + "'>" +
+      "<span class='tcaret tleaf'></span><span class='tname'>" + esc(joinedLabel(j.name)) + "</span></div>";
+  }
+  return html;
+}
+
 function isLeaf(node) {
   return !!(node.file || node.entry);
 }
@@ -6824,7 +6896,7 @@ function renderTree() {
       "or use <b>Open .parquet</b> — whatever you open shows up here.</div>"
     : "<div class='tempty'>No .parquet files found here.</div>";
   body.innerHTML = (picking() ? "<div class='tpick'>click a file to join against</div>" : "") +
-    (html || empty);
+    (html || empty) + renderJoinedSection();
 }
 
 async function toggleDir(path) {
@@ -6915,6 +6987,10 @@ function initTree() {
   joinHooks.onShow = syncTreeForJoin;
   joinHooks.onPick = syncTreeAfterPick;
   fileHooks.onSeen = syncTreeAfterSeen;
+  joinHooks.onResult = () => {
+    tree.openPath = null;      /* what is open is a join now, not a file */
+    if (tree.on) renderTree();
+  };
   fileHooks.onOpen = syncTreeAfterOpen;
   $("treerail").addEventListener("click", () => {
     openTreeSession();               /* never a folder grant: that is a click inside */
@@ -6936,8 +7012,9 @@ function initTree() {
   $("treebody").addEventListener("dragstart", (e) => {
     const row = e.target.closest(".tnode[draggable='true']");
     if (!row) return;
-    e.dataTransfer.setData("text/plain", row.dataset.path);
-    e.dataTransfer.setData(TREE_DRAG, row.dataset.path);
+    const what = row.dataset.joined ? JOINED_PREFIX + row.dataset.joined : row.dataset.path;
+    e.dataTransfer.setData("text/plain", what);
+    e.dataTransfer.setData(TREE_DRAG, what);
     e.dataTransfer.effectAllowed = "copy";
     row.classList.add("tdragging");
   });
@@ -6948,6 +7025,13 @@ function initTree() {
   $("treebody").addEventListener("click", (e) => {
     const row = e.target.closest(".tnode");
     if (!row) return;
+    if (row.dataset.joined) {
+      /* a result is already in memory: side B if one is being picked,
+         otherwise back on screen as the open table */
+      if (picking()) joinedAsB(row.dataset.joined); else openJoined(row.dataset.joined);
+      renderTree();
+      return;
+    }
     const path = row.dataset.path;
     if (row.dataset.kind === "directory") toggleDir(path);
     else pickFile(path).catch(showError);

@@ -60,6 +60,10 @@ body{margin:0;background:var(--bg);color:var(--ink);
 .tnode.tdragging{opacity:.45}
 #treebody .tpick{padding:5px 10px 6px;margin-bottom:2px;border-bottom:1px solid var(--line2);
   font:10px var(--mono);color:var(--accent);letter-spacing:.03em;text-transform:uppercase}
+#treebody .tsect{margin-top:8px;padding:5px 10px 4px;border-top:1px solid var(--line2);
+  font:10px var(--mono);color:var(--faint);letter-spacing:.14em;text-transform:uppercase}
+.tnode.tjoined .tname{color:var(--dim)}
+.tnode.tjoined .tname::before{content:"\22C8  ";color:var(--faint)}
 .tnode{display:flex;align-items:center;gap:4px;padding:2px 8px;font:11px var(--mono);
   white-space:nowrap;cursor:pointer;user-select:none}
 .tnode:hover{background:var(--accent-soft)}

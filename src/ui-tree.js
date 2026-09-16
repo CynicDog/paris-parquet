@@ -1,8 +1,8 @@
 import { $ } from "./columns.js";
 import { isParquetPath } from "./dataset.js";
-import { join, joinHooks, openJoinCompare } from "./join.js";
+import { join, joined, joinedAsB, joinHooks, openJoinCompare, openJoined } from "./join.js";
 import { busy, drag, entriesFromFiles, fileHooks, openEntries, openFile, seen, showError } from "./main.js";
-import { esc } from "./view.js";
+import { esc, state } from "./view.js";
 
 /**
  * Browsing state for the left-side folder tree. Nothing here is persisted
@@ -27,6 +27,9 @@ export const tree = {
 /** Marks a drag as one of ours, so a join side can tell a row being dragged
     in from a file being dragged in off the desktop. */
 export const TREE_DRAG = "application/x-paris-parquet-path";
+
+/** Marks a dragged row as one of the joins already run, not a file. */
+export const JOINED_PREFIX = "joined:";
 
 /** Looks a path up in whatever the panel is showing, as an entry the reader
     can take: the session list holds them already, a browsed folder has to
@@ -223,6 +226,26 @@ function renderLiveLevel(dirPath, depth) {
   return html;
 }
 
+/**
+ * The joins run this page load, listed under the files they came from. The
+ * row is the short form -- the files, without extensions or the key each
+ * side -- since the panel is narrow; the whole description is the title.
+ */
+function joinedLabel(name) {
+  return name.split(" ⋈ ").map((part) => part.replace(/ on .*/, "").replace(/\.[^.]*$/, "")).join(" ⋈ ");
+}
+function renderJoinedSection() {
+  if (!joined.length) return "";
+  let html = "<div class='tsect'>joined</div>";
+  for (const j of joined) {
+    const on = picking() ? (join.b && join.b.table === j.table) : state.table === j.table;
+    html += "<div class='tnode tfile tjoined" + (on ? " ton" : "") + "' data-joined='" + esc(j.id) +
+      "' draggable='true' title='" + esc(j.name) + "'>" +
+      "<span class='tcaret tleaf'></span><span class='tname'>" + esc(joinedLabel(j.name)) + "</span></div>";
+  }
+  return html;
+}
+
 function isLeaf(node) {
   return !!(node.file || node.entry);
 }
@@ -272,7 +295,7 @@ export function renderTree() {
       "or use <b>Open .parquet</b> — whatever you open shows up here.</div>"
     : "<div class='tempty'>No .parquet files found here.</div>";
   body.innerHTML = (picking() ? "<div class='tpick'>click a file to join against</div>" : "") +
-    (html || empty);
+    (html || empty) + renderJoinedSection();
 }
 
 async function toggleDir(path) {
@@ -363,6 +386,10 @@ export function initTree() {
   joinHooks.onShow = syncTreeForJoin;
   joinHooks.onPick = syncTreeAfterPick;
   fileHooks.onSeen = syncTreeAfterSeen;
+  joinHooks.onResult = () => {
+    tree.openPath = null;      /* what is open is a join now, not a file */
+    if (tree.on) renderTree();
+  };
   fileHooks.onOpen = syncTreeAfterOpen;
   $("treerail").addEventListener("click", () => {
     openTreeSession();               /* never a folder grant: that is a click inside */
@@ -384,8 +411,9 @@ export function initTree() {
   $("treebody").addEventListener("dragstart", (e) => {
     const row = e.target.closest(".tnode[draggable='true']");
     if (!row) return;
-    e.dataTransfer.setData("text/plain", row.dataset.path);
-    e.dataTransfer.setData(TREE_DRAG, row.dataset.path);
+    const what = row.dataset.joined ? JOINED_PREFIX + row.dataset.joined : row.dataset.path;
+    e.dataTransfer.setData("text/plain", what);
+    e.dataTransfer.setData(TREE_DRAG, what);
     e.dataTransfer.effectAllowed = "copy";
     row.classList.add("tdragging");
   });
@@ -396,6 +424,13 @@ export function initTree() {
   $("treebody").addEventListener("click", (e) => {
     const row = e.target.closest(".tnode");
     if (!row) return;
+    if (row.dataset.joined) {
+      /* a result is already in memory: side B if one is being picked,
+         otherwise back on screen as the open table */
+      if (picking()) joinedAsB(row.dataset.joined); else openJoined(row.dataset.joined);
+      renderTree();
+      return;
+    }
     const path = row.dataset.path;
     if (row.dataset.kind === "directory") toggleDir(path);
     else pickFile(path).catch(showError);

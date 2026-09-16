@@ -404,6 +404,71 @@ await withPage(async (page) => {
   else bad("dragged-in join rows: " + rows);
 });
 
+/* --------------------------------- results listed back in the file panel */
+await withPage(async (page) => {
+  await page.goto("file://" + appPath);
+  await page.setInputFiles("#picker", path.join(tmp, "regions.parquet"));
+  await idle(page);
+  await page.setInputFiles("#picker", path.join(tmp, "orders.parquet"));
+  await idle(page);
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(200);
+  await page.setInputFiles("#jpicker", path.join(tmp, "regions.parquet"));
+  await idle(page);
+  await page.selectOption("#jkeyA", { label: "region" });
+  await page.selectOption("#jkeyB", { label: "name" });
+  await page.click("#jrun");
+  await idle(page);
+  await page.waitForTimeout(300);
+
+  /* the result is a table like any other, so it is listed like one -- under
+     its own heading, since it has no file behind it */
+  const listed = await page.evaluate(() => ({
+    section: document.querySelector("#treebody .tsect")?.textContent || "",
+    rows: [...document.querySelectorAll("#treebody .tnode.tjoined")].map((n) => n.textContent.trim()),
+    marked: [...document.querySelectorAll("#treebody .tnode.tjoined.ton")].length,
+    files: [...document.querySelectorAll("#treebody .tnode.ton:not(.tjoined)")].length,
+  }));
+  if (/joined/i.test(listed.section) && listed.rows.length === 1) {
+    ok("a join run is listed under a joined heading: " + listed.rows[0]);
+  } else bad("joined section: " + JSON.stringify(listed));
+  if (listed.marked === 1 && listed.files === 0) ok("and it is the one marked as open, not the file it came from");
+  else bad("marks: " + JSON.stringify(listed));
+
+  /* open a file again, then click the result to bring it back */
+  await page.click("#treebody .tnode[data-path='orders.parquet']");
+  await idle(page);
+  await page.waitForTimeout(250);
+  const away = await page.evaluate(() => window.PARIS.state.table.rowsLoaded);
+  await page.click("#treebody .tnode.tjoined");
+  await page.waitForTimeout(400);
+  const back = await page.evaluate(() => ({
+    rows: window.PARIS.state.table.rowsLoaded,
+    cols: window.PARIS.state.table.cols.map((c) => c.name),
+  }));
+  if (away === 500 && back.rows === 470 && back.cols.includes("manager")) {
+    ok("clicking it puts the joined table back on screen, whole");
+  } else bad("reopening a result: " + JSON.stringify({ away, back }));
+
+  /* and it can be the other side of the next join, dragged in like a file */
+  await page.click("#toggleJoin");
+  await page.waitForTimeout(250);
+  await page.evaluate(() => {
+    const row = document.querySelector("#treebody .tnode.tjoined");
+    const zone = document.querySelector(".jside[data-jside='B']");
+    const dt = new DataTransfer();
+    row.dispatchEvent(new DragEvent("dragstart", { dataTransfer: dt, bubbles: true }));
+    zone.dispatchEvent(new DragEvent("dragover", { dataTransfer: dt, bubbles: true, cancelable: true }));
+    zone.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await idle(page);
+  await page.waitForTimeout(300);
+  const asB = await page.evaluate(() =>
+    [...document.querySelectorAll(".jside .jname")].map((n) => n.textContent));
+  if (/⋈/.test(asB[1] || "")) ok("a result drags into a side like a file does: " + asB.join(" / "));
+  else bad("joined result as B: " + JSON.stringify(asB));
+});
+
 /* ------------------------------------------- what the SQL panel writes */
 await withPage(async (page) => {
   await page.goto("file://" + appPath);

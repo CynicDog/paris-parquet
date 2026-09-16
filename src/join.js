@@ -7,7 +7,7 @@ import { keyPart, newQuery, sortKey, textOf } from "./query.js";
 import { lessThan } from "./types.js";
 import { renderMeta } from "./ui-metadata.js";
 import { renderQuery, renderQueryColumns } from "./ui-query-builder.js";
-import { entryForPath, TREE_DRAG } from "./ui-tree.js";
+import { entryForPath, JOINED_PREFIX, TREE_DRAG } from "./ui-tree.js";
 import { baseView, esc, newDisplay, num, setView, state } from "./view.js";
 
 /**
@@ -25,7 +25,44 @@ export const join = { on: false, b: null, keyA: -1, keyB: -1, before: null, resu
  * it is built later than this module (see the manifest in scripts/
  * compose.mjs), so it registers itself here rather than being imported.
  */
-export const joinHooks = { onShow: null, onPick: null };
+export const joinHooks = { onShow: null, onPick: null, onResult: null };
+
+/**
+ * Every join run this page load, in the order they were made. A result is
+ * a table like any other -- already whole, in memory, no file behind it --
+ * so the file panel can list them beside the files and hand one back to be
+ * opened, joined against, or joined onto.
+ */
+export const joined = [];
+let joinSeq = 0;
+
+/** Puts a result back on screen, from the panel's list of them. */
+export function openJoined(id) {
+  const j = joined.find((x) => x.id === id);
+  if (!j) return;
+  if (!join.before && state.table && state.dataset.parts.length) {
+    join.before = { dataset: state.dataset, table: state.table, name: sideDisplayName(state.dataset) };
+  }
+  join.chain = j.name;
+  join.result = j.table.joined;
+  adoptJoinedTable(j.dataset, j.table, j.name);
+  if (joinHooks.onResult) joinHooks.onResult();
+}
+
+/** The same result as the other side of a new join. */
+export function joinedAsB(id) {
+  const j = joined.find((x) => x.id === id);
+  if (!j) return false;
+  join.b = { dataset: j.dataset, table: j.table, name: j.name };
+  if (state.table) {
+    const [ai, bi] = guessKeys(state.table.cols, j.table.cols);
+    join.keyA = ai;
+    join.keyB = bi;
+  }
+  join.result = null;
+  renderJoin();
+  return true;
+}
 
 function sideDisplayName(dataset) {
   if (!dataset) return "";
@@ -294,6 +331,9 @@ export async function runJoin() {
     if (!join.before) join.before = { dataset: aDatasetIn, table: aTableIn, name: aNameIn };
     join.result = joinedTable.joined;
     join.chain = description;
+    joinSeq++;
+    joined.push({ id: "j" + joinSeq, name: description, dataset: joinedDataset, table: joinedTable });
+    if (joinHooks.onResult) joinHooks.onResult();
     adoptJoinedTable(joinedDataset, joinedTable, description);
     renderJoin();
     /* the join is what the panel was for: step out of the way and show the
@@ -361,6 +401,11 @@ function sideDropHandlers() {
     const path = e.dataTransfer.getData(TREE_DRAG);
     busy(true, "reading…");
     try {
+      if (path.startsWith(JOINED_PREFIX)) {      /* a join already run */
+        const id = path.slice(JOINED_PREFIX.length);
+        if (which === "B") joinedAsB(id); else openJoined(id);
+        return;
+      }
       if (path) {                 /* a row dragged out of the file panel */
         const entry = await entryForPath(path);
         if (!entry) throw new Error('"' + path + '" is no longer available; open it again.');
