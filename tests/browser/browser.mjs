@@ -2,7 +2,7 @@
  * Drives index.html in a real browser: loads a parquet file through the same
  * File input a user would use, then reports what the page actually rendered.
  *
- *   node tools/browser.mjs file.parquet [--shot out.png] [--wide]
+ *   node tests/browser/browser.mjs file.parquet [--shot out.png] [--wide]
  */
 
 import { createRequire } from "node:module";
@@ -17,7 +17,7 @@ const shot = shotAt >= 0 ? args[shotAt + 1] : null;
 const files = args.filter((a, i) => !a.startsWith("--") && !(shotAt >= 0 && i === shotAt + 1));
 const wide = args.includes("--wide");
 const here = path.dirname(new URL(import.meta.url).pathname);
-const appPath = path.join(here, "..", "index.html");
+const appPath = path.join(here, "..", "..", "index.html");
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: wide ? 1600 : 1280, height: 900 } });

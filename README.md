@@ -220,7 +220,7 @@ hand, it says so at the top of the file.
 ```sh
 npm install        # once, for Biome
 npm run build       # src/*.js + src/index.template.html -> index.html
-npm run lint         # biome check against src/, tools/, scripts/
+npm run lint         # biome check against src/, tests/, tools/, scripts/
 npm test              # unit tests, plus the integration suite if fixtures exist
 ```
 
@@ -260,38 +260,44 @@ decision from turning lint on, not bundled into this pass.
 
 ## Tests
 
-The `tools/` directory is for developing the file; none of it ships to a
-user. It needs `pyarrow` (to write fixtures and act as the source of truth)
-and optionally `playwright` and `duckdb` (its Python package, for the
+`tests/` holds everything that verifies the file and nothing that ships:
+`tests/unit/` (node:test, straight against the modules in `src/`),
+`tests/integration/` (against the built `index.html`), `tests/browser/`
+(real Chromium), `tests/fuzz/`, and `tests/support/` for the Python that
+writes fixtures and acts as ground truth. `tools/` keeps what is a tool
+rather than a test, such as `sample-data.py`. None of it ships to a user.
+It needs `pyarrow` (to write fixtures and act as the source of truth) and
+optionally `playwright` and `duckdb` (its Python package, for the
 query-engine cross-checks).
 
-`npm test` runs the unit tests under `src/*.test.js` — fast, each one
+`npm test` runs the unit tests under `tests/unit/*.test.js` — fast, each one
 exercising a single module directly through a real `import`, no file to
 decode (the SQL parser against malformed input, `aggregate`'s rollup/pivot/
 cube reshaping and its spread metrics against hand-built columns,
-`clauseCanMatch`'s pushdown logic against hand-built statistics) — and then, if a fixture directory exists
-(`python3 tools/fixtures.py /tmp/fx` first), the integration suite below,
-which exercises the *built* `index.html` end to end. Both matter: the unit
+`clauseCanMatch`'s pushdown logic against hand-built statistics) — and
+then, if a fixture directory exists (`python3 tests/support/fixtures.py
+/tmp/fx` first), the integration suite below, which exercises the *built*
+`index.html` end to end. Both matter: the unit
 tests catch a regression in one module in milliseconds; the integration
 suite is the one that would catch the build step itself going wrong.
 
 ```sh
-python3 tools/fixtures.py /tmp/fx             # write fixtures + expected values
-node tools/check.mjs /tmp/fx/*.parquet        # decode each one, compare every cell
-node tools/check-query.mjs /tmp/fx/*.parquet  # run the query engine against duckdb
-node tools/check-sql.mjs /tmp/fx/a.parquet    # SQL round trip, execution, refusals
-node tools/check-folder.mjs /tmp/fx/folders   # partitioned folders read as one table
-node tools/check-diff.mjs /tmp/fx/diff /tmp/fx/*.parquet   # diff, and every file vs itself
-node tools/check-push.mjs /tmp/fx/push        # pushdown: the same answer, less read
-node tools/fuzz-zstd.mjs 1000                 # zstd decoder vs node's zstd encoder
-node tools/browser.mjs /tmp/fx/a.parquet      # drive the page in real Chromium
-node tools/browser-diff.mjs /tmp/fx/diff      # drive the diff panel, and count requests
-node tools/browser-push.mjs /tmp/fx/push      # drive the scan, and time it
-node tools/browser-lazy.mjs /tmp/fx/wide.parquet   # only decode what is wanted
-node tools/browser-workers.mjs /tmp/fx/*.parquet   # the other cores agree, cell for cell
-node tools/browser-tree.mjs /tmp/fx/push      # drive the folder tree, both backends, count requests
-node tools/browser-metrics.mjs /tmp/fx/a.parquet   # drive the METRICS row's "more", and the SQL it writes
-node tools/browser-join.mjs                   # drive a join from both pickers, chain one, check pushdown narrowed it, and undo
+python3 tests/support/fixtures.py /tmp/fx                 # write fixtures + expected values
+node tests/integration/check.mjs /tmp/fx/*.parquet        # decode each one, compare every cell
+node tests/integration/check-query.mjs /tmp/fx/*.parquet  # run the query engine against duckdb
+node tests/integration/check-sql.mjs /tmp/fx/a.parquet    # SQL round trip, execution, refusals
+node tests/integration/check-folder.mjs /tmp/fx/folders   # partitioned folders read as one table
+node tests/integration/check-diff.mjs /tmp/fx/diff /tmp/fx/*.parquet   # diff, and every file vs itself
+node tests/integration/check-push.mjs /tmp/fx/push        # pushdown: the same answer, less read
+node tests/fuzz/fuzz-zstd.mjs 1000                        # zstd decoder vs node's zstd encoder
+node tests/browser/browser.mjs /tmp/fx/a.parquet          # drive the page in real Chromium
+node tests/browser/browser-diff.mjs /tmp/fx/diff          # drive the diff panel, and count requests
+node tests/browser/browser-push.mjs /tmp/fx/push          # drive the scan, and time it
+node tests/browser/browser-lazy.mjs /tmp/fx/wide.parquet  # only decode what is wanted
+node tests/browser/browser-workers.mjs /tmp/fx/*.parquet  # the other cores agree, cell for cell
+node tests/browser/browser-tree.mjs /tmp/fx/folders       # drive the folder tree, both backends, count requests
+node tests/browser/browser-metrics.mjs /tmp/fx/a.parquet  # drive the METRICS row's "more", and the SQL it writes
+node tests/browser/browser-join.mjs                       # drive a join from both pickers, chain one, check pushdown narrowed it, and undo
 ```
 
 - `check.mjs` pulls the `<script>` out of `index.html` and runs it against a

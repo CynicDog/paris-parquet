@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Dumps a parquet file's values as paris-parquet would display them.
 
-Used as ground truth for tools/check.mjs: pyarrow reads the file, and the
+Used as ground truth for tests/integration/check.mjs: pyarrow reads the file, and the
 values are rendered with the same rules index.html uses, leaf column by leaf
 column in schema order.
 """

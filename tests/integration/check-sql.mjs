@@ -1,7 +1,7 @@
 /**
  * Checks the SQL panel's two-way editing.
  *
- *   node tools/check-sql.mjs file.parquet
+ *   node tests/integration/check-sql.mjs file.parquet
  *
  * Three things:
  *  1. round trip — a builder state prints as SQL, parses back, and prints the
@@ -16,6 +16,7 @@ import { appPath, loadApp } from "./check.mjs";
 
 const PARIS = loadApp(appPath);
 const here = path.dirname(new URL(import.meta.url).pathname);
+const support = path.join(here, "..", "support");
 const file = process.argv[2] || "/tmp/corpus/basic_snappy.parquet";
 
 const buf = fs.readFileSync(file);
@@ -155,8 +156,8 @@ for (const sql of handWritten) {
   }
   let duck;
   try {
-    duck = JSON.parse(execFileSync("python3", [path.join(here, "duck.py"), file, sql.replace(/;\s*$/, ""), tableName],
-      { maxBuffer: 256 * 1024 * 1024, encoding: "utf8", cwd: here }));
+    duck = JSON.parse(execFileSync("python3", [path.join(support, "duck.py"), file, sql.replace(/;\s*$/, ""), tableName],
+      { maxBuffer: 256 * 1024 * 1024, encoding: "utf8", cwd: support }));
   } catch (e) {
     bad("duckdb: " + label, String(e.stderr || e.message).split("\n").slice(-3).join(" "));
     continue;

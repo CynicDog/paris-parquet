@@ -2,12 +2,12 @@
   "name": "paris-parquet",
   "private": true,
   "type": "module",
-  "description": "A single HTML file that reads a parquet file and shows you what's in it. src/ is the source; index.html is a generated build artifact.",
+  "description": "A single HTML file that reads a parquet file and shows you what's in it. src/ is the source; index.html is a generated build artifact; tests/ verifies it.",
   "scripts": {
     "build": "node scripts/compose.mjs",
-    "lint": "biome check src/ tools/ scripts/",
-    "lint:fix": "biome check --write src/ tools/ scripts/",
-    "test": "node tools/run-tests.mjs"
+    "lint": "biome check src/ tests/ tools/ scripts/",
+    "lint:fix": "biome check --write src/ tests/ tools/ scripts/",
+    "test": "node tests/run.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13"

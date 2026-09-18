@@ -8,10 +8,11 @@
  * is granted and before the first file is even dropped. Also counts every
  * network request, which must stay at one -- the html itself.
  *
- *   NODE_PATH=/opt/node22/lib/node_modules node tools/browser-tree.mjs /tmp/fx/push
+ *   NODE_PATH=/opt/node22/lib/node_modules node tests/browser/browser-tree.mjs /tmp/fx/folders
  *
  * Any folder with at least one subfolder containing a .parquet file works;
- * tools/fixtures.py's push/ output (folders of parquet files) fits.
+ * tests/support/fixtures.py's folders/ output (hive/, flat/, ragged/) fits --
+ * push/ is a flat directory of files, with no subfolder to expand.
  */
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -20,7 +21,7 @@ import path from "node:path";
 const { chromium } = createRequire(import.meta.url)("playwright");
 const dir = process.argv[2] || "/tmp/fx/push";
 const here = path.dirname(new URL(import.meta.url).pathname);
-const appPath = path.join(here, "..", "index.html");
+const appPath = path.join(here, "..", "..", "index.html");
 
 let failed = 0;
 const ok = (s) => console.log("ok   " + s);

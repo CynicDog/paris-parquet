@@ -1,8 +1,8 @@
 /**
  * Checks that a folder of parquet files reads as one table.
  *
- *   python3 tools/fixtures.py /tmp/fx        # writes /tmp/fx/folders/...
- *   node tools/check-folder.mjs /tmp/fx/folders
+ *   python3 tests/support/fixtures.py /tmp/fx        # writes /tmp/fx/folders/...
+ *   node tests/integration/check-folder.mjs /tmp/fx/folders
  *
  * Hive partition values must land on the right rows, files the reader should
  * ignore must be ignored, a missing column must read as null, and two files

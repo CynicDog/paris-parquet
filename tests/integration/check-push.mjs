@@ -1,8 +1,8 @@
 /**
  * Checks predicate pushdown.
  *
- *   python3 tools/fixtures.py /tmp/fx
- *   node tools/check-push.mjs /tmp/fx/push /tmp/fx/folders/hive
+ *   python3 tests/support/fixtures.py /tmp/fx
+ *   node tests/integration/check-push.mjs /tmp/fx/push /tmp/fx/folders/hive
  *
  * The property that matters is that skipping changes nothing: for every
  * query, the rows a scan produces must be the rows a full read produces,

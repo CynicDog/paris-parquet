@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Writes the parquet test corpus, plus the expected values for each file.
 
-    python3 tools/fixtures.py /tmp/fx
-    node tools/check.mjs /tmp/fx/*.parquet
+    python3 tests/support/fixtures.py /tmp/fx
+    node tests/integration/check.mjs /tmp/fx/*.parquet
 
 Covers every codec, encoding and page version pyarrow can write, the awkward
 types (decimals, int96, float16, unsigned, nanosecond timestamps), nesting, and

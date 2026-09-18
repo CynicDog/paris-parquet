@@ -2,7 +2,7 @@
  * Checks that decoding on the other cores gives the same answer as decoding
  * here, for every fixture and every type in them — and measures what it saved.
  *
- *   NODE_PATH=/opt/node22/lib/node_modules node tools/browser-workers.mjs /tmp/corpus/*.parquet
+ *   NODE_PATH=/opt/node22/lib/node_modules node tests/browser/browser-workers.mjs /tmp/corpus/*.parquet
  *
  * Each file is read twice in the same page, once with the pool forced on and
  * once with it off, and every cell of the two tables is compared. A worker
@@ -17,7 +17,7 @@ import path from "node:path";
 const { chromium } = createRequire(import.meta.url)("playwright");
 const files = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const here = path.dirname(new URL(import.meta.url).pathname);
-const appPath = path.join(here, "..", "index.html");
+const appPath = path.join(here, "..", "..", "index.html");
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });

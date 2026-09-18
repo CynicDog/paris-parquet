@@ -1,7 +1,7 @@
 /**
  * Cross-checks the zstd decoder in index.html against Node's zstd encoder.
  *
- *   node tools/fuzz-zstd.mjs [iterations]
+ *   node tests/fuzz/fuzz-zstd.mjs [iterations]
  *
  * Varies size, entropy and compression level so that raw blocks, RLE blocks,
  * huffman and treeless literals, repeated FSE tables and long match offsets
@@ -10,9 +10,9 @@
 
 import path from "node:path";
 import zlib from "node:zlib";
-import { loadApp } from "./check.mjs";
+import { loadApp } from "../integration/check.mjs";
 
-const PARIS = loadApp(path.join(path.dirname(new URL(import.meta.url).pathname), "..", "index.html"));
+const PARIS = loadApp(path.join(path.dirname(new URL(import.meta.url).pathname), "..", "..", "index.html"));
 
 let seed = 0x2f6fdd;
 function rnd() {

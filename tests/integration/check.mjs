@@ -1,9 +1,9 @@
 /**
  * Runs the reader inside index.html against real parquet files and compares
- * every cell with the ground truth written by tools/expect.py.
+ * every cell with the ground truth written by tests/support/expect.py.
  *
- *   python3 tools/expect.py file.parquet file.expect.json
- *   node tools/check.mjs file.parquet [...]
+ *   python3 tests/support/expect.py file.parquet file.expect.json
+ *   node tests/integration/check.mjs file.parquet [...]
  *
  * The script tag is evaluated as-is against a stub DOM, so this exercises the
  * shipped file rather than a copy of it.
@@ -110,7 +110,7 @@ async function checkFile(PARIS, file) {
 }
 
 const here = path.dirname(new URL(import.meta.url).pathname);
-export const appPath = path.join(here, "..", "index.html");
+export const appPath = path.join(here, "..", "..", "index.html");
 
 /* importing this file (fuzz-zstd.mjs does) must not run the CLI */
 if (process.argv[1] && process.argv[1].endsWith("check.mjs")) {

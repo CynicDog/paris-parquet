@@ -6,10 +6,10 @@
  * footer metadata (not the joined table's synthetic one). Also counts every
  * network request, which must stay at one -- the html itself.
  *
- *   NODE_PATH=/opt/node22/lib/node_modules node tools/browser-join.mjs
+ *   NODE_PATH=/opt/node22/lib/node_modules node tests/browser/browser-join.mjs
  *
  * Writes its own tiny fixtures into the OS temp dir rather than depending on
- * tools/fixtures.py's corpus, since it needs a specific, known join shape
+ * tests/support/fixtures.py's corpus, since it needs a specific, known join shape
  * (a small lookup table against a larger fact-shaped one, with a fraction of
  * rows that deliberately have no match) that isn't a natural byproduct of
  * the general-purpose fixture generator.
@@ -23,7 +23,7 @@ import path from "node:path";
 
 const { chromium } = createRequire(import.meta.url)("playwright");
 const here = path.dirname(new URL(import.meta.url).pathname);
-const appPath = path.join(here, "..", "index.html");
+const appPath = path.join(here, "..", "..", "index.html");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pp-join-"));
 
 let failed = 0;

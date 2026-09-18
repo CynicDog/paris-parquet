@@ -1,7 +1,7 @@
 /**
  * Checks the query engine in index.html against duckdb.
  *
- *   node tools/check-query.mjs file.parquet [...]
+ *   node tests/integration/check-query.mjs file.parquet [...]
  *
  * For each case: the builder's state produces SQL, the engine runs over the
  * decoded columns, duckdb runs the same SQL over the same file, and every cell
@@ -14,6 +14,7 @@ import { appPath, loadApp } from "./check.mjs";
 
 const PARIS = loadApp(appPath);
 const here = path.dirname(new URL(import.meta.url).pathname);
+const support = path.join(here, "..", "support");
 
 function source(file) {
   const buf = fs.readFileSync(file);
@@ -23,7 +24,7 @@ function source(file) {
     async read(start, end) { return new Uint8Array(buf.subarray(start, end)); },
   };
 }
-/** Same rendering rules tools/duck.py uses, so the two sides line up. */
+/** Same rendering rules tests/support/duck.py uses, so the two sides line up. */
 function canon(v, spec) {
   if (v === null || v === undefined) return null;
   switch (spec.kind) {
@@ -192,8 +193,8 @@ async function checkFile(file) {
     const ordered = /ORDER BY/.test(sql) ? sql : sql + "\nORDER BY ALL";
     let duck;
     try {
-      duck = JSON.parse(execFileSync("python3", [path.join(here, "duck.py"), file, ordered, tableName],
-        { maxBuffer: 512 * 1024 * 1024, encoding: "utf8", cwd: here }));
+      duck = JSON.parse(execFileSync("python3", [path.join(support, "duck.py"), file, ordered, tableName],
+        { maxBuffer: 512 * 1024 * 1024, encoding: "utf8", cwd: support }));
     } catch (e) {
       problems.push(`${c.name}: duckdb failed — ${String(e.stderr || e.message).split("\n").slice(-3).join(" ")}`);
       continue;

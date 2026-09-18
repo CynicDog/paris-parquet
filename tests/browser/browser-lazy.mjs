@@ -2,7 +2,7 @@
  * Checks that a column nobody is looking at is not decoded, and that one
  * anybody asks for afterwards is — with the right values in it.
  *
- *   NODE_PATH=/opt/node22/lib/node_modules node tools/browser-lazy.mjs /tmp/fx/wide.parquet
+ *   NODE_PATH=/opt/node22/lib/node_modules node tests/browser/browser-lazy.mjs /tmp/fx/wide.parquet
  *
  * Reading fewer columns is only worth anything if the ones you do read are
  * still right, so every check here ends at the cells on screen.
@@ -15,7 +15,7 @@ const { chromium } = createRequire(import.meta.url)("playwright");
 const args = process.argv.slice(2);
 const file = args.find((a) => !a.startsWith("--")) || "/tmp/corpus/wide.parquet";
 const here = path.dirname(new URL(import.meta.url).pathname);
-const appPath = path.join(here, "..", "index.html");
+const appPath = path.join(here, "..", "..", "index.html");
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });

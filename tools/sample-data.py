@@ -5,7 +5,7 @@ with the repo so the features have something to be tried on out of the box.
     python3 tools/sample-data.py            # -> data/
     uv run --with pyarrow tools/sample-data.py
 
-Unlike tools/fixtures.py, which writes a large corpus covering every codec,
+Unlike tests/support/fixtures.py, which writes a large corpus covering every codec,
 encoding and awkward type, this is a tiny, readable, plausible shop: customers,
 products, the orders that reference both, and a partitioned folder of events.
 It is deterministic (seeded), so

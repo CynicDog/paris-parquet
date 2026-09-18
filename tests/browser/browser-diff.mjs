@@ -3,7 +3,7 @@
  * press Diff, choose the other file, pick a key, compare. Also counts every
  * network request the page makes, which must stay at one — the html itself.
  *
- *   NODE_PATH=/opt/node22/lib/node_modules node tools/browser-diff.mjs /tmp/fx/diff
+ *   NODE_PATH=/opt/node22/lib/node_modules node tests/browser/browser-diff.mjs /tmp/fx/diff
  */
 
 import { createRequire } from "node:module";
@@ -15,7 +15,7 @@ const dir = args.find((a) => !a.startsWith("--")) || "/tmp/fx/diff";
 const shotAt = args.indexOf("--shot");
 const shot = shotAt >= 0 ? args[shotAt + 1] : null;
 const here = path.dirname(new URL(import.meta.url).pathname);
-const appPath = path.join(here, "..", "index.html");
+const appPath = path.join(here, "..", "..", "index.html");
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });

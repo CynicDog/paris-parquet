@@ -6,7 +6,7 @@
  * never misstate what it computes), and that the SQL box follows every press.
  * Also counts every network request, which must stay at one -- the html itself.
  *
- *   node tools/browser-metrics.mjs /tmp/fx/basic_snappy.parquet
+ *   node tests/browser/browser-metrics.mjs /tmp/fx/basic_snappy.parquet
  *
  * Any file with a string column and a number column works.
  */
@@ -17,7 +17,7 @@ import path from "node:path";
 const { chromium } = createRequire(import.meta.url)("playwright");
 const file = process.argv[2] || "/tmp/fx/basic_snappy.parquet";
 const here = path.dirname(new URL(import.meta.url).pathname);
-const appPath = path.join(here, "..", "index.html");
+const appPath = path.join(here, "..", "..", "index.html");
 
 let failed = 0;
 const ok = (s) => console.log("ok   " + s);

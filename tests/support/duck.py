@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Runs SQL over a parquet file with duckdb and prints the rows as JSON.
 
-Ground truth for tools/check-query.mjs: the query builder generates SQL, the
+Ground truth for tests/integration/check-query.mjs: the query builder generates SQL, the
 engine in index.html executes it over the decoded columns, and duckdb answers
 the same question independently. Values are rendered with expect.py's rules so
 the two sides are comparable.
 
-    python3 tools/duck.py file.parquet "SELECT ..." [table_name]
+    python3 tests/support/duck.py file.parquet "SELECT ..." [table_name]
 """
 import json
 import sys

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compileFilter, parseTemporal, scopeFilters } from "./query.js";
-import { BINS, binBounds, fmtValue, summarize, toMillis } from "./types.js";
+import { compileFilter, parseTemporal, scopeFilters } from "../../src/query.js";
+import { BINS, binBounds, fmtValue, summarize, toMillis } from "../../src/types.js";
 
 const numSpec = { kind: "number", label: "double", physical: "DOUBLE", convert: (v) => v };
 const tsSpec = { kind: "temporal", sub: "timestamp", utc: true, label: "timestamp", convert: (v) => v };

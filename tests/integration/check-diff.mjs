@@ -1,8 +1,8 @@
 /**
  * Checks the diff: schema drift, shape, statistics and the keyed row diff.
  *
- *   python3 tools/fixtures.py /tmp/fx
- *   node tools/check-diff.mjs /tmp/fx/diff [corpus.parquet ...]
+ *   python3 tests/support/fixtures.py /tmp/fx
+ *   node tests/integration/check-diff.mjs /tmp/fx/diff [corpus.parquet ...]
  *
  * The fixtures in <dir> are built to differ in exactly known ways, so the
  * diff has to name those and nothing else. Any extra parquet files given are

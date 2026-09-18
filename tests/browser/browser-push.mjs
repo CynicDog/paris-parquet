@@ -3,7 +3,7 @@
  * whole file, so the claim that pushdown is faster is measured rather than
  * asserted.
  *
- *   NODE_PATH=/opt/node22/lib/node_modules node tools/browser-push.mjs /tmp/fx/push
+ *   NODE_PATH=/opt/node22/lib/node_modules node tests/browser/browser-push.mjs /tmp/fx/push
  */
 
 import { createRequire } from "node:module";
@@ -13,7 +13,7 @@ const { chromium } = createRequire(import.meta.url)("playwright");
 const args = process.argv.slice(2);
 const dir = args.find((a) => !a.startsWith("--")) || "/tmp/fx/push";
 const here = path.dirname(new URL(import.meta.url).pathname);
-const appPath = path.join(here, "..", "index.html");
+const appPath = path.join(here, "..", "..", "index.html");
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
