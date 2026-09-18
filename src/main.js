@@ -8,7 +8,7 @@ import { bloomBytes, bloomHas, chunkBounds, clauseCanMatch, clauseGroups, clause
 import { AGG_NUMERIC, aggregate, compileFilter, newQuery, parseSql, querySql, runQuery, scopeToBar, sqlTokenize, toggleSort } from "./query.js";
 import { readFooter } from "./thrift.js";
 import { fmtValue, summarize, typeSpec } from "./types.js";
-import { closeInspector, initPicker, openInspector, refreshView, renderRows } from "./ui-grid.js";
+import { closeInspector, initPicker, openInspector, pageTopAt, refreshView, renderRows } from "./ui-grid.js";
 import { rawStat, renderMeta, showStat, statValue } from "./ui-metadata.js";
 import { adoptSql, initQuery, renderQuery, renderQueryColumns } from "./ui-query-builder.js";
 import { initTree } from "./ui-tree.js";
@@ -303,6 +303,8 @@ export function init() {
   try {
     const qh = +localStorage.getItem("paris-parquet-queryh");
     if (qh > 0) document.documentElement.style.setProperty("--queryh", qh + "px");
+    const qw = +localStorage.getItem("paris-parquet-qsqlw");
+    if (qw > 0) document.documentElement.style.setProperty("--qsqlw", qw + "px");
   } catch (_e) { /* fine */ }
   try {
     const size = Number(localStorage.getItem("paris-parquet-pagesize"));
@@ -337,6 +339,12 @@ export function init() {
       if (th.classList.contains("rownum")) return;
       const idx = Array.prototype.indexOf.call(th.parentNode.children, th) - 1;
       if (idx >= 0) toggleSort(idx, e.shiftKey);
+      return;
+    }
+    const pager = e.target.closest("tr.r-sum .top .pager button");
+    if (pager) {
+      const pth = pager.closest("th");
+      pageTopAt(pth, Array.prototype.indexOf.call(pth.parentNode.children, pth) - 1, +pager.dataset.toppage);
       return;
     }
     const bar = e.target.closest("tr.r-sum .hist.scopes i, tr.r-sum .top .row.scopes, tr.r-sum .bools.scopes i");

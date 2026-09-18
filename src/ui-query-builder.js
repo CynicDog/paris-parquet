@@ -325,6 +325,18 @@ export function initQuery() {
   });
   $("qgrip").addEventListener("pointerdown", (e) =>
     drag(e, "rowsizing", (ev) => queryHeight($("query").getBoundingClientRect().bottom - ev.clientY)));
+  /* the zones and the SQL text share the width: drag the grip and one grows
+     as the other shrinks, the same way the folder panel and the grid do */
+  $("qsqlgrip").addEventListener("pointerdown", (e) =>
+    drag(e, "colsizing", (ev) => sqlWidth($("qsqlgrip").parentNode.getBoundingClientRect().right - ev.clientX)));
+}
+/** How wide the SQL panel is, leaving the zones at least a column's worth. */
+export function sqlWidth(px) {
+  const room = Math.max(220, window.innerWidth - 460);
+  const w = Math.max(220, Math.min(Math.round(px), room));
+  document.documentElement.style.setProperty("--qsqlw", w + "px");
+  try { localStorage.setItem("paris-parquet-qsqlw", String(w)); } catch (_e) { /* fine */ }
+  return w;
 }
 export function queryHeight(px) {
   const room = Math.max(120, window.innerHeight - 260);

@@ -201,6 +201,10 @@ export function jsonish(v, spec) {
 }
 
 export const BINS = 24;
+/* Three top values are on show at a time; keeping ten pages of them costs
+   nothing next to the counts map they came from, and means paging through
+   is instant rather than a rescan. */
+export const TOP_KEEP = 30;
 /** A mean is an estimate; this keeps it short and stops it looking exact. */
 export function compactNumber(x) {
   if (!isFinite(x)) return String(x);
@@ -328,7 +332,7 @@ export function summarize(col, index, count) {
   if (counts.size) {
     s.distinct = counts.size;
     s.distinctCapped = distinctCapped;
-    s.top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+    s.top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, TOP_KEEP);
   }
   if (spec.kind === "nested") {
     let empties = 0;

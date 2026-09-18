@@ -9,8 +9,11 @@
 :root{
   --bg:#fbfbfa; --panel:#fff; --ink:#1c1c1a; --dim:#6b6b66; --faint:#9a9a94;
   --line:#e2e2dd; --line2:#efefea; --accent:#2f6fdd; --accent-soft:#e8f0fd;
-  --num:#1a6b4a; --str:#8a4b1f; --bool:#7a3fa0; --time:#1d5f8a; --bin:#6b6b66;
+  --num:#1a6b4a; --str:#8a4b1f; --bool:#0d6e8a; --time:#1d5f8a; --bin:#6b6b66;
   --ok:#1a7a4a; --ok-soft:#e9f6ef; --err-soft:#fceded;
+  /* the one line that makes scrollbars, form controls and the canvas behind
+     the page follow the theme; without it they stay light on a dark page */
+  color-scheme:light;
   --warn:#b3541e; --err:#b32020; --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
 }
 /* dark follows the browser unless the theme button has picked a side */
@@ -18,15 +21,17 @@
   :root:not([data-theme="light"]){
     --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#9b9d9f; --faint:#6e7073;
     --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a;
-    --num:#6fd0a3; --str:#e0a06a; --bool:#c59cf0; --time:#7cc4ef; --bin:#9b9d9f;
+    --num:#6fd0a3; --str:#e0a06a; --bool:#45bcd8; --time:#7cc4ef; --bin:#9b9d9f;
     --warn:#e09a5e; --err:#f08a8a; --ok:#6fd0a3; --ok-soft:#1b2c26; --err-soft:#2e2022;
+    color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
     --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#9b9d9f; --faint:#6e7073;
     --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a;
-    --num:#6fd0a3; --str:#e0a06a; --bool:#c59cf0; --time:#7cc4ef; --bin:#9b9d9f;
+    --num:#6fd0a3; --str:#e0a06a; --bool:#45bcd8; --time:#7cc4ef; --bin:#9b9d9f;
     --warn:#e09a5e; --err:#f08a8a; --ok:#6fd0a3; --ok-soft:#1b2c26; --err-soft:#2e2022;
+    color-scheme:dark;
 }
 *{box-sizing:border-box}
 [hidden]{display:none !important}
@@ -167,6 +172,11 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .top .row span.c{color:var(--faint);flex:none}
 /* a bar that scopes the result to itself on click */
 .hist.scopes i{cursor:pointer}
+.top .pager{justify-content:space-between;align-items:center;color:var(--faint);padding-top:1px}
+.top .pager span{position:static;font-size:9px}
+.top .pager button{font:10px var(--mono);line-height:1.2;padding:0 4px;min-width:0;border:1px solid var(--line);
+  border-radius:2px;background:var(--panel);color:var(--dim)}
+.top .pager button:hover{border-color:var(--accent);color:var(--accent)}
 .top .row.scopes{cursor:pointer}
 .top .row.scopes:hover i{opacity:.34}
 .bools.scopes i{cursor:pointer}
@@ -212,6 +222,10 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .cppin.on{background:var(--accent);border-color:var(--accent);color:#fff}
 
 /* ---------- query builder ---------- */
+#qsqlgrip{flex:none;width:7px;cursor:col-resize;position:relative;z-index:6}
+#qsqlgrip::after{content:"";position:absolute;top:50%;left:2px;margin-top:-19px;height:38px;width:3px;
+  border-radius:2px;background:var(--line)}
+#qsqlgrip:hover::after,body.colsizing #qsqlgrip::after{background:var(--accent)}
 #qgrip{flex:none;height:7px;background:var(--bg);cursor:row-resize;position:relative;z-index:6}
 #qgrip::after{content:"";position:absolute;left:50%;top:2px;margin-left:-19px;width:38px;height:3px;
   border-radius:2px;background:var(--line)}
@@ -277,7 +291,7 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .qwarn{color:var(--warn);font-style:normal}
 .qlimit{display:flex;align-items:center;gap:8px}
 .qlimit .qzlabel{margin:0}
-.qsqlwrap{flex:0 0 420px;border-left:1px solid var(--line2);display:flex;flex-direction:column;overflow:hidden;
+.qsqlwrap{flex:0 0 var(--qsqlw,420px);border-left:1px solid var(--line2);display:flex;flex-direction:column;overflow:hidden;
   background:var(--bg)}
 .qsqlwrap .qhead button{font:10px var(--mono);padding:0 6px;border-radius:3px}
 #qsql{margin:0;padding:8px 10px;overflow:auto;flex:1;font:11px/1.55 var(--mono);color:var(--ink);
@@ -493,6 +507,7 @@ details[open]>summary::before{content:"▾ "}
   <div class="qbody">
     <div class="qcols" id="qcols"></div>
     <div class="qzones" id="qzones"></div>
+    <div id="qsqlgrip" title="Drag to resize the SQL panel"></div>
     <div class="qsqlwrap">
       <div class="qhead">SQL <span id="qsqlstate"></span><span class="grow"></span>
         <button id="qformat" title="Rewrite it the way the builder would">tidy</button>

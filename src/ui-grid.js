@@ -5,6 +5,24 @@ import { compactNumber, fmtTemporal, fmtValue, HEX, hex } from "./types.js";
 import { typeTag } from "./ui-query-builder.js";
 import { baseView, bytesHuman, CELL_BUDGET, COL_W, displayOrder, esc, needFilled, num, pageBounds, pct, pinnedCount, ROW_H, renderPager, setView, state, viewValue, wantedColumns } from "./view.js";
 
+/* Which page of top values each column is showing, by column name, so it
+   survives a re-render of the header but not a different file. */
+export const TOP_PAGE = 3;
+const topPage = new Map();
+export function topPageOf(col) {
+  const n = col.summary && col.summary.top ? Math.ceil(col.summary.top.length / TOP_PAGE) : 1;
+  return Math.min(topPage.get(col.name) || 0, Math.max(0, n - 1));
+}
+/** Steps one column's top values on by a page, wrapping at either end. */
+export function pageTopAt(th, viewIdx, delta) {
+  const view = state.view, col = view && view.cols[viewIdx];
+  if (!col || !col.summary || !col.summary.top) return;
+  const pages = Math.ceil(col.summary.top.length / TOP_PAGE);
+  topPage.set(col.name, (topPageOf(col) + delta + pages) % pages);
+  const own = state.table ? state.table.cols : [];
+  th.innerHTML = summaryCard(col, !view.agg && own.indexOf(col) >= 0);
+}
+
 /** Where a histogram bin starts, for its tooltip: approximate, a click uses the real values. */
 function binEdge(s, spec, at) {
   const x = s.min + (s.max - s.min) * at / s.hist.length;
@@ -54,16 +72,30 @@ export function summaryCard(col, scopes) {
   } else if (spec.kind === "string") {
     out.push(kv("distinct", (s.distinctCapped ? "&ge;" : "") + num(s.distinct || 0)));
     if (s.top) {
-      let rows = "";
+      /* three at a time, so the card stays the same height whatever the
+         column holds; the rest are a click away rather than a rescan */
+      const pages = Math.ceil(s.top.length / TOP_PAGE);
+      const from = topPageOf(col) * TOP_PAGE;
+      const page = s.top.slice(from, from + TOP_PAGE);
       const top = s.top[0] ? s.top[0][1] : 1;
-      s.top.forEach((pair, k) => {
+      let rows = "";
+      page.forEach((pair, k) => {
         const v = pair[0], c = pair[1];
         const can = scopes && v !== "";
-        rows += '<div class="row' + (can ? " scopes" : "") + '" data-top="' + k + '" title="' +
+        rows += '<div class="row' + (can ? " scopes" : "") + '" data-top="' + (from + k) + '" title="' +
           esc(v + (can ? " — click to scope to it" : "")) + '"><i style="width:' + (c / top * 100) + '%"></i>' +
           "<span>" + (v === "" ? '<em class="null">(empty)</em>' : esc(v)) + '</span><span class="c">' +
           num(c) + "</span></div>";
       });
+      if (pages > 1) {
+        /* the counts map stops at TOP_KEEP, so say "30+" rather than imply
+           these are all of them when the column has more */
+        const more = (s.distinct || 0) > s.top.length;
+        rows += '<div class="row pager"><button data-toppage="-1" title="Previous three">&lsaquo;</button>' +
+          "<span>" + (from + 1) + "&ndash;" + (from + page.length) + " of " + num(s.top.length) +
+          (more ? "+" : "") + "</span>" +
+          '<button data-toppage="1" title="Next three">&rsaquo;</button></div>';
+      }
       out.push('<div class="top">' + rows + "</div>");
     }
     out.push(kv("length", s.count ? s.minLen + "-" + s.maxLen : "-"));
