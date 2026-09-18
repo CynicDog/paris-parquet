@@ -1,0 +1,81 @@
+# Publishes index.html to GitHub Pages: https://cynicdog.github.io/paris-parquet/
+#
+# The page is the same single self-contained file, only served over https
+# instead of opened from disk. Pages hosts it; it still makes no request of
+# its own, and a parquet file opened in it is read in the browser and never
+# uploaded.
+#
+# index.html is a committed build artifact, so the build job rebuilds it from
+# src/ and refuses to publish if the two disagree -- a stale page is worse
+# than no page, because it looks current.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# never let a newer push interrupt a deploy already in flight
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      # the unit tier. The integration tier needs a pyarrow-written fixture
+      # corpus and duckdb, and skips itself with a note when there is none.
+      - run: npm test
+
+      - name: index.html matches src/
+        run: |
+          npm run build
+          if ! git diff --quiet -- index.html; then
+            echo "::error file=index.html::index.html does not match src/ — run 'npm run build' and commit the result"
+            git diff --stat -- index.html
+            exit 1
+          fi
+
+      - name: Stage the site
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -R data _site/data          # the sample corpus, to download and open
+          touch _site/.nojekyll          # serve every path as-is, no Jekyll pass
+
+      - uses: actions/configure-pages@v5
+        with:
+          # turn Pages on for the repo on the first run, so publishing needs
+          # no click in Settings
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

@@ -16,6 +16,13 @@ or mail is still exactly one HTML file with nothing else required to run it.
 open index.html      # or double-click it, or mail it to someone
 ```
 
+Or try it without downloading anything: **<https://cynicdog.github.io/paris-parquet/>**
+— the same one file, served over https instead of opened off disk. It still
+makes no request of its own once it has loaded, and a file you open there is
+read in the browser and never uploaded. The sample corpus is published beside
+it, so [`data/orders.parquet`](https://cynicdog.github.io/paris-parquet/data/orders.parquet)
+is one download away if you have no parquet file to hand.
+
 Drop a file, several files, or a whole partitioned folder — `year=2024/
 month=01/part-0.parquet` reads as one table with `year` and `month` as real
 columns. Files the ecosystem leaves lying around (`_SUCCESS`, `.crc`,
@@ -223,6 +230,12 @@ npm run build       # src/*.js + src/index.template.html -> index.html
 npm run lint         # biome check against src/, tests/, tools/, scripts/
 npm test              # unit tests, plus the integration suite if fixtures exist
 ```
+
+A push to `main` runs `.github/workflows/pages.yml`: lint, the unit tests, and
+a rebuild that has to match the committed `index.html` — a stale build fails
+the job rather than publishing a page that looks current and isn't — then it
+uploads `index.html` and `data/` and deploys them to
+<https://cynicdog.github.io/paris-parquet/>.
 
 `data/` is the one place parquet files are checked in (`.gitignore` ignores
 `*.parquet` everywhere else, since fixtures are generated). `python3
