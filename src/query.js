@@ -681,6 +681,27 @@ export function toggleSort(viewIdx, additive) {
   renderQuery();
   runQuery();
 }
+/**
+ * Drags a header to a new position among the columns on screen. SELECT is
+ * implicit ("*", in display order) until this runs; the first drag makes it
+ * explicit, naming every column currently shown, in the order dragged to --
+ * from then on the picker's hide/pin no longer applies, the same as typing
+ * a column list into the SQL box would.
+ */
+export function reorderColumns(fromCi, toCi, after) {
+  const view = state.view, q = state.query, table = state.table;
+  if (!view || !table || view.agg || fromCi === toCi) return;
+  if (state.sqlDirty && !adoptSql(false)) return;
+  const order = q.select.length ? q.select.slice() : view.cols.map((c) => table.cols.indexOf(c));
+  const from = order.indexOf(fromCi);
+  if (from < 0) return;
+  order.splice(from, 1);
+  const at = order.indexOf(toCi);
+  order.splice(at < 0 ? order.length : at + (after ? 1 : 0), 0, fromCi);
+  q.select = order;
+  renderQuery();
+  runQuery();
+}
 /* the clauses a scope may replace: each one admits a single unbroken range
    of this column's values, so a range drawn from inside the current result
    already satisfies it and it can go */

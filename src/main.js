@@ -10,7 +10,7 @@ import { cellEq, cellKey, colShape, columnStats, datasetShape, diff, initDiff, o
 import { assemble, intersectRanges, mergeRanges, rangeCount, readColumnChunk, readColumnIndex, readOffsetIndex, readPage, readRowsRanges, unionRanges } from "./encoding.js";
 import { initJoin, join, openJoinCompare } from "./join.js";
 import { bloomBytes, bloomHas, chunkBounds, clauseCanMatch, clauseGroups, clauseRanges, planReport, planScan, readBloom, showPlan, xxh64 } from "./pushdown.js";
-import { AGG_NUMERIC, aggregate, compileFilter, newQuery, parseSql, querySql, runQuery, scopeToBar, sqlTokenize, toggleSort } from "./query.js";
+import { AGG_NUMERIC, aggregate, compileFilter, newQuery, parseSql, querySql, reorderColumns, runQuery, scopeToBar, sqlTokenize, toggleSort } from "./query.js";
 import { readFooter } from "./thrift.js";
 import { fmtValue, summarize, typeSpec } from "./types.js";
 import { closeInspector, initPicker, openInspector, pageTopAt, refreshView, renderRows } from "./ui-grid.js";
@@ -335,6 +335,38 @@ export function init() {
   $("gridwrap").addEventListener("dblclick", (e) => {
     const grip = e.target.closest("i.grip");
     if (grip) columnWidth(+grip.dataset.col, COL_W);
+  });
+  let colDrag = null;
+  const dragTh = (e) => e.target.closest("tr.r-name th[draggable='true']");
+  $("gridwrap").addEventListener("dragstart", (e) => {
+    const th = dragTh(e);
+    if (!th) return;
+    colDrag = +th.dataset.ci;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", th.dataset.ci);
+  });
+  $("gridwrap").addEventListener("dragover", (e) => {
+    const th = colDrag === null ? null : dragTh(e);
+    if (!th) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    for (const el of th.parentNode.children) el.classList.remove("dropbefore", "dropafter");
+    const box = th.getBoundingClientRect();
+    th.classList.add(e.clientX > box.left + box.width / 2 ? "dropafter" : "dropbefore");
+  });
+  $("gridwrap").addEventListener("drop", (e) => {
+    const th = colDrag === null ? null : dragTh(e);
+    if (!th) return;
+    e.preventDefault();
+    const after = e.clientX > th.getBoundingClientRect().left + th.offsetWidth / 2;
+    reorderColumns(colDrag, +th.dataset.ci, after);
+    colDrag = null;
+    for (const el of th.parentNode.children) el.classList.remove("dropbefore", "dropafter");
+  });
+  $("gridwrap").addEventListener("dragend", () => {
+    colDrag = null;
+    const row = $("grid").querySelector("tr.r-name");
+    if (row) for (const el of row.children) el.classList.remove("dropbefore", "dropafter");
   });
   $("gridwrap").addEventListener("click", (e) => {
     if (state.justResized) return;              /* the click that ends a drag */

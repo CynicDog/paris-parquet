@@ -145,6 +145,8 @@ i.grip{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z
 i.grip:hover,body.colsizing i.grip{background:var(--accent);opacity:.45}
 th.sortable{cursor:pointer}
 th.sortable:hover .cname{color:var(--accent)}
+th.sortable.dropbefore{box-shadow:inset 3px 0 0 var(--accent)}
+th.sortable.dropafter{box-shadow:inset -3px 0 0 var(--accent)}
 .sortmark{float:right;color:var(--accent);font-size:10px;line-height:14px;padding-left:3px}
 .sortmark i{font-style:normal;font-size:8px;vertical-align:super;color:var(--faint)}
 .cname{font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -3282,6 +3284,7 @@ function renderGrid() {
   if (state.table && needFilled(wantedColumns(state.table), () => refreshView(true))) return;
   const view = state.view;
   if (!view) return;
+  const table = state.table;
   const grid = $("grid");
   const cols = view.cols;
   let html = "<colgroup><col style='width:62px'>";
@@ -3292,9 +3295,14 @@ function renderGrid() {
   html += "</colgroup><thead><tr class='r-name'><th class='rownum'>#</th>";
   for (let i = 0; i < cols.length; i++) {
     const c = cols[i];
+    /* dragging a header into a new order is how the SELECT list is built by
+       hand; it means nothing for a grouped result, which has no such list */
+    const ci = !view.agg && table ? table.cols.indexOf(c) : -1;
     const title = (c.leaf ? c.leaf.path.join(".") : c.name) + "  -  " + c.spec.label +
       (c.leaf ? " (" + c.spec.physical + ", " + c.leaf.rep.toLowerCase() + ")" : "");
-    html += "<th class='sortable' title='" + esc(title) + " — click to sort, shift-click to add a key'>" +
+    const hint = " — click to sort, shift-click to add a key" + (ci >= 0 ? ", drag to reorder" : "");
+    html += "<th class='sortable'" + (ci >= 0 ? " draggable='true' data-ci='" + ci + "'" : "") +
+      " title='" + esc(title + hint) + "'>" +
       sortMark(i) + "<span class='cname'>" + esc(c.name) +
       "</span><span class='ctype t-" + c.spec.kind + "'>" + esc(c.spec.label) +
       (c.leaf && c.leaf.rep === "OPTIONAL" && !c.spec.nested ? "?" : "") +
@@ -4503,6 +4511,27 @@ function toggleSort(viewIdx, additive) {
   } else if (at < 0) q.sort.push(fresh());
   else if (q.sort[at].dir === "ASC") q.sort[at].dir = "DESC";
   else q.sort.splice(at, 1);
+  renderQuery();
+  runQuery();
+}
+/**
+ * Drags a header to a new position among the columns on screen. SELECT is
+ * implicit ("*", in display order) until this runs; the first drag makes it
+ * explicit, naming every column currently shown, in the order dragged to --
+ * from then on the picker's hide/pin no longer applies, the same as typing
+ * a column list into the SQL box would.
+ */
+function reorderColumns(fromCi, toCi, after) {
+  const view = state.view, q = state.query, table = state.table;
+  if (!view || !table || view.agg || fromCi === toCi) return;
+  if (state.sqlDirty && !adoptSql(false)) return;
+  const order = q.select.length ? q.select.slice() : view.cols.map((c) => table.cols.indexOf(c));
+  const from = order.indexOf(fromCi);
+  if (from < 0) return;
+  order.splice(from, 1);
+  const at = order.indexOf(toCi);
+  order.splice(at < 0 ? order.length : at + (after ? 1 : 0), 0, fromCi);
+  q.select = order;
   renderQuery();
   runQuery();
 }
@@ -7941,6 +7970,38 @@ function init() {
   $("gridwrap").addEventListener("dblclick", (e) => {
     const grip = e.target.closest("i.grip");
     if (grip) columnWidth(+grip.dataset.col, COL_W);
+  });
+  let colDrag = null;
+  const dragTh = (e) => e.target.closest("tr.r-name th[draggable='true']");
+  $("gridwrap").addEventListener("dragstart", (e) => {
+    const th = dragTh(e);
+    if (!th) return;
+    colDrag = +th.dataset.ci;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", th.dataset.ci);
+  });
+  $("gridwrap").addEventListener("dragover", (e) => {
+    const th = colDrag === null ? null : dragTh(e);
+    if (!th) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    for (const el of th.parentNode.children) el.classList.remove("dropbefore", "dropafter");
+    const box = th.getBoundingClientRect();
+    th.classList.add(e.clientX > box.left + box.width / 2 ? "dropafter" : "dropbefore");
+  });
+  $("gridwrap").addEventListener("drop", (e) => {
+    const th = colDrag === null ? null : dragTh(e);
+    if (!th) return;
+    e.preventDefault();
+    const after = e.clientX > th.getBoundingClientRect().left + th.offsetWidth / 2;
+    reorderColumns(colDrag, +th.dataset.ci, after);
+    colDrag = null;
+    for (const el of th.parentNode.children) el.classList.remove("dropbefore", "dropafter");
+  });
+  $("gridwrap").addEventListener("dragend", () => {
+    colDrag = null;
+    const row = $("grid").querySelector("tr.r-name");
+    if (row) for (const el of row.children) el.classList.remove("dropbefore", "dropafter");
   });
   $("gridwrap").addEventListener("click", (e) => {
     if (state.justResized) return;              /* the click that ends a drag */

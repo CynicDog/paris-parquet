@@ -118,6 +118,7 @@ export function renderGrid() {
   if (state.table && needFilled(wantedColumns(state.table), () => refreshView(true))) return;
   const view = state.view;
   if (!view) return;
+  const table = state.table;
   const grid = $("grid");
   const cols = view.cols;
   let html = "<colgroup><col style='width:62px'>";
@@ -128,9 +129,14 @@ export function renderGrid() {
   html += "</colgroup><thead><tr class='r-name'><th class='rownum'>#</th>";
   for (let i = 0; i < cols.length; i++) {
     const c = cols[i];
+    /* dragging a header into a new order is how the SELECT list is built by
+       hand; it means nothing for a grouped result, which has no such list */
+    const ci = !view.agg && table ? table.cols.indexOf(c) : -1;
     const title = (c.leaf ? c.leaf.path.join(".") : c.name) + "  -  " + c.spec.label +
       (c.leaf ? " (" + c.spec.physical + ", " + c.leaf.rep.toLowerCase() + ")" : "");
-    html += "<th class='sortable' title='" + esc(title) + " — click to sort, shift-click to add a key'>" +
+    const hint = " — click to sort, shift-click to add a key" + (ci >= 0 ? ", drag to reorder" : "");
+    html += "<th class='sortable'" + (ci >= 0 ? " draggable='true' data-ci='" + ci + "'" : "") +
+      " title='" + esc(title + hint) + "'>" +
       sortMark(i) + "<span class='cname'>" + esc(c.name) +
       "</span><span class='ctype t-" + c.spec.kind + "'>" + esc(c.spec.label) +
       (c.leaf && c.leaf.rep === "OPTIONAL" && !c.spec.nested ? "?" : "") +
