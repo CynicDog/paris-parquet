@@ -60,11 +60,13 @@ jobs:
           cp -R data _site/data          # the sample corpus, to download and open
           touch _site/.nojekyll          # serve every path as-is, no Jekyll pass
 
+      # Pages has to be switched on for the repo once, by hand or with
+      # `gh api -X POST /repos/OWNER/REPO/pages -f build_type=workflow`.
+      # configure-pages takes an `enablement: true` that reads as if it would
+      # do that itself, but GITHUB_TOKEN cannot create a Pages site -- it
+      # answers "Resource not accessible by integration" -- so this only
+      # reads the settings of a site that already exists.
       - uses: actions/configure-pages@v5
-        with:
-          # turn Pages on for the repo on the first run, so publishing needs
-          # no click in Settings
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
