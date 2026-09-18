@@ -224,6 +224,32 @@ export function lessThan(a, b) {
   }
   return false;
 }
+/** Which histogram bin a value lands in: the one rule the bars and a click on them share. */
+export const binOf = (x, min, span) => (span > 0 ? Math.min(BINS - 1, Math.floor((x - min) / span * BINS)) : 0);
+/**
+ * The smallest and largest stored value that fell into one histogram bin,
+ * over the same rows the summary counted. Bins are contiguous ranges, so
+ * every value between these two lands in this bin and no other -- a filter
+ * written with them selects exactly the rows the bar counted, where one
+ * written with the bin's computed edges could gain or lose a row to
+ * rounding at the boundary. null when the bin is empty.
+ */
+export function binBounds(col, index, count, bin) {
+  const s = col.summary;
+  if (!s || !s.hist || !s.hist[bin]) return null;
+  const rows = col.rows, span = s.max - s.min;
+  const n = count == null ? (index ? index.length : rows.length) : count;
+  let lo = null, hi = null;
+  for (let i = 0; i < n; i++) {
+    const v = index ? rows[index[i]] : rows[i];
+    if (v === null || v === undefined) continue;
+    const x = numeric(v);
+    if (!isFinite(x) || binOf(x, s.min, span) !== bin) continue;
+    if (lo === null || lessThan(v, lo)) lo = v;
+    if (hi === null || lessThan(hi, v)) hi = v;
+  }
+  return lo === null ? null : { lo, hi };
+}
 /**
  * Summarises one column. `index`, when given, selects which underlying rows
  * belong to the current view, so a filtered result summarises itself without
@@ -267,8 +293,7 @@ export function summarize(col, index, count) {
         if (v === null || v === undefined) continue;
         const x = numeric(v);
         if (!isFinite(x)) continue;
-        const b = span > 0 ? Math.min(BINS - 1, Math.floor((x - min) / span * BINS)) : 0;
-        hist[b]++;
+        hist[binOf(x, min, span)]++;
       }
       s.hist = hist;
       /* the text comes from the stored value, so decimals and int64 stay exact */

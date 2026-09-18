@@ -166,6 +166,12 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .top .row i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);opacity:.16}
 .top .row span{position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .top .row span.c{color:var(--faint);flex:none}
+/* a bar that scopes the result to itself on click */
+.hist.scopes i{cursor:pointer}
+.top .row.scopes{cursor:pointer}
+.top .row.scopes:hover i{opacity:.34}
+.bools.scopes i{cursor:pointer}
+.bools.scopes i:hover{filter:brightness(1.15)}
 .bools{display:flex;height:12px;border-radius:2px;overflow:hidden;font-size:9px;color:#fff;line-height:12px}
 .bools i{display:block;text-align:center;overflow:hidden}
 .bools i.t{background:var(--bool)} .bools i.f{background:var(--dim)} .bools i.n{background:var(--line)}
@@ -2056,6 +2062,32 @@ function lessThan(a, b) {
   }
   return false;
 }
+/** Which histogram bin a value lands in: the one rule the bars and a click on them share. */
+const binOf = (x, min, span) => (span > 0 ? Math.min(BINS - 1, Math.floor((x - min) / span * BINS)) : 0);
+/**
+ * The smallest and largest stored value that fell into one histogram bin,
+ * over the same rows the summary counted. Bins are contiguous ranges, so
+ * every value between these two lands in this bin and no other -- a filter
+ * written with them selects exactly the rows the bar counted, where one
+ * written with the bin's computed edges could gain or lose a row to
+ * rounding at the boundary. null when the bin is empty.
+ */
+function binBounds(col, index, count, bin) {
+  const s = col.summary;
+  if (!s || !s.hist || !s.hist[bin]) return null;
+  const rows = col.rows, span = s.max - s.min;
+  const n = count == null ? (index ? index.length : rows.length) : count;
+  let lo = null, hi = null;
+  for (let i = 0; i < n; i++) {
+    const v = index ? rows[index[i]] : rows[i];
+    if (v === null || v === undefined) continue;
+    const x = numeric(v);
+    if (!isFinite(x) || binOf(x, s.min, span) !== bin) continue;
+    if (lo === null || lessThan(v, lo)) lo = v;
+    if (hi === null || lessThan(hi, v)) hi = v;
+  }
+  return lo === null ? null : { lo, hi };
+}
 /**
  * Summarises one column. `index`, when given, selects which underlying rows
  * belong to the current view, so a filtered result summarises itself without
@@ -2099,8 +2131,7 @@ function summarize(col, index, count) {
         if (v === null || v === undefined) continue;
         const x = numeric(v);
         if (!isFinite(x)) continue;
-        const b = span > 0 ? Math.min(BINS - 1, Math.floor((x - min) / span * BINS)) : 0;
-        hist[b]++;
+        hist[binOf(x, min, span)]++;
       }
       s.hist = hist;
       /* the text comes from the stored value, so decimals and int64 stay exact */
@@ -3089,7 +3120,16 @@ function doExport(format) {
 
 /* ---------------------------------------------------------------- grid */
 
-function summaryCard(col) {
+/** Where a histogram bin starts, for its tooltip: approximate, a click uses the real values. */
+function binEdge(s, spec, at) {
+  const x = s.min + (s.max - s.min) * at / s.hist.length;
+  return spec.kind === "temporal" ? fmtTemporal(x, spec) : compactNumber(x);
+}
+/**
+ * `scopes` says whether a click on a bar can narrow the result to it: only
+ * for a column of the table itself, not one an aggregate made up.
+ */
+function summaryCard(col, scopes) {
   const s = col.summary, spec = col.spec;
   if (!s) return "";
   const out = [];
@@ -3101,9 +3141,10 @@ function summaryCard(col) {
 
   if (spec.kind === "bool") {
     const t = s.trues, f = s.falses, tot = s.n || 1;
-    out.push('<div class="bools"><i class="t" style="width:' + (t / tot * 100) + '%">' + (t / tot > 0.14 ? t : "") +
-      '</i><i class="f" style="width:' + (f / tot * 100) + '%">' + (f / tot > 0.14 ? f : "") +
-      '</i><i class="n" style="width:' + (s.nulls / tot * 100) + '%"></i></div>');
+    const seg = (cls, v, c, label) => '<i class="' + cls + '" data-bool="' + v + '" style="width:' + (c / tot * 100) +
+      '%" title="' + esc(v + " · " + num(c) + (scopes && c ? " — click to scope to it" : "")) + '">' + label + "</i>";
+    out.push('<div class="bools' + (scopes ? " scopes" : "") + '">' + seg("t", "true", t, t / tot > 0.14 ? t : "") +
+      seg("f", "false", f, f / tot > 0.14 ? f : "") + seg("n", "null", s.nulls, "") + "</div>");
     out.push(kv("true", num(t) + " &middot; " + pct(t, tot)));
     out.push(kv("false", num(f) + " &middot; " + pct(f, tot)));
   } else if (spec.kind === "number" || spec.kind === "temporal") {
@@ -3117,9 +3158,11 @@ function summaryCard(col) {
         for (const h of s.hist) if (h > peak) peak = h;
         let bars = "";
         for (let i = 0; i < s.hist.length; i++) {
-          bars += '<i style="height:' + Math.max(3, s.hist[i] / peak * 100) + '%" title="' + s.hist[i] + '"></i>';
+          const range = binEdge(s, spec, i) + " – " + binEdge(s, spec, i + 1);
+          bars += '<i style="height:' + Math.max(3, s.hist[i] / peak * 100) + '%" data-bin="' + i + '" title="' +
+            esc(num(s.hist[i]) + " · " + range + (scopes && s.hist[i] ? " — click to scope to it" : "")) + '"></i>';
         }
-        out.push('<div class="hist">' + bars + "</div>");
+        out.push('<div class="hist' + (scopes ? " scopes" : "") + '">' + bars + "</div>");
       }
       if (s.nonFinite) out.push(kv("nan/inf", num(s.nonFinite)));
     }
@@ -3128,12 +3171,14 @@ function summaryCard(col) {
     if (s.top) {
       let rows = "";
       const top = s.top[0] ? s.top[0][1] : 1;
-      for (const pair of s.top) {
+      s.top.forEach((pair, k) => {
         const v = pair[0], c = pair[1];
-        rows += '<div class="row" title="' + esc(v) + '"><i style="width:' + (c / top * 100) + '%"></i>' +
+        const can = scopes && v !== "";
+        rows += '<div class="row' + (can ? " scopes" : "") + '" data-top="' + k + '" title="' +
+          esc(v + (can ? " — click to scope to it" : "")) + '"><i style="width:' + (c / top * 100) + '%"></i>' +
           "<span>" + (v === "" ? '<em class="null">(empty)</em>' : esc(v)) + '</span><span class="c">' +
           num(c) + "</span></div>";
-      }
+      });
       out.push('<div class="top">' + rows + "</div>");
     }
     out.push(kv("length", s.count ? s.minLen + "-" + s.maxLen : "-"));
@@ -3171,7 +3216,8 @@ function renderGrid() {
       "</span><i class='grip' data-col='" + i + "' title='Drag to resize, double-click to reset'></i></th>";
   }
   html += "</tr><tr class='r-sum'><th class='rownum'></th>";
-  for (const c of cols) html += "<th>" + summaryCard(c) + "</th>";
+  const own = state.table ? state.table.cols : [];
+  for (const c of cols) html += "<th>" + summaryCard(c, !view.agg && own.indexOf(c) >= 0) + "</th>";
   html += "</tr></thead><tbody id='tbody'></tbody>";
   grid.innerHTML = html;
 
@@ -3731,12 +3777,15 @@ function parseTemporal(text, spec) {
   if (spec.sub === "time") {
     const m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/);
     if (!m) return NaN;
-    return ((+m[1] * 60 + +m[2]) * 60 + (+m[3] || 0)) * 1000 + (m[4] ? +(m[4] + "000").slice(0, 3) : 0);
+    return (((+m[1] * 60 + +m[2]) * 60 + (+m[3] || 0)) * 1e6 + (m[4] ? +(m[4] + "000000").slice(0, 6) : 0)) / 1000;
   }
   const m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?Z?$/);
   if (!m) return NaN;
-  return Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0),
-    m[7] ? +(m[7] + "000").slice(0, 3) : 0);
+  /* whole microseconds, divided once, the way toMillis() turns a stored
+     value into millis -- so a timestamp the grid prints reads back as
+     exactly the number it was printed from, not one a fraction below it */
+  const whole = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+  return (whole * 1000 + (m[7] ? +(m[7] + "000000").slice(0, 6) : 0)) / 1000;
 }
 function parseOperand(text, spec) {
   const t = String(text).trim();
@@ -4207,6 +4256,72 @@ function toggleSort(viewIdx, additive) {
   } else if (at < 0) q.sort.push(fresh());
   else if (q.sort[at].dir === "ASC") q.sort[at].dir = "DESC";
   else q.sort.splice(at, 1);
+  renderQuery();
+  runQuery();
+}
+/* the clauses a scope may replace: each one admits a single unbroken range
+   of this column's values, so a range drawn from inside the current result
+   already satisfies it and it can go */
+const RANGE_PREDS = { eq: 1, between: 1, lt: 1, le: 1, gt: 1, ge: 1 };
+/**
+ * Narrows a WHERE list to `clause` as well. With only ANDs it is appended,
+ * and any range clause on the same column is dropped rather than stacked,
+ * since the new one came from rows that already passed it. With ORs it
+ * has to hold in every branch, so a copy goes at the end of each OR group
+ * -- AND binds tighter, and one appended to the end would narrow only the
+ * last. A group with nothing runnable in it yet gets no copy: that group
+ * is skipped today, and a lone scope clause would bring it to life.
+ */
+function scopeFilters(filters, clause, cols) {
+  const fresh = () => Object.assign({}, clause, { id: nextQid("f"), linker: "AND" });
+  if (!filters.some((f, i) => i > 0 && f.linker === "OR")) {
+    const kept = filters.filter((f) => !(f.ci === clause.ci && RANGE_PREDS[f.pred] && !filterIssue(f, cols)));
+    return kept.concat(fresh());
+  }
+  const out = [];
+  let live = false;
+  const close = () => { if (live) out.push(fresh()); live = false; };
+  filters.forEach((f, i) => {
+    if (i > 0 && f.linker === "OR") close();
+    out.push(f);
+    if (!filterIssue(f, cols)) live = true;
+  });
+  close();
+  return out;
+}
+/**
+ * A click on a summary bar scopes the result to what that bar counted: a
+ * histogram bin to the smallest and largest value that fell in it, a
+ * top-values bar to that value, a true/false/null segment to that. `pick`
+ * is the bar's dataset: one of bin, top or bool. It goes in as an ordinary WHERE clause, so
+ * the zones, the SQL and the grid all move together, and taking it back
+ * out is the same × as any other filter.
+ */
+function scopeToBar(viewIdx, pick) {
+  const view = state.view, table = state.table, q = state.query;
+  if (!view || !table || !q || view.agg) return;
+  const col = view.cols[viewIdx];
+  const ci = table.cols.indexOf(col);
+  if (!col || ci < 0) return;
+  let clause = null;
+  if (pick.bin != null) {
+    const b = binBounds(col, view.index, view.count, +pick.bin);
+    if (!b) return;
+    const lo = fmtValue(b.lo, col.spec), hi = fmtValue(b.hi, col.spec);
+    clause = lo === hi ? { ci, pred: "eq", value: lo, valueTo: "" } : { ci, pred: "between", value: lo, valueTo: hi };
+  } else if (pick.bool != null) {
+    clause = pick.bool === "null" ? { ci, pred: "null", value: "", valueTo: "" }
+      : { ci, pred: "eq", value: pick.bool, valueTo: "" };
+  } else if (pick.top != null) {
+    const top = col.summary && col.summary.top && col.summary.top[+pick.top];
+    /* an empty string is how a clause says "no value yet", so '' cannot be one */
+    if (!top || top[0] === "") return;
+    clause = { ci, pred: "eq", value: top[0], valueTo: "" };
+  } else return;
+  /* SQL being typed is adopted first, as Run would; if it does not parse,
+     the click is refused rather than overwriting it */
+  if (state.sqlDirty && !adoptSql(false)) return;
+  q.filters = scopeFilters(q.filters, clause, table.cols);
   renderQuery();
   runQuery();
 }
@@ -7477,6 +7592,12 @@ function init() {
       if (th.classList.contains("rownum")) return;
       const idx = Array.prototype.indexOf.call(th.parentNode.children, th) - 1;
       if (idx >= 0) toggleSort(idx, e.shiftKey);
+      return;
+    }
+    const bar = e.target.closest("tr.r-sum .hist.scopes i, tr.r-sum .top .row.scopes, tr.r-sum .bools.scopes i");
+    if (bar) {
+      const sth = bar.closest("th");
+      scopeToBar(Array.prototype.indexOf.call(sth.parentNode.children, sth) - 1, bar.dataset);
       return;
     }
     const td = e.target.closest("#tbody td");

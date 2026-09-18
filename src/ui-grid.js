@@ -1,11 +1,20 @@
 import { $ } from "./columns.js";
 import { diff } from "./diff.js";
 import { runQuery, sortMark } from "./query.js";
-import { fmtValue, HEX, hex } from "./types.js";
+import { compactNumber, fmtTemporal, fmtValue, HEX, hex } from "./types.js";
 import { typeTag } from "./ui-query-builder.js";
 import { baseView, bytesHuman, CELL_BUDGET, COL_W, displayOrder, esc, needFilled, num, pageBounds, pct, pinnedCount, ROW_H, renderPager, setView, state, viewValue, wantedColumns } from "./view.js";
 
-export function summaryCard(col) {
+/** Where a histogram bin starts, for its tooltip: approximate, a click uses the real values. */
+function binEdge(s, spec, at) {
+  const x = s.min + (s.max - s.min) * at / s.hist.length;
+  return spec.kind === "temporal" ? fmtTemporal(x, spec) : compactNumber(x);
+}
+/**
+ * `scopes` says whether a click on a bar can narrow the result to it: only
+ * for a column of the table itself, not one an aggregate made up.
+ */
+export function summaryCard(col, scopes) {
   const s = col.summary, spec = col.spec;
   if (!s) return "";
   const out = [];
@@ -17,9 +26,10 @@ export function summaryCard(col) {
 
   if (spec.kind === "bool") {
     const t = s.trues, f = s.falses, tot = s.n || 1;
-    out.push('<div class="bools"><i class="t" style="width:' + (t / tot * 100) + '%">' + (t / tot > 0.14 ? t : "") +
-      '</i><i class="f" style="width:' + (f / tot * 100) + '%">' + (f / tot > 0.14 ? f : "") +
-      '</i><i class="n" style="width:' + (s.nulls / tot * 100) + '%"></i></div>');
+    const seg = (cls, v, c, label) => '<i class="' + cls + '" data-bool="' + v + '" style="width:' + (c / tot * 100) +
+      '%" title="' + esc(v + " · " + num(c) + (scopes && c ? " — click to scope to it" : "")) + '">' + label + "</i>";
+    out.push('<div class="bools' + (scopes ? " scopes" : "") + '">' + seg("t", "true", t, t / tot > 0.14 ? t : "") +
+      seg("f", "false", f, f / tot > 0.14 ? f : "") + seg("n", "null", s.nulls, "") + "</div>");
     out.push(kv("true", num(t) + " &middot; " + pct(t, tot)));
     out.push(kv("false", num(f) + " &middot; " + pct(f, tot)));
   } else if (spec.kind === "number" || spec.kind === "temporal") {
@@ -33,9 +43,11 @@ export function summaryCard(col) {
         for (const h of s.hist) if (h > peak) peak = h;
         let bars = "";
         for (let i = 0; i < s.hist.length; i++) {
-          bars += '<i style="height:' + Math.max(3, s.hist[i] / peak * 100) + '%" title="' + s.hist[i] + '"></i>';
+          const range = binEdge(s, spec, i) + " – " + binEdge(s, spec, i + 1);
+          bars += '<i style="height:' + Math.max(3, s.hist[i] / peak * 100) + '%" data-bin="' + i + '" title="' +
+            esc(num(s.hist[i]) + " · " + range + (scopes && s.hist[i] ? " — click to scope to it" : "")) + '"></i>';
         }
-        out.push('<div class="hist">' + bars + "</div>");
+        out.push('<div class="hist' + (scopes ? " scopes" : "") + '">' + bars + "</div>");
       }
       if (s.nonFinite) out.push(kv("nan/inf", num(s.nonFinite)));
     }
@@ -44,12 +56,14 @@ export function summaryCard(col) {
     if (s.top) {
       let rows = "";
       const top = s.top[0] ? s.top[0][1] : 1;
-      for (const pair of s.top) {
+      s.top.forEach((pair, k) => {
         const v = pair[0], c = pair[1];
-        rows += '<div class="row" title="' + esc(v) + '"><i style="width:' + (c / top * 100) + '%"></i>' +
+        const can = scopes && v !== "";
+        rows += '<div class="row' + (can ? " scopes" : "") + '" data-top="' + k + '" title="' +
+          esc(v + (can ? " — click to scope to it" : "")) + '"><i style="width:' + (c / top * 100) + '%"></i>' +
           "<span>" + (v === "" ? '<em class="null">(empty)</em>' : esc(v)) + '</span><span class="c">' +
           num(c) + "</span></div>";
-      }
+      });
       out.push('<div class="top">' + rows + "</div>");
     }
     out.push(kv("length", s.count ? s.minLen + "-" + s.maxLen : "-"));
@@ -87,7 +101,8 @@ export function renderGrid() {
       "</span><i class='grip' data-col='" + i + "' title='Drag to resize, double-click to reset'></i></th>";
   }
   html += "</tr><tr class='r-sum'><th class='rownum'></th>";
-  for (const c of cols) html += "<th>" + summaryCard(c) + "</th>";
+  const own = state.table ? state.table.cols : [];
+  for (const c of cols) html += "<th>" + summaryCard(c, !view.agg && own.indexOf(c) >= 0) + "</th>";
   html += "</tr></thead><tbody id='tbody'></tbody>";
   grid.innerHTML = html;
 

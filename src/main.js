@@ -5,7 +5,7 @@ import { cellEq, cellKey, colShape, columnStats, datasetShape, diff, initDiff, o
 import { assemble, intersectRanges, mergeRanges, rangeCount, readColumnChunk, readColumnIndex, readOffsetIndex, readPage, readRowsRanges, unionRanges } from "./encoding.js";
 import { initJoin, join, openJoinCompare } from "./join.js";
 import { bloomBytes, bloomHas, chunkBounds, clauseCanMatch, clauseGroups, clauseRanges, planReport, planScan, readBloom, showPlan, xxh64 } from "./pushdown.js";
-import { aggregate, compileFilter, newQuery, parseSql, querySql, runQuery, sqlTokenize, toggleSort } from "./query.js";
+import { aggregate, compileFilter, newQuery, parseSql, querySql, runQuery, scopeToBar, sqlTokenize, toggleSort } from "./query.js";
 import { readFooter } from "./thrift.js";
 import { fmtValue, summarize, typeSpec } from "./types.js";
 import { closeInspector, initPicker, openInspector, refreshView, renderRows } from "./ui-grid.js";
@@ -337,6 +337,12 @@ export function init() {
       if (th.classList.contains("rownum")) return;
       const idx = Array.prototype.indexOf.call(th.parentNode.children, th) - 1;
       if (idx >= 0) toggleSort(idx, e.shiftKey);
+      return;
+    }
+    const bar = e.target.closest("tr.r-sum .hist.scopes i, tr.r-sum .top .row.scopes, tr.r-sum .bools.scopes i");
+    if (bar) {
+      const sth = bar.closest("th");
+      scopeToBar(Array.prototype.indexOf.call(sth.parentNode.children, sth) - 1, bar.dataset);
       return;
     }
     const td = e.target.closest("#tbody td");

@@ -165,6 +165,12 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .top .row i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);opacity:.16}
 .top .row span{position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .top .row span.c{color:var(--faint);flex:none}
+/* a bar that scopes the result to itself on click */
+.hist.scopes i{cursor:pointer}
+.top .row.scopes{cursor:pointer}
+.top .row.scopes:hover i{opacity:.34}
+.bools.scopes i{cursor:pointer}
+.bools.scopes i:hover{filter:brightness(1.15)}
 .bools{display:flex;height:12px;border-radius:2px;overflow:hidden;font-size:9px;color:#fff;line-height:12px}
 .bools i{display:block;text-align:center;overflow:hidden}
 .bools i.t{background:var(--bool)} .bools i.f{background:var(--dim)} .bools i.n{background:var(--line)}

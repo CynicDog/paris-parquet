@@ -53,6 +53,10 @@ them; `tools/sample-data.py` regenerates them.
   numbers and timestamps, distinct count + top values for strings, a
   true/false/null bar for booleans, length stats for binary/list columns, a
   null bar on all of them.
+- Click a bar in a summary card to scope the result to it: a histogram bin
+  becomes `BETWEEN` its smallest and largest value, a top value or a
+  true/false/null segment becomes `=` / `IS NULL`. It goes in as an ordinary
+  `WHERE` clause, so the zones, the SQL and the grid move together.
 - Pager (100 rows by default, up to 3,000 or all); export the current view as
   CSV, TSV, JSON or Markdown, or copy to the clipboard.
 

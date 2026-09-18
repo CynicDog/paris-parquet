@@ -1,7 +1,7 @@
 import { $ } from "./columns.js";
 import { showPlan, unscan, updateScanButton } from "./pushdown.js";
-import { fmtValue, lessThan, numeric } from "./types.js";
-import { renderQuery } from "./ui-query-builder.js";
+import { binBounds, fmtValue, lessThan, numeric } from "./types.js";
+import { adoptSql, renderQuery } from "./ui-query-builder.js";
 import { baseView, displayCols, neededColumns, needFilled, num, setView, state } from "./view.js";
 
 export const PREDS = [
@@ -38,12 +38,15 @@ export function parseTemporal(text, spec) {
   if (spec.sub === "time") {
     const m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/);
     if (!m) return NaN;
-    return ((+m[1] * 60 + +m[2]) * 60 + (+m[3] || 0)) * 1000 + (m[4] ? +(m[4] + "000").slice(0, 3) : 0);
+    return (((+m[1] * 60 + +m[2]) * 60 + (+m[3] || 0)) * 1e6 + (m[4] ? +(m[4] + "000000").slice(0, 6) : 0)) / 1000;
   }
   const m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?Z?$/);
   if (!m) return NaN;
-  return Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0),
-    m[7] ? +(m[7] + "000").slice(0, 3) : 0);
+  /* whole microseconds, divided once, the way toMillis() turns a stored
+     value into millis -- so a timestamp the grid prints reads back as
+     exactly the number it was printed from, not one a fraction below it */
+  const whole = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+  return (whole * 1000 + (m[7] ? +(m[7] + "000000").slice(0, 6) : 0)) / 1000;
 }
 export function parseOperand(text, spec) {
   const t = String(text).trim();
@@ -514,6 +517,72 @@ export function toggleSort(viewIdx, additive) {
   } else if (at < 0) q.sort.push(fresh());
   else if (q.sort[at].dir === "ASC") q.sort[at].dir = "DESC";
   else q.sort.splice(at, 1);
+  renderQuery();
+  runQuery();
+}
+/* the clauses a scope may replace: each one admits a single unbroken range
+   of this column's values, so a range drawn from inside the current result
+   already satisfies it and it can go */
+const RANGE_PREDS = { eq: 1, between: 1, lt: 1, le: 1, gt: 1, ge: 1 };
+/**
+ * Narrows a WHERE list to `clause` as well. With only ANDs it is appended,
+ * and any range clause on the same column is dropped rather than stacked,
+ * since the new one came from rows that already passed it. With ORs it
+ * has to hold in every branch, so a copy goes at the end of each OR group
+ * -- AND binds tighter, and one appended to the end would narrow only the
+ * last. A group with nothing runnable in it yet gets no copy: that group
+ * is skipped today, and a lone scope clause would bring it to life.
+ */
+export function scopeFilters(filters, clause, cols) {
+  const fresh = () => Object.assign({}, clause, { id: nextQid("f"), linker: "AND" });
+  if (!filters.some((f, i) => i > 0 && f.linker === "OR")) {
+    const kept = filters.filter((f) => !(f.ci === clause.ci && RANGE_PREDS[f.pred] && !filterIssue(f, cols)));
+    return kept.concat(fresh());
+  }
+  const out = [];
+  let live = false;
+  const close = () => { if (live) out.push(fresh()); live = false; };
+  filters.forEach((f, i) => {
+    if (i > 0 && f.linker === "OR") close();
+    out.push(f);
+    if (!filterIssue(f, cols)) live = true;
+  });
+  close();
+  return out;
+}
+/**
+ * A click on a summary bar scopes the result to what that bar counted: a
+ * histogram bin to the smallest and largest value that fell in it, a
+ * top-values bar to that value, a true/false/null segment to that. `pick`
+ * is the bar's dataset: one of bin, top or bool. It goes in as an ordinary WHERE clause, so
+ * the zones, the SQL and the grid all move together, and taking it back
+ * out is the same × as any other filter.
+ */
+export function scopeToBar(viewIdx, pick) {
+  const view = state.view, table = state.table, q = state.query;
+  if (!view || !table || !q || view.agg) return;
+  const col = view.cols[viewIdx];
+  const ci = table.cols.indexOf(col);
+  if (!col || ci < 0) return;
+  let clause = null;
+  if (pick.bin != null) {
+    const b = binBounds(col, view.index, view.count, +pick.bin);
+    if (!b) return;
+    const lo = fmtValue(b.lo, col.spec), hi = fmtValue(b.hi, col.spec);
+    clause = lo === hi ? { ci, pred: "eq", value: lo, valueTo: "" } : { ci, pred: "between", value: lo, valueTo: hi };
+  } else if (pick.bool != null) {
+    clause = pick.bool === "null" ? { ci, pred: "null", value: "", valueTo: "" }
+      : { ci, pred: "eq", value: pick.bool, valueTo: "" };
+  } else if (pick.top != null) {
+    const top = col.summary && col.summary.top && col.summary.top[+pick.top];
+    /* an empty string is how a clause says "no value yet", so '' cannot be one */
+    if (!top || top[0] === "") return;
+    clause = { ci, pred: "eq", value: top[0], valueTo: "" };
+  } else return;
+  /* SQL being typed is adopted first, as Run would; if it does not parse,
+     the click is refused rather than overwriting it */
+  if (state.sqlDirty && !adoptSql(false)) return;
+  q.filters = scopeFilters(q.filters, clause, table.cols);
   renderQuery();
   runQuery();
 }
