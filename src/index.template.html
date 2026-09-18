@@ -260,6 +260,13 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .qb{font:10px var(--mono);padding:1px 5px;border:1px solid var(--line);border-radius:3px;background:var(--panel);
   color:var(--dim);font-weight:600;min-width:0}
 .qb.on{background:var(--accent);border-color:var(--accent);color:#fff}
+/* the METRICS row's "more": a wrapping flex child, so it sits to the right of
+   the row when there is room and drops onto its own line when there is not */
+.qmore{display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;margin-left:2px;
+  padding:2px 0 2px 8px;border-left:2px solid var(--line2)}
+.qmgroup{display:inline-flex;align-items:center;gap:4px}
+.qmlabel{font:9px var(--mono);color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+.qmore-btn{letter-spacing:.06em}
 .qlink{font:10px var(--mono);font-weight:700;color:var(--accent);background:none;border:1px solid var(--accent);
   border-radius:3px;padding:0 5px;width:36px}
 .qin{font:11px var(--mono);background:var(--panel);color:var(--ink);border:1px solid var(--line);

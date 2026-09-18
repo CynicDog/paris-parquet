@@ -65,7 +65,16 @@ them; `tools/sample-data.py` regenerates them.
   / `METRICS` (Aggregate mode), then Run.
 - Filters: `=` `≠` `<` `≤` `>` `≥` `LIKE` `BETWEEN` `IS NULL` `IS NOT NULL`,
   chained with AND/OR.
-- Aggregates: `COUNT`, `COUNT(DISTINCT)`, `SUM`, `AVG`, `MIN`, `MAX`.
+- Aggregates: `COUNT`, `COUNT(DISTINCT)`, `SUM`, `AVG`, `MIN`, `MAX` inline,
+  and twelve more behind the row's **⋯** — *spread*: `STD`, `STDP`, `VAR`,
+  `CV` (spread over level, so it compares columns of different units),
+  `RANGE`; *distribution*: `MED`, `P90`, `P95`, `P99`, `IQR`, `MODE` (which
+  reads strings and enums too); *missing*: `NULLS`, the rows `COUNT` skips.
+  Picking a hidden one pins it onto the button, so a closed row always says
+  what it computes. Spread is accumulated with Welford's method and merged
+  with Chan's, so a mean that dwarfs its own spread — epoch millis, prices
+  in a tight band — still reports the right standard deviation; percentiles
+  are exact rather than sketched, which costs memory in the group.
 - **Flat / pivot / rollup / cube** toggle appears once `GROUP BY` has a
   column. *Pivot* reshapes the result Excel-style — the last grouped
   column's values become new output columns. *Rollup* and *cube* add
@@ -259,8 +268,8 @@ query-engine cross-checks).
 `npm test` runs the unit tests under `src/*.test.js` — fast, each one
 exercising a single module directly through a real `import`, no file to
 decode (the SQL parser against malformed input, `aggregate`'s rollup/pivot/
-cube reshaping against hand-built columns, `clauseCanMatch`'s pushdown logic
-against hand-built statistics) — and then, if a fixture directory exists
+cube reshaping and its spread metrics against hand-built columns,
+`clauseCanMatch`'s pushdown logic against hand-built statistics) — and then, if a fixture directory exists
 (`python3 tools/fixtures.py /tmp/fx` first), the integration suite below,
 which exercises the *built* `index.html` end to end. Both matter: the unit
 tests catch a regression in one module in milliseconds; the integration
@@ -281,6 +290,7 @@ node tools/browser-push.mjs /tmp/fx/push      # drive the scan, and time it
 node tools/browser-lazy.mjs /tmp/fx/wide.parquet   # only decode what is wanted
 node tools/browser-workers.mjs /tmp/fx/*.parquet   # the other cores agree, cell for cell
 node tools/browser-tree.mjs /tmp/fx/push      # drive the folder tree, both backends, count requests
+node tools/browser-metrics.mjs /tmp/fx/a.parquet   # drive the METRICS row's "more", and the SQL it writes
 node tools/browser-join.mjs                   # drive a join from both pickers, chain one, check pushdown narrowed it, and undo
 ```
 

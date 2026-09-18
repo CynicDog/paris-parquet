@@ -1,7 +1,7 @@
 import { $ } from "./columns.js";
 import { drag } from "./main.js";
 import { runScan, updateScanButton } from "./pushdown.js";
-import { AGG_SHORT, AGGS, CUBE_MAX_COLS, filterIssue, NO_OPERAND, newQuery, nextQid, PREDS, parseSql, querySql, resetQuery, runQuery } from "./query.js";
+import { AGG_GROUPS, AGG_SHORT, AGG_TITLE, AGGS, CUBE_MAX_COLS, filterIssue, NO_OPERAND, newQuery, nextQid, PREDS, parseSql, querySql, resetQuery, runQuery } from "./query.js";
 import { renderRows } from "./ui-grid.js";
 import { esc, state } from "./view.js";
 
@@ -37,6 +37,40 @@ export function groupModeCtl(q) {
       "<button class='" + (q.groupMode === v ? "on" : "") + "' data-act='groupmode' data-v='" + v + "'>" + l + "</button>"
     ).join("") + "</span>";
 }
+/* Which metric rows have "more" open. UI state, not query state: what
+   newQuery() holds is what round-trips through the SQL box, and whether a
+   row is expanded has no business being in a query. */
+const metricsOpen = new Set();
+const aggBtn = (a, m) => "<button class='qb" + (m.agg === a ? " on" : "") + "' data-act='agg' data-id='" + m.id +
+  "' data-v='" + a + "' title='" + esc(AGG_TITLE[a] || "") + "'>" + AGG_SHORT[a] + "</button>";
+/**
+ * The six common aggregates stay inline, one click each, and the rest live
+ * behind a "more" button that widens the row to the right where there is
+ * room and wraps onto the next line where there is not -- .qrow already
+ * wraps, so no popover is needed and nothing can be clipped. When the
+ * chosen metric is one of the hidden ones, it is pinned onto the button
+ * itself, so a closed row never misstates what it computes.
+ */
+export function metricRow(m, name) {
+  const open = metricsOpen.has(m.id);
+  const pinned = AGGS.indexOf(m.agg) < 0 ? m.agg : null;
+  let btns = "";
+  for (const a of AGGS) btns += aggBtn(a, m);
+  btns += "<button class='qb qmore-btn" + (pinned || open ? " on" : "") + "' data-act='agg-more' data-id='" + m.id +
+    "' title='" + (open ? "fewer aggregates" : "standard deviation, percentiles, nulls and more") + "'>" +
+    (pinned ? esc(AGG_SHORT[pinned]) + " " : "") + (open ? "⌄" : "⋯") + "</button>";
+  let more = "";
+  if (open) {
+    more = "<div class='qmore'>" + AGG_GROUPS.map((g) =>
+      "<span class='qmgroup'><span class='qmlabel'>" + g.label + "</span><span class='qbtns'>" +
+      g.aggs.map((a) => aggBtn(a, m)).join("") + "</span></span>").join("") + "</div>";
+  }
+  return "<div class='qrow'><span class='qbtns'>" + btns + "</span><code>" + esc(name) + "</code>" +
+    "<input class='qin' data-in='alias' data-id='" + m.id + "' value='" + esc(m.alias || "") +
+    "' placeholder='alias' size='7'>" +
+    "<button class='qx' data-act='rm-metric' data-id='" + m.id + "'>×</button>" + more + "</div>";
+}
+
 export const chip = (text, act, id) => "<span class='qchip'>" + esc(text) +
   "<button class='qx' data-act='" + act + "' data-id='" + id + "'>×</button></span>";
 
@@ -57,17 +91,7 @@ export function renderZones() {
         "rm-group", ci)).join(""), q.groupBy.length === 0,
       groupModeCtl(q)));
     parts.push(zone("metrics", "METRICS", "Drop a column to aggregate it",
-      q.metrics.map((m) => {
-        let btns = "";
-        for (const a of AGGS) {
-          btns += "<button class='qb" + (m.agg === a ? " on" : "") + "' data-act='agg' data-id='" + m.id +
-            "' data-v='" + a + "'>" + AGG_SHORT[a] + "</button>";
-        }
-        return "<div class='qrow'><span class='qbtns'>" + btns + "</span><code>" + esc(nameOf(m.ci)) + "</code>" +
-          "<input class='qin' data-in='alias' data-id='" + m.id + "' value='" + esc(m.alias || "") +
-          "' placeholder='alias' size='7'>" +
-          "<button class='qx' data-act='rm-metric' data-id='" + m.id + "'>×</button></div>";
-      }).join(""), q.metrics.length === 0));
+      q.metrics.map((m) => metricRow(m, nameOf(m.ci))).join(""), q.metrics.length === 0));
   }
 
   parts.push(zone("where", "WHERE", "Drop a column to filter on it",
@@ -227,12 +251,14 @@ export function initQuery() {
         if (!q.groupBy.length) q.groupMode = "";
         break;
       case "groupmode": q.groupMode = b.dataset.v; break;
-      case "rm-metric": q.metrics = q.metrics.filter((m) => m.id !== id); break;
+      case "rm-metric": q.metrics = q.metrics.filter((m) => m.id !== id); metricsOpen.delete(id); break;
       case "rm-filter": q.filters = q.filters.filter((f) => f.id !== id); break;
       case "rm-sort": q.sort = q.sort.filter((s) => s.id !== id); break;
       case "pred": { const f = q.filters.find((x) => x.id === id); if (f) f.pred = b.dataset.v; break; }
       case "link": { const f = q.filters.find((x) => x.id === id); if (f) f.linker = f.linker === "OR" ? "AND" : "OR"; break; }
-      case "agg": { const m = q.metrics.find((x) => x.id === id); if (m) m.agg = b.dataset.v; break; }
+      /* picking one closes the row again, the same as picking one of the six */
+      case "agg": { const m = q.metrics.find((x) => x.id === id); if (m) m.agg = b.dataset.v; metricsOpen.delete(id); break; }
+      case "agg-more": { if (metricsOpen.has(id)) metricsOpen.delete(id); else metricsOpen.add(id); break; }
       case "dir": { const s = q.sort.find((x) => x.id === id); if (s) s.dir = s.dir === "ASC" ? "DESC" : "ASC"; break; }
       default: return;
     }

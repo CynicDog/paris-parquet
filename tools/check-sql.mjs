@@ -86,6 +86,15 @@ const states = [
       { id: "m6", ci: ix("ts"), agg: "MAX", alias: "last" },
     ];
   }],
+  ["group by, every spread and distribution metric", (q) => {
+    q.mode = "agg";
+    q.groupBy = [ix("cat")];
+    /* the ones written as more than one SQL call are the point here: they
+       have to read back out of the text they printed */
+    q.metrics = ["STD", "STDP", "VAR", "CV", "RANGE", "MED", "P90", "P95", "P99", "IQR", "NULLS"]
+      .map((agg, i) => ({ id: "m" + i, ci: ix("score"), agg, alias: "" }));
+    q.metrics.push({ id: "mm", ci: ix("name"), agg: "MODE", alias: "common" });
+  }],
   ["group, filter, order by a metric, limit", (q) => {
     q.mode = "agg";
     q.groupBy = [ix("cat")];
@@ -154,15 +163,16 @@ for (const sql of handWritten) {
   }
   const theirs = [];
   for (let r = 0; r < duck.rows; r++) theirs.push(duck.columns.map((c) => c.values[r]));
-  /* SUM and AVG over floats depend on summation order, so the last bit or two
-     may differ from duckdb's; everything else must match exactly. (Checked
-     against math.fsum: this engine's compensated sum is the exactly-rounded
-     one, and duckdb is the side that is 1 ulp out.) */
+  /* A metric that derives a float — a sum, a mean, a spread, a percentile —
+     depends on the order it accumulated in, so its last bit or two may differ
+     from duckdb's; everything else must match exactly. (Checked against
+     math.fsum: this engine's compensated sum is the exactly-rounded one, and
+     duckdb is the side that is 1 ulp out.) */
   const soft = view.cols.map((_c, i) => {
     const q2 = res.query;
     if (!q2 || q2.mode !== "agg") return false;
     const m = q2.metrics[i - q2.groupBy.length];
-    return !!m && (m.agg === "SUM" || m.agg === "AVG");
+    return !!m && !!PARIS.AGG_NUMERIC[m.agg];
   });
   const near = (a, b, i) => {
     if (a === b) return true;

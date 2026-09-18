@@ -119,7 +119,11 @@ function cases(cols) {
   /* aggregates */
   if (strs.length && nums.length) {
     const gs = strs[0][1], ci = nums[0][1];
-    for (const agg of ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MIN", "MAX"]) {
+    /* MODE is left out on purpose: duckdb does not define which value wins a
+       tie, so a fixture with two equally common values could disagree for a
+       reason that is not a bug */
+    for (const agg of ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MIN", "MAX",
+      "STD", "STDP", "VAR", "CV", "RANGE", "MED", "P90", "P95", "P99", "IQR", "NULLS"]) {
       q("group by + " + agg, (x) => {
         x.mode = "agg";
         x.groupBy = [gs];
@@ -207,12 +211,13 @@ async function checkFile(file) {
     }
     const theirs = [];
     for (let r = 0; r < duck.rows; r++) theirs.push(duck.columns.map((c2) => c2.values[r]));
-    /* SUM and AVG over floats depend on summation order, so their last bit or
-       two may differ from duckdb's; everything else must match exactly. */
+    /* A metric that derives a float — a sum, a mean, a spread, a percentile —
+       depends on the order it accumulated in, so its last bit or two may differ
+       from duckdb's. Counts, MIN/MAX and NULLS must match exactly. */
     const soft = view.cols.map((_c, i) => {
       if (q.mode !== "agg") return false;
       const m = q.metrics[i - q.groupBy.length];
-      return !!m && (m.agg === "SUM" || m.agg === "AVG");
+      return !!m && !!PARIS.AGG_NUMERIC[m.agg];
     });
     const near = (a, b, j) => {
       if (a === b) return true;

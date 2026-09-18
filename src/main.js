@@ -5,7 +5,7 @@ import { cellEq, cellKey, colShape, columnStats, datasetShape, diff, initDiff, o
 import { assemble, intersectRanges, mergeRanges, rangeCount, readColumnChunk, readColumnIndex, readOffsetIndex, readPage, readRowsRanges, unionRanges } from "./encoding.js";
 import { initJoin, join, openJoinCompare } from "./join.js";
 import { bloomBytes, bloomHas, chunkBounds, clauseCanMatch, clauseGroups, clauseRanges, planReport, planScan, readBloom, showPlan, xxh64 } from "./pushdown.js";
-import { aggregate, compileFilter, newQuery, parseSql, querySql, runQuery, scopeToBar, sqlTokenize, toggleSort } from "./query.js";
+import { AGG_NUMERIC, aggregate, compileFilter, newQuery, parseSql, querySql, runQuery, scopeToBar, sqlTokenize, toggleSort } from "./query.js";
 import { readFooter } from "./thrift.js";
 import { fmtValue, summarize, typeSpec } from "./types.js";
 import { closeInspector, initPicker, openInspector, refreshView, renderRows } from "./ui-grid.js";
@@ -411,7 +411,7 @@ if (typeof document === "undefined" && typeof self !== "undefined" && typeof imp
 export const HOST = typeof window !== "undefined" ? window : (typeof self !== "undefined" ? self : null);
 if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, summarize, assemble, fmtValue, decompress,
   hivePartition, isParquetPath, entriesFromFiles,
-  runQuery, querySql, parseSql, sqlTokenize, adoptSql,
+  runQuery, querySql, parseSql, sqlTokenize, adoptSql, AGG_NUMERIC,
   baseView, setView, compileFilter, aggregate, exportParts, viewValue,
   displayCols, newDisplay, refreshView,
   diff, schemaDiff, datasetShape, columnStats, rowDiff, suggestKey, cellEq, cellKey, colShape,

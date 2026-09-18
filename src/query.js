@@ -17,9 +17,62 @@ export const PREDS = [
   { id: "notnull", label: "!NULL", sql: "IS NOT NULL" },
 ];
 export const NO_OPERAND = { null: 1, notnull: 1 };
+/* The six that answer "how much" and "how big" stay inline in the METRICS
+   row; the ones that answer "how spread out" and "how much is missing" sit
+   behind the row's "more" button. A metric's `agg` is one of these short
+   names, and AGG_FN/AGG_COMPOSITE turn one into the SQL it means. */
 export const AGGS = ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MIN", "MAX"];
-export const AGG_SHORT = { COUNT: "COUNT", COUNT_DISTINCT: "CNTD", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "MAX" };
-export const AGG_BY_NAME = { COUNT: "COUNT", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "MAX" };
+export const AGG_GROUPS = [
+  { label: "spread", aggs: ["STD", "STDP", "VAR", "CV", "RANGE"] },
+  { label: "distribution", aggs: ["MED", "P90", "P95", "P99", "IQR", "MODE"] },
+  { label: "missing", aggs: ["NULLS"] },
+];
+export const AGG_MORE = AGG_GROUPS.reduce((a, g) => a.concat(g.aggs), []);
+export const AGG_SHORT = {
+  COUNT: "COUNT", COUNT_DISTINCT: "CNTD", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "MAX",
+  STD: "STD", STDP: "STDP", VAR: "VAR", CV: "CV", RANGE: "RANGE",
+  MED: "MED", P90: "P90", P95: "P95", P99: "P99", IQR: "IQR", MODE: "MODE", NULLS: "NULLS",
+};
+export const AGG_TITLE = {
+  COUNT: "rows with a value", COUNT_DISTINCT: "distinct values", SUM: "total", AVG: "mean",
+  MIN: "smallest", MAX: "largest",
+  STD: "standard deviation (sample, n\u22121)", STDP: "standard deviation (population, n)",
+  VAR: "variance (sample, n\u22121)", CV: "coefficient of variation \u2014 std \u00f7 |mean|, unitless",
+  RANGE: "max \u2212 min", MED: "median", P90: "90th percentile", P95: "95th percentile",
+  P99: "99th percentile", IQR: "interquartile range \u2014 p75 \u2212 p25", MODE: "most common value",
+  NULLS: "rows with no value",
+};
+/** The kinds that only mean something over a column that reads as a number. */
+export const AGG_NUMERIC = { SUM: 1, AVG: 1, STD: 1, STDP: 1, VAR: 1, CV: 1, RANGE: 1, MED: 1, P90: 1, P95: 1, P99: 1, IQR: 1 };
+/** kind -> the SQL function that says it, where one call is enough. */
+export const AGG_FN = { STD: "STDDEV_SAMP", STDP: "STDDEV_POP", VAR: "VAR_SAMP", MED: "MEDIAN", MODE: "MODE" };
+/**
+ * kind -> the SQL it takes more than one call to say, with `#` for the
+ * column. The SQL box writes these and reads them back from this same
+ * string, so the two directions cannot drift apart.
+ */
+export const AGG_COMPOSITE = {
+  NULLS: "COUNT(*) - COUNT(#)",
+  RANGE: "MAX(#) - MIN(#)",
+  CV: "STDDEV_SAMP(#) / ABS(AVG(#))",
+  IQR: "QUANTILE_CONT(#, 0.75) - QUANTILE_CONT(#, 0.25)",
+  P90: "QUANTILE_CONT(#, 0.9)",
+  P95: "QUANTILE_CONT(#, 0.95)",
+  P99: "QUANTILE_CONT(#, 0.99)",
+};
+/** Every SQL spelling the parser accepts, mapped onto one internal kind. */
+export const AGG_BY_NAME = {
+  COUNT: "COUNT", SUM: "SUM", AVG: "AVG", MIN: "MIN", MAX: "MAX", MEDIAN: "MED", MODE: "MODE",
+  STDDEV_SAMP: "STD", STDDEV: "STD", STDEV: "STD", STDEV_SAMP: "STD",
+  STDDEV_POP: "STDP", STDEVP: "STDP", STDEV_POP: "STDP",
+  VAR_SAMP: "VAR", VARIANCE: "VAR", VAR: "VAR",
+};
+/** The SQL for one metric over one already-quoted column expression. */
+export function aggSqlExpr(kind, inner) {
+  if (kind === "COUNT_DISTINCT") return "COUNT(DISTINCT " + inner + ")";
+  const t = AGG_COMPOSITE[kind];
+  return t ? t.replace(/#/g, inner) : (AGG_FN[kind] || kind) + "(" + inner + ")";
+}
 let qid = 0;
 /** Ids for the builder's own chips: unique per page load, nothing more. */
 export function nextQid(prefix) {
@@ -198,64 +251,154 @@ export function groupingSets(k, mode) {
   return [full];
 }
 
+/**
+ * One group's running state for one metric. Every field is here rather than
+ * per kind so a group is one object shape, but the containers stay null
+ * until a metric that needs them turns up -- the way COUNT(DISTINCT)'s set
+ * always has.
+ */
+export function newAcc() {
+  return { t: 0, n: 0, sum: 0, c: 0, k: 0, mean: 0, m2: 0, lo: Infinity, hi: -Infinity,
+    min: null, max: null, set: null, vals: null, freq: null, sorted: false };
+}
+/** What a kind has to keep per group, worked out once per kind, not per row. */
+const ACC_NEEDS = {};
+export function accNeeds(kind) {
+  let f = ACC_NEEDS[kind];
+  if (!f) {
+    f = {
+      sum: kind === "SUM" || kind === "AVG",
+      stat: kind === "STD" || kind === "STDP" || kind === "VAR" || kind === "CV",
+      span: kind === "RANGE",
+      vals: kind === "MED" || kind === "IQR" || kind === "P90" || kind === "P95" || kind === "P99",
+      set: kind === "COUNT_DISTINCT",
+      freq: kind === "MODE",
+      minmax: kind === "MIN" || kind === "MAX",
+    };
+    f.num = f.sum || f.stat || f.span || f.vals;
+    ACC_NEEDS[kind] = f;
+  }
+  return f;
+}
+/* Neumaier summation: adding a million doubles naively drifts, and the lost
+   low bits are exactly what a mean is made of */
+function addSum(a, x) {
+  const t = a.sum + x;
+  a.c += Math.abs(a.sum) >= Math.abs(x) ? (a.sum - t) + x : (x - t) + a.sum;
+  a.sum = t;
+}
+
 export function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n) {
   const groups = new Map();
   const total = index ? index.length : n;
+  const needs = metrics.map((m) => accNeeds(m.agg));
+  /* one comparator per metric, built here rather than per row */
+  const less = metrics.map((_m, i) => (mKeys[i]
+    ? (x, y) => lessThan(x, y)
+    : (x, y) => String(textOf(x, mSpecs[i])) < String(textOf(y, mSpecs[i]))));
   for (let i = 0; i < total; i++) {
     const r = index ? index[i] : i;
     let key = "";
     for (const g of positions) key += keyPart(gRows[g][r]) + "\u0001";
     let acc = groups.get(key);
     if (!acc) {
-      acc = { row: r, m: metrics.map(() => ({ n: 0, sum: 0, c: 0, min: null, max: null, set: null })) };
+      acc = { row: r, m: metrics.map(newAcc) };
       groups.set(key, acc);
     }
     for (let m = 0; m < metrics.length; m++) {
+      const a = acc.m[m];
+      a.t++;                          /* rows in the group; NULLS is t minus n */
       const v = mRows[m][r];
       if (v === null || v === undefined) continue;
-      const a = acc.m[m];
       a.n++;
-      const kind = metrics[m].agg;
-      if (kind === "SUM" || kind === "AVG") {
+      const f = needs[m];
+      if (f.num) {
         const x = mKeys[m] ? mKeys[m](v) : NaN;
         if (x === x) {
-          /* Neumaier summation: adding a million doubles naively drifts, and
-             the lost low bits are exactly what a mean is made of */
-          const t = a.sum + x;
-          a.c += Math.abs(a.sum) >= Math.abs(x) ? (a.sum - t) + x : (x - t) + a.sum;
-          a.sum = t;
+          a.k++;
+          if (f.sum) addSum(a, x);
+          if (f.stat) {
+            /* Welford. The textbook E[x^2] - E[x]^2 cancels catastrophically
+               when the mean dwarfs the spread -- epoch millis, prices in a
+               tight band -- and can come out negative. This is the same one
+               pass and the same constant memory, and it stays right. */
+            const d = x - a.mean;
+            a.mean += d / a.k;
+            a.m2 += d * (x - a.mean);
+          }
+          if (f.span) { if (x < a.lo) a.lo = x; if (x > a.hi) a.hi = x; }
+          if (f.vals) { if (!a.vals) a.vals = []; a.vals.push(x); }
         }
       }
-      else if (kind === "COUNT_DISTINCT") {
-        if (!a.set) a.set = new Set();
-        a.set.add(keyPart(v));
+      else if (f.set) { if (!a.set) a.set = new Set(); a.set.add(keyPart(v)); }
+      else if (f.freq) {
+        if (!a.freq) a.freq = new Map();
+        const fk = keyPart(v), hit = a.freq.get(fk);
+        if (hit) hit.c++; else a.freq.set(fk, { v, c: 1 });
       }
-      else if (kind === "MIN" || kind === "MAX") {
-        const cmpLess = mKeys[m]
-          ? (x, y) => lessThan(x, y)
-          : (x, y) => String(textOf(x, mSpecs[m])) < String(textOf(y, mSpecs[m]));
-        if (a.min === null || cmpLess(v, a.min)) a.min = v;
-        if (a.max === null || cmpLess(a.max, v)) a.max = v;
+      else if (f.minmax) {
+        if (a.min === null || less[m](v, a.min)) a.min = v;
+        if (a.max === null || less[m](a.max, v)) a.max = v;
       }
     }
   }
   return groups;
 }
+/**
+ * An exact quantile, linearly interpolated between the two values it falls
+ * between -- what duckdb's QUANTILE_CONT and numpy's percentile both give.
+ * Exact means the values are kept, so a percentile metric costs memory in
+ * the group that a streaming one does not.
+ */
+export function quantileOf(a, p) {
+  const v = a.vals;
+  if (!v || !v.length) return null;
+  if (!a.sorted) { v.sort((x, y) => x - y); a.sorted = true; }
+  const h = (v.length - 1) * p, lo = Math.floor(h), d = h - lo;
+  return d ? v[lo] + (v[lo + 1] - v[lo]) * d : v[lo];
+}
 export function metricValue(m, kind) {
-  if (kind === "COUNT") return m.n;
-  if (kind === "COUNT_DISTINCT") return m.set ? m.set.size : 0;
-  if (kind === "SUM") return m.n ? m.sum + m.c : null;
-  if (kind === "AVG") return m.n ? (m.sum + m.c) / m.n : null;
-  if (kind === "MIN") return m.min;
-  if (kind === "MAX") return m.max;
-  return null;
+  switch (kind) {
+    case "COUNT": return m.n;
+    case "COUNT_DISTINCT": return m.set ? m.set.size : 0;
+    case "NULLS": return m.t - m.n;
+    case "SUM": return m.n ? m.sum + m.c : null;
+    case "AVG": return m.n ? (m.sum + m.c) / m.n : null;
+    case "MIN": return m.min;
+    case "MAX": return m.max;
+    case "RANGE": return m.k ? m.hi - m.lo : null;
+    /* m2 is a sum of squares and cannot really be negative; rounding can
+       still leave it a hair below zero on a constant column */
+    case "STD": return m.k > 1 ? Math.sqrt(Math.max(0, m.m2 / (m.k - 1))) : null;
+    case "STDP": return m.k ? Math.sqrt(Math.max(0, m.m2 / m.k)) : null;
+    case "VAR": return m.k > 1 ? Math.max(0, m.m2 / (m.k - 1)) : null;
+    /* spread divided by level: unitless, so it is the one metric that
+       compares columns which have no business being compared in their own
+       units. Undefined at a mean of zero, where it would divide by it. */
+    case "CV": return m.k > 1 && m.mean !== 0 ? Math.sqrt(Math.max(0, m.m2 / (m.k - 1))) / Math.abs(m.mean) : null;
+    case "MED": return quantileOf(m, 0.5);
+    case "P90": return quantileOf(m, 0.9);
+    case "P95": return quantileOf(m, 0.95);
+    case "P99": return quantileOf(m, 0.99);
+    case "IQR": { const a = quantileOf(m, 0.25); return a === null ? null : quantileOf(m, 0.75) - a; }
+    case "MODE": {
+      if (!m.freq) return null;
+      let best = null;                          /* ties go to the first seen */
+      for (const e of m.freq.values()) if (!best || e.c > best.c) best = e;
+      return best ? best.v : null;
+    }
+    default: return null;
+  }
 }
 export const AGG_COUNT_SPEC = { kind: "number", label: "count", physical: "INT64", convert: (v) => v };
 export function metricSpec(m, cols) {
   const src = cols[m.ci];
-  const isCount = m.agg === "COUNT" || m.agg === "COUNT_DISTINCT";
-  const keeps = m.agg === "MIN" || m.agg === "MAX";
-  return isCount ? AGG_COUNT_SPEC : keeps ? src.spec : { kind: "number", label: m.agg.toLowerCase(), physical: src.spec.physical, convert: (v) => v };
+  const counts = m.agg === "COUNT" || m.agg === "COUNT_DISTINCT" || m.agg === "NULLS";
+  /* MIN/MAX/MODE hand back a value the column really holds, so they keep its
+     type; everything else is a derived number, and one that has left the
+     column's units behind -- STD of a timestamp is a duration, not a date */
+  const keeps = m.agg === "MIN" || m.agg === "MAX" || m.agg === "MODE";
+  return counts ? AGG_COUNT_SPEC : keeps ? src.spec : { kind: "number", label: m.agg.toLowerCase(), physical: src.spec.physical, convert: (v) => v };
 }
 export function metricName(m, cols) { return m.alias || AGG_SHORT[m.agg] + "(" + cols[m.ci].name + ")"; }
 
@@ -303,18 +446,35 @@ export function aggregate(q, cols, index, n) {
 export const PIVOT_MAX_COLS = 50;
 export function mergeAcc(target, acc, metrics, mKeys, mSpecs) {
   for (let mi = 0; mi < metrics.length; mi++) {
-    const a = acc.m[mi], o = target[mi], kind = metrics[mi].agg;
+    const a = acc.m[mi], o = target[mi], f = accNeeds(metrics[mi].agg);
+    o.t += a.t;
     o.n += a.n;
-    if (kind === "SUM" || kind === "AVG") {
-      const x = a.n ? a.sum + a.c : NaN;
-      if (x === x) {
-        const t = o.sum + x;
-        o.c += Math.abs(o.sum) >= Math.abs(x) ? (o.sum - t) + x : (x - t) + o.sum;
-        o.sum = t;
+    if (f.sum) { const x = a.n ? a.sum + a.c : NaN; if (x === x) addSum(o, x); }
+    if (f.stat) {
+      /* Chan's parallel form: two Welford states combine exactly, which is
+         what lets a pivot merge partial groups instead of rescanning them */
+      if (a.k) {
+        const k = o.k + a.k, d = a.mean - o.mean;
+        o.m2 += a.m2 + d * d * ((o.k * a.k) / k);
+        o.mean += d * (a.k / k);
+        o.k = k;
       }
-    } else if (kind === "COUNT_DISTINCT") {
-      if (a.set) { if (!o.set) o.set = new Set(); for (const v of a.set) o.set.add(v); }
-    } else if (kind === "MIN" || kind === "MAX") {
+    } else o.k += a.k;
+    if (f.span) { if (a.lo < o.lo) o.lo = a.lo; if (a.hi > o.hi) o.hi = a.hi; }
+    if (f.vals && a.vals) {
+      if (!o.vals) o.vals = [];
+      for (let i = 0; i < a.vals.length; i++) o.vals.push(a.vals[i]);
+      o.sorted = false;
+    }
+    if (f.set && a.set) { if (!o.set) o.set = new Set(); for (const v of a.set) o.set.add(v); }
+    if (f.freq && a.freq) {
+      if (!o.freq) o.freq = new Map();
+      for (const [fk, e] of a.freq) {
+        const hit = o.freq.get(fk);
+        if (hit) hit.c += e.c; else o.freq.set(fk, { v: e.v, c: e.c });
+      }
+    }
+    if (f.minmax) {
       const cmpLess = mKeys[mi]
         ? (x, y) => lessThan(x, y)
         : (x, y) => String(textOf(x, mSpecs[mi])) < String(textOf(y, mSpecs[mi]));
@@ -363,7 +523,7 @@ export function pivotTable(q, cols, index, n) {
     if (known) rec.cells.set(pk, acc);
     else {
       overflow = true;
-      if (!rec.other) rec.other = metrics.map(() => ({ n: 0, sum: 0, c: 0, min: null, max: null, set: null }));
+      if (!rec.other) rec.other = metrics.map(newAcc);
       mergeAcc(rec.other, acc, metrics, mKeys, mSpecs);
     }
   }
@@ -665,7 +825,7 @@ export function querySql() {
     for (const m of q.metrics) {
       if (!cols[m.ci]) continue;
       const inner = sqlIdent(cols[m.ci].name);
-      const fn = m.agg === "COUNT_DISTINCT" ? "COUNT(DISTINCT " + inner + ")" : m.agg + "(" + inner + ")";
+      const fn = aggSqlExpr(m.agg, inner);
       sel.push(m.alias ? fn + " AS " + sqlIdent(m.alias) : fn);
     }
     lines.push("SELECT " + (sel.length ? sel.join(",\n       ") : "*"));
@@ -708,8 +868,7 @@ export function querySql() {
     const m = st.mid ? q.metrics.find((x) => x.id === st.mid) : q.metrics.find((x) => x.ci === st.ci);
     if (m) {
       const inner = sqlIdent(col.name);
-      order.push((m.alias ? sqlIdent(m.alias)
-        : m.agg === "COUNT_DISTINCT" ? "COUNT(DISTINCT " + inner + ")" : m.agg + "(" + inner + ")") + " " + st.dir);
+      order.push((m.alias ? sqlIdent(m.alias) : aggSqlExpr(m.agg, inner)) + " " + st.dir);
     }
   }
   if (order.length) lines.push("ORDER BY " + order.join(", "));
@@ -747,6 +906,15 @@ export function sqlTokenize(text) {
   }
   out.push({ t: "end", v: "", at: text.length, raw: "" });
   return out;
+}
+
+/* A composite metric is more than one SQL call, so it is read back by
+   matching the very template the writer printed from, token for token. */
+const COMPOSITE_TOKS = {};
+export function compositeToks(kind) {
+  let t = COMPOSITE_TOKS[kind];
+  if (!t) { t = sqlTokenize(AGG_COMPOSITE[kind]).slice(0, -1); COMPOSITE_TOKS[kind] = t; }
+  return t;
 }
 
 /** Cheap edit distance, only used to suggest a column the user meant. */
@@ -808,6 +976,47 @@ export function parseSql(text, cols) {
     return -1;
   };
 
+  /* resolve() reports what it cannot find; matching a template has to be
+     able to fail without saying anything, because the next template may fit */
+  const lookup = (tok) => {
+    if (tok.t !== "name") return -1;
+    const i = names.indexOf(tok.v);
+    if (i >= 0) return i;
+    const lower = tok.v.toLowerCase();
+    let hit = -1, seen = 0;
+    for (let k = 0; k < names.length; k++) if (names[k].toLowerCase() === lower) { hit = k; seen++; }
+    return seen === 1 ? hit : -1;
+  };
+  /** The composite metric starting here, consumed, or null and nothing moved. */
+  const matchComposite = () => {
+    for (const kind of Object.keys(AGG_COMPOSITE)) {
+      const tpl = compositeToks(kind);
+      let i = p, ci = -1, ok = true;
+      for (const want of tpl) {
+        const got = tokAt(i);
+        if (want.t === "op" && want.v === "#") {        /* the column, the same one each time */
+          const at = lookup(got);
+          if (at < 0 || (ci >= 0 && at !== ci)) { ok = false; break; }
+          ci = at;
+        } else if (got.t !== want.t || String(got.v).toUpperCase() !== String(want.v).toUpperCase()) {
+          ok = false;
+          break;
+        }
+        i++;
+      }
+      if (ok && ci >= 0) { const tok = peek(); p = i; return { kind, ci, tok }; }
+    }
+    return null;
+  };
+  const eatAlias = () => {
+    if (eatKw("AS")) {
+      if (peek().t === "name") return (step(), tokAt(p - 1)).v;
+      fail("expected a name after AS");
+      return "";
+    }
+    return peek().t === "name" ? (step(), tokAt(p - 1)).v : "";
+  };
+
   const q = { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], groupMode: "", metrics: [], limit: null };
   let starSelect = false;
   const selectAggs = [];      /* {ci, agg, alias, tok} */
@@ -819,24 +1028,26 @@ export function parseSql(text, cols) {
     if (eatOp("*")) { starSelect = true; }
     else if (peek().t === "kw" && AGG_BY_NAME[peek().v]) { fail("unexpected keyword " + peek().v); p++; }
     else if (peek().t === "name" && tokAt(p + 1) && tokAt(p + 1).t === "op" && tokAt(p + 1).v === "(") {
-      const fnTok = peek();
-      const fn = fnTok.v.toUpperCase();
-      step(); step();
-      let agg = null;
-      if (fn === "COUNT" && isKw("DISTINCT")) { p++; agg = "COUNT_DISTINCT"; }
-      else if (AGG_BY_NAME[fn]) agg = AGG_BY_NAME[fn];
-      else fail(fn + "() is not one of COUNT, SUM, AVG, MIN, MAX", fnTok);
-      let ci = -1;
-      if (eatOp("*")) {
-        if (agg !== "COUNT") fail("only COUNT(*) may take a star", fnTok);
-        ci = 0;                                        /* COUNT(*) counts rows */
-      } else if (peek().t === "name") ci = resolve((step(), tokAt(p - 1)));
-      else fail("expected a column inside " + fn + "()");
-      if (!eatOp(")")) fail("expected )");
-      let alias = "";
-      if (eatKw("AS")) { if (peek().t === "name") alias = (step(), tokAt(p - 1)).v; else fail("expected a name after AS"); }
-      else if (peek().t === "name") alias = (step(), tokAt(p - 1)).v;
-      if (agg && ci >= 0) selectAggs.push({ ci, agg, alias, tok: fnTok });
+      const comp = matchComposite();
+      if (comp) selectAggs.push({ ci: comp.ci, agg: comp.kind, alias: eatAlias(), tok: comp.tok });
+      else {
+        const fnTok = peek();
+        const fn = fnTok.v.toUpperCase();
+        step(); step();
+        let agg = null;
+        if (fn === "COUNT" && isKw("DISTINCT")) { p++; agg = "COUNT_DISTINCT"; }
+        else if (AGG_BY_NAME[fn]) agg = AGG_BY_NAME[fn];
+        else fail(fn + "() is not one of COUNT, SUM, AVG, MIN, MAX, MEDIAN, MODE, STDDEV_SAMP/POP, VAR_SAMP or QUANTILE_CONT", fnTok);
+        let ci = -1;
+        if (eatOp("*")) {
+          if (agg !== "COUNT") fail("only COUNT(*) may take a star", fnTok);
+          ci = 0;                                      /* COUNT(*) counts rows */
+        } else if (peek().t === "name") ci = resolve((step(), tokAt(p - 1)));
+        else fail("expected a column inside " + fn + "()");
+        if (!eatOp(")")) fail("expected )");
+        const alias = eatAlias();
+        if (agg && ci >= 0) selectAggs.push({ ci, agg, alias, tok: fnTok });
+      }
     } else if (peek().t === "name") {
       const tok = (step(), tokAt(p - 1));
       const ci = resolve(tok);
@@ -1033,16 +1244,21 @@ export function parseSql(text, cols) {
       if (t.t === "name" && tokAt(p + 1) && tokAt(p + 1).t === "op" && tokAt(p + 1).v === "(") {
         /* ORDER BY COUNT(x) — match it to the metric that produces it */
         const fnTok = toks[p];
-        const fn = fnTok.v.toUpperCase();
-        step(); step();
-        const distinct = fn === "COUNT" && isKw("DISTINCT") ? (p++, true) : false;
-        const kind = distinct ? "COUNT_DISTINCT" : AGG_BY_NAME[fn];
-        let ci = -1;
-        if (eatOp("*")) ci = 0; else if (peek().t === "name") ci = resolve((step(), tokAt(p - 1)));
-        if (!eatOp(")")) fail("expected )");
+        const comp = matchComposite();
+        let kind = null, ci = -1, shown = "";
+        if (comp) { kind = comp.kind; ci = comp.ci; shown = AGG_SHORT[kind]; }
+        else {
+          const fn = fnTok.v.toUpperCase();
+          shown = fn + "(...)";
+          step(); step();
+          const distinct = fn === "COUNT" && isKw("DISTINCT") ? (p++, true) : false;
+          kind = distinct ? "COUNT_DISTINCT" : AGG_BY_NAME[fn];
+          if (eatOp("*")) ci = 0; else if (peek().t === "name") ci = resolve((step(), tokAt(p - 1)));
+          if (!eatOp(")")) fail("expected )");
+        }
         const m = q.metrics.find((x) => x.ci === ci && x.agg === kind);
         if (m) entry = { id: nextQid("s"), ci: m.ci, mid: m.id, dir: "ASC" };
-        else fail("ORDER BY " + fn + "(...) does not match anything selected", fnTok);
+        else fail("ORDER BY " + shown + " does not match anything selected", fnTok);
       } else if (t.t === "name") {
         step();
         const alias = q.metrics.find((m) => m.alias && m.alias === t.v);
@@ -1083,7 +1299,7 @@ export function parseSql(text, cols) {
   }
   for (const m of q.metrics) {
     const col = cols[m.ci];
-    if ((m.agg === "SUM" || m.agg === "AVG") && col && col.spec.kind !== "number") {
+    if (AGG_NUMERIC[m.agg] && col && col.spec.kind !== "number") {
       warnings.push({ msg: m.agg + "(" + col.name + ") over a " + col.spec.label + " column yields nothing", at: 0 });
     }
   }
