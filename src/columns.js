@@ -1,3 +1,7 @@
+// Column-chunk loading: reads row groups into `table.cols` incrementally
+// (via `loadMore`), catches columns up that were skipped earlier (via
+// `fillColumns`), and tracks how much of the dataset is left to read.
+
 import { becomesText, sniffUtf8 } from "./dataset.js";
 import { assemble, rangeCount, readColumnChunk, readRowsRanges } from "./encoding.js";
 import { chunkFor, groupSource, pool, poolWorthIt, readGroupBytes, workerCan, workerColumn } from "./workers.js";

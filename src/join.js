@@ -1,3 +1,9 @@
+// The Join panel: builds a hash join between the open table and a second
+// file on one equality key, materializing the result in memory as a table
+// the rest of the app treats like any other. See the `join` doc below for
+// the constraints (one join at a time, inner only) and `runJoin` for the
+// build/probe side selection and row-group narrowing.
+
 import { $, loadMore } from "./columns.js";
 import { newTable, readDataset } from "./dataset.js";
 import { diff, showDiff } from "./diff.js";

@@ -1,3 +1,7 @@
+// Dataset assembly: reads every part's footer, reconciles files into one
+// column list (union of leaves, Hive partition columns folded in, real
+// schema conflicts rejected), and builds the empty `table` a view loads into.
+
 import { utf8 } from "./bytes.js";
 import { readColumnChunk } from "./encoding.js";
 import { readFooter } from "./thrift.js";

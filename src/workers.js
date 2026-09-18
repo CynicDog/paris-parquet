@@ -1,3 +1,9 @@
+// Web Worker pool for decoding column chunks off the main thread: sizing and
+// dispatch on the main-thread side (`poolStart`, `workerColumn`, the
+// worth-it heuristics), and `workerMain` — the same file, running as a
+// worker — which decodes a chunk and hands values back as a transferable
+// buffer wherever it can.
+
 import { becomesText } from "./dataset.js";
 import { assemble, readColumnChunk, readRowsRanges } from "./encoding.js";
 import { typeSpec } from "./types.js";
@@ -248,10 +254,3 @@ export function workerMain(scope) {
     }
   };
 }
-
-/**
- * Decodes one column for one row group, or for the selection of rows a plan
- * narrowed it to. The row group is read the same way whether this happens
- * while the group is first read or long afterwards, which is what lets a
- * column be filled in later without re-reading anything else.
- */

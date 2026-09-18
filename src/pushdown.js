@@ -1,3 +1,8 @@
+// Predicate pushdown: turns a query's WHERE clause into a plan of which row
+// groups (and, within a group, which page ranges) could hold a matching row,
+// using footer statistics, page indexes, and bloom filters (with its own
+// xxh64) before `runScan` rebuilds the table from only what survived.
+
 import { Cursor } from "./bytes.js";
 import { $, loadMore } from "./columns.js";
 import { newTable } from "./dataset.js";
@@ -159,7 +164,6 @@ export function partitionCanMatch(f, col, value) {
   return !test || test(0);
 }
 
-/* ------------------------------------------------------- bloom filters */
 /* xxh64, which is the only hash parquet's bloom filters use. BigInt keeps
    the 64-bit arithmetic honest; one small value is hashed per clause per
    row group, so its cost never shows. */
@@ -264,7 +268,6 @@ export function bloomBytes(f, col) {
   return b;
 }
 
-/* ------------------------------------------------------------ the plan */
 /**
  * Walks every row group and decides, from the footer alone plus any bloom
  * filters, which ones could hold a matching row. Returns null when there
@@ -410,7 +413,6 @@ export function planReport(plan) {
     " in " + num(plan.ms) + " ms";
 }
 
-/* ---------------------------------------------------------- the scan */
 /**
  * Plans, then rebuilds the table from only the row groups that survived,
  * then runs the query over them. The answer is the same as reading the
@@ -481,11 +483,3 @@ export function updateScanButton() {
   b.disabled = !has || groups < 2;
   b.classList.toggle("on", !!(t && t.scan));
 }
-
-
-/**
- * What makes two columns of the same name the same column. The spec label
- * carries the logical type in full ("decimal(9,2)", "timestamp[millis, UTC]"),
- * so it says more than the physical type on its own. The utf-8 note is a
- * sniffing result rather than a property of the file, so it is not compared.
- */

@@ -1,3 +1,8 @@
+// The folder tree panel: browses a granted live directory
+// (showDirectoryPicker), a picked snapshot (webkitdirectory), or the
+// session's own list of files seen so far, and doubles as the file list
+// for picking the join panel's side B.
+
 import { $ } from "./columns.js";
 import { fileSource, isParquetPath } from "./dataset.js";
 import { join, joined, joinedAsB, joinHooks, openJoinCompare, openJoined } from "./join.js";

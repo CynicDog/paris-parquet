@@ -1,3 +1,9 @@
+// The query engine: predicate/metric vocabulary, filter compilation, value
+// parsing and comparison, row-mode sorting, group-by aggregation (including
+// cube grouping sets and pivot), and the SQL text this all round-trips
+// through — `querySql()` writes it from the query object, `parseSql()`
+// reads it back. `runQuery()` ties it together against the loaded rows.
+
 import { $ } from "./columns.js";
 import { showPlan, unscan, updateScanButton } from "./pushdown.js";
 import { binBounds, fmtValue, lessThan, numeric } from "./types.js";
@@ -84,7 +90,6 @@ export function newQuery() {
   return { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], groupMode: "", metrics: [], limit: null };
 }
 
-/* -------------------------------------------------------- value parsing */
 export function parseTemporal(text, spec) {
   const t = text.trim();
   if (/^-?\d+(\.\d+)?$/.test(t)) return parseFloat(t);          /* raw epoch millis */
@@ -118,7 +123,6 @@ export function textOf(v, spec) {
   return spec.kind === "string" ? v : fmtValue(v, spec);
 }
 
-/* ------------------------------------------------------------- filtering */
 /** Compiles one clause into a row test, or null if it is not filled in yet. */
 export function compileFilter(f, cols) {
   const col = cols[f.ci];
@@ -222,7 +226,6 @@ export function buildComparator(sorts, cols) {
   };
 }
 
-/* ------------------------------------------------------------ aggregates */
 /* a group key joins its parts with U+0001 and writes null as U+0000, so no
    two group values can collide by running into each other */
 export const keyPart = (v) => (v === null || v === undefined ? "\u0000" : typeof v === "object" ? JSON.stringify(v) : String(v));
@@ -436,7 +439,6 @@ export function aggregate(q, cols, index, n) {
   return outCols;
 }
 
-/* ------------------------------------------------------------- pivot */
 /* Excel-style reshape: the last GROUP BY column's own distinct values
    become new output columns instead of a row of their own, and every
    other grouped column stays a row dimension. A cell nothing matched is
@@ -555,7 +557,6 @@ export function pivotTable(q, cols, index, n) {
   return outCols;
 }
 
-/* -------------------------------------------------------------- running */
 export function runQuery() {
   const q = state.query, table = state.table;
   if (!table) return;
@@ -776,7 +777,6 @@ export function resetQuery() {
   renderQuery();
 }
 
-/* ------------------------------------------------------------ SQL text */
 export function sqlIdent(name) {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : '"' + name.replace(/"/g, '""') + '"';
 }
@@ -1305,5 +1305,3 @@ export function parseSql(text, cols) {
   }
   return { query: errors.length ? null : q, errors, warnings };
 }
-
-/* ----------------------------------------------------------------- UI */

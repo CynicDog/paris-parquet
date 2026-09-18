@@ -1,3 +1,7 @@
+// The Metadata panel: reads a statistics blob back into its logical value
+// (`rawStat`/`showStat`), renders the schema tree, and builds the file/
+// dataset, row-group, per-column, and key-value cards `renderMeta()` shows.
+
 import { $ } from "./columns.js";
 import { fmtValue, hex, typeSpec } from "./types.js";
 import { bytesHuman, esc, num, state } from "./view.js";

@@ -1,3 +1,8 @@
+// Logical-type handling and value formatting: `typeSpec()` turns a schema
+// leaf into a display spec (kind, label, physical-to-logical `convert`),
+// helpers format temporal/number/binary values for the grid, and
+// `summarize()` computes a column's stats (histogram, top values, etc).
+
 import { utf8 } from "./bytes.js";
 
 export const JULIAN_EPOCH = 2440588;                       // 1970-01-01

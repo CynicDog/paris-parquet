@@ -1,3 +1,8 @@
+// App entry point: file/folder intake (picker, drop, drag), opening a
+// dataset onto the page (`openEntries`/`adoptDataset`), the resize/theme/
+// drag-and-drop UI wiring in `init()`, and the `PARIS` global that exposes
+// the internals to the test harness and, when run as a worker, to workers.js.
+
 import { decompress, gzipDecompress, lz4BlockDecompress, snappyDecompress, zstdDecompress } from "./codecs.js";
 import { $, fillColumns, groupsLeft, loadMore, readColumnRows, rowsAhead, unfilled } from "./columns.js";
 import { fileSource, hivePartition, isParquetPath, newTable, readDataset } from "./dataset.js";

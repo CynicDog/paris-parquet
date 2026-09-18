@@ -529,6 +529,9 @@ details[open]>summary::before{content:"▾ "}
 <script>
 "use strict";
 
+// Byte-level primitives: a cursor over a Uint8Array with thrift-compact
+// varint/zigzag reads, plus the shared UTF-8 decoder instance.
+
 const utf8 = new TextDecoder("utf-8");
 
 class Cursor {
@@ -548,7 +551,11 @@ class Cursor {
   zigzag() { const v = this.uvarint(); return v % 2 ? -(v + 1) / 2 : v / 2; }
 }
 
-/* --------------------------------------------------- thrift compact read */
+// Thrift-compact deserialization and the parquet metadata built on top of
+// it: the raw struct/value reader, schema tree construction (folding LIST/
+// MAP wrapper levels out of the displayed path), and the footer parse
+// (`readFooter`) into row groups, column chunks, and statistics.
+
 
 const TSTOP = 0, TTRUE = 1, TFALSE = 2, TBYTE = 3, TI16 = 4, TI32 = 5, TI64 = 6,
       TDOUBLE = 7, TBINARY = 8, TLIST = 9, TSET = 10, TMAP = 11, TSTRUCT = 12;
@@ -601,7 +608,6 @@ function thriftValue(c, type) {
 }
 const str = (v) => (v == null ? null : utf8.decode(v));
 
-/* ------------------------------------------------------------- constants */
 const PTYPE = ["BOOLEAN", "INT32", "INT64", "INT96", "FLOAT", "DOUBLE", "BYTE_ARRAY", "FIXED_LEN_BYTE_ARRAY"];
 const REP = ["REQUIRED", "OPTIONAL", "REPEATED"];
 const CODEC = ["UNCOMPRESSED", "SNAPPY", "GZIP", "LZO", "BROTLI", "LZ4", "ZSTD", "LZ4_RAW"];
@@ -617,7 +623,6 @@ const LOGICAL = { 1: "STRING", 2: "MAP", 3: "LIST", 4: "ENUM", 5: "DECIMAL", 6: 
   8: "TIMESTAMP", 10: "INTEGER", 11: "NULL", 12: "JSON", 13: "BSON", 14: "UUID", 15: "FLOAT16",
   16: "VARIANT", 17: "GEOMETRY", 18: "GEOGRAPHY" };
 
-/* ------------------------------------------------------- schema handling */
 /** Decodes SchemaElement.logicalType (a thrift union) into something usable. */
 function logicalType(raw) {
   if (!raw) return null;
@@ -701,7 +706,6 @@ function buildSchema(elements) {
   return { root, nodes, leaves };
 }
 
-/* ------------------------------------------------------- footer / header */
 const MAGIC = [0x50, 0x41, 0x52, 0x31];          // "PAR1"
 const MAGIC_ENC = [0x50, 0x41, 0x52, 0x45];      // "PARE" (encrypted footer)
 const eq4 = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
@@ -795,8 +799,10 @@ function parseStatistics(s) {
   };
 }
 
-
-/* -------------------------------------------------------------- snappy */
+// Decompressors for the codecs parquet pages arrive in: snappy, lz4 (raw and
+// Hadoop-framed), gzip/deflate/brotli via the browser's DecompressionStream,
+// and a from-scratch zstd frame decoder (FSE + huffman + sequence decode).
+// `decompress()` is the single dispatch point the rest of the app calls.
 
 function snappyDecompress(src, expected) {
   let p = 0, shift = 0, len = 0, b;
@@ -847,7 +853,6 @@ function snappyCopy(out, o, off, n) {
   return o;
 }
 
-/* ----------------------------------------------------------- lz4 block */
 function lz4BlockDecompress(src, expected) {
   const out = new Uint8Array(expected);
   let p = 0, o = 0;
@@ -886,7 +891,6 @@ function lz4HadoopDecompress(src, expected) {
   }
 }
 
-/* ----------------------------------------------- gzip (browser builtin) */
 async function inflate(src, format) {
   const ds = new DecompressionStream(format);
   const stream = new Blob([src]).stream().pipeThrough(ds);
@@ -1320,7 +1324,6 @@ function zstdFrame(src, p, grow, getOut, setO, getO) {
   return p;
 }
 
-/* ------------------------------------------------------- codec dispatch */
 async function decompress(codec, src, uncompressedSize) {
   switch (codec) {
     case "UNCOMPRESSED": return src;
@@ -1340,7 +1343,11 @@ async function decompress(codec, src, uncompressedSize) {
 const bitWidth = (max) => (max === 0 ? 0 : 32 - Math.clz32(max));
 const u32le = (b, p) => (b[p] | (b[p + 1] << 8) | (b[p + 2] << 16) | (b[p + 3] << 24)) >>> 0;
 
-/** RLE / bit-packing hybrid (parquet's level + dictionary-index encoding). */
+// Parquet page decoding: every value encoding (PLAIN, RLE/dictionary, the
+// DELTA family, BYTE_STREAM_SPLIT), page and column-chunk reading, the
+// offset/column index for narrowing a chunk to a row range, and record
+// assembly — turning (values, def levels, rep levels) back into nested rows.
+
 
 function rleHybrid(b, pos, end, width, count, out) {
   out = out || new Int32Array(count);
@@ -1681,7 +1688,6 @@ async function readColumnChunk(src, chunk, leaf, convert) {
   return { values: out.values, defs: out.defs, reps: out.reps, count: seen };
 }
 
-/* ------------------------------------------------------- page indexes */
 /**
  * A parquet file may carry, beside the footer, an index per column chunk:
  * where each page starts and which row it begins at (the offset index), and
@@ -1814,7 +1820,6 @@ function pushLevels(sink, b, pos, end, width, count, enc) {
   return lv;
 }
 
-/* ----------------------------------------------------- record assembly */
 /**
  * Turns (values, definition levels, repetition levels) back into one value
  * per row, nesting arrays wherever the path repeats.
@@ -1859,6 +1864,12 @@ function assemble(leaf, values, defs, reps, convert) {
   while (i < n) rows.push(readNode(0, 0, 0));
   return rows;
 }
+
+// Logical-type handling and value formatting: `typeSpec()` turns a schema
+// leaf into a display spec (kind, label, physical-to-logical `convert`),
+// helpers format temporal/number/binary values for the grid, and
+// `summarize()` computes a column's stats (histogram, top values, etc).
+
 
 const JULIAN_EPOCH = 2440588;                       // 1970-01-01
 function beBigInt(bytes) {
@@ -2202,6 +2213,11 @@ function summarize(col, index, count) {
   return s;
 }
 
+// Dataset assembly: reads every part's footer, reconciles files into one
+// column list (union of leaves, Hive partition columns folded in, real
+// schema conflicts rejected), and builds the empty `table` a view loads into.
+
+
 function fileSource(file) {
   return {
     size: file.size,
@@ -2379,6 +2395,13 @@ async function sniffUtf8(dataset, col, atHand, isFirstGroup) {
   dataset.utf8.set(col.key, yes);
   return yes;
 }
+
+// Web Worker pool for decoding column chunks off the main thread: sizing and
+// dispatch on the main-thread side (`poolStart`, `workerColumn`, the
+// worth-it heuristics), and `workerMain` — the same file, running as a
+// worker — which decodes a chunk and hands values back as a transferable
+// buffer wherever it can.
+
 
 const OWN_SCRIPT = (typeof document !== "undefined" && document.currentScript) || null;
 const pool = { workers: [], free: [], waiting: [], jobs: new Map(), id: 0, url: null,
@@ -2627,12 +2650,10 @@ function workerMain(scope) {
   };
 }
 
-/**
- * Decodes one column for one row group, or for the selection of rows a plan
- * narrowed it to. The row group is read the same way whether this happens
- * while the group is first read or long afterwards, which is what lets a
- * column be filled in later without re-reading anything else.
- */
+// Column-chunk loading: reads row groups into `table.cols` incrementally
+// (via `loadMore`), catches columns up that were skipped earlier (via
+// `fillColumns`), and tracks how much of the dataset is left to read.
+
 
 async function readColumnRows(dataset, part, rg, col, sel, took, firstGroup, ctx) {
   if (col.partKey !== undefined) {
@@ -2824,6 +2845,11 @@ function rowsAhead(dataset, table, limit) {
 
 const $ = (id) => document.getElementById(id);
 
+// The view layer: what columns the grid shows (`newDisplay`/`baseView`),
+// which of the loaded columns still need decoding, pagination, and export
+// to CSV/TSV/JSON/Markdown (both download and clipboard).
+
+
 const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESCAPES[c]);
 const num = (n) => (n == null ? "-" : Number(n).toLocaleString("en-US"));
@@ -2949,7 +2975,6 @@ function setView(view) {
   renderPager();
 }
 
-/* ------------------------------------------------------------ pagination */
 function pageBounds() {
   const v = state.view;
   if (!v) return [0, 0];
@@ -3040,7 +3065,6 @@ function renderPager() {
   };
 }
 
-/* -------------------------------------------------------------- export */
 /** The value as the grid shows it, minus the display truncation. */
 function exportText(v, spec) {
   return v === null || v === undefined ? null : fmtValue(v, spec);
@@ -3144,7 +3168,10 @@ function doExport(format) {
   download(exportParts(format, from, to), mime + ";charset=utf-8", exportName(ext));
 }
 
-/* ---------------------------------------------------------------- grid */
+// The data grid: renders the header (with per-column summary cards —
+// histograms, top values, null bars) and virtualized rows for the current
+// view, plus the column picker panel and the cell inspector popup.
+
 
 /* Which page of top values each column is showing, by column name, so it
    survives a re-render of the header but not a different file. */
@@ -3367,7 +3394,6 @@ function renderRows(force) {
   if (state.inspectAt) closeInspector();
 }
 
-/* -------------------------------------------------------- column picker */
 function refreshView(keepPage) {
   const page = state.page;
   if (state.query && state.query.active) runQuery();
@@ -3478,7 +3504,6 @@ function initPicker() {
   }, true);
 }
 
-/* ------------------------------------------------------- cell inspector */
 function hexDump(bytes) {
   const lines = [];
   for (let off = 0; off < bytes.length; off += 16) {
@@ -3558,8 +3583,10 @@ function openInspector(viewRow, ci, cell) {
   };
 }
 
-/* ------------------------------------------------------------ metadata */
-/** The physical value a statistics blob holds, before any logical type. */
+// The Metadata panel: reads a statistics blob back into its logical value
+// (`rawStat`/`showStat`), renders the schema tree, and builds the file/
+// dataset, row-group, per-column, and key-value cards `renderMeta()` shows.
+
 
 function rawStat(bytes, leaf) {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -3801,6 +3828,13 @@ function renderMeta() {
   $("mgrip").hidden = $("meta").classList.contains("collapsed");
 }
 
+// The query engine: predicate/metric vocabulary, filter compilation, value
+// parsing and comparison, row-mode sorting, group-by aggregation (including
+// cube grouping sets and pivot), and the SQL text this all round-trips
+// through — `querySql()` writes it from the query object, `parseSql()`
+// reads it back. `runQuery()` ties it together against the loaded rows.
+
+
 const PREDS = [
   { id: "eq", label: "=", sql: "=" },
   { id: "ne", label: "≠", sql: "<>" },
@@ -3881,7 +3915,6 @@ function newQuery() {
   return { active: false, mode: "rows", select: [], filters: [], sort: [], groupBy: [], groupMode: "", metrics: [], limit: null };
 }
 
-/* -------------------------------------------------------- value parsing */
 function parseTemporal(text, spec) {
   const t = text.trim();
   if (/^-?\d+(\.\d+)?$/.test(t)) return parseFloat(t);          /* raw epoch millis */
@@ -3915,7 +3948,6 @@ function textOf(v, spec) {
   return spec.kind === "string" ? v : fmtValue(v, spec);
 }
 
-/* ------------------------------------------------------------- filtering */
 /** Compiles one clause into a row test, or null if it is not filled in yet. */
 function compileFilter(f, cols) {
   const col = cols[f.ci];
@@ -4019,7 +4051,6 @@ function buildComparator(sorts, cols) {
   };
 }
 
-/* ------------------------------------------------------------ aggregates */
 /* a group key joins its parts with U+0001 and writes null as U+0000, so no
    two group values can collide by running into each other */
 const keyPart = (v) => (v === null || v === undefined ? "\u0000" : typeof v === "object" ? JSON.stringify(v) : String(v));
@@ -4233,7 +4264,6 @@ function aggregate(q, cols, index, n) {
   return outCols;
 }
 
-/* ------------------------------------------------------------- pivot */
 /* Excel-style reshape: the last GROUP BY column's own distinct values
    become new output columns instead of a row of their own, and every
    other grouped column stays a row dimension. A cell nothing matched is
@@ -4352,7 +4382,6 @@ function pivotTable(q, cols, index, n) {
   return outCols;
 }
 
-/* -------------------------------------------------------------- running */
 function runQuery() {
   const q = state.query, table = state.table;
   if (!table) return;
@@ -4573,7 +4602,6 @@ function resetQuery() {
   renderQuery();
 }
 
-/* ------------------------------------------------------------ SQL text */
 function sqlIdent(name) {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : '"' + name.replace(/"/g, '""') + '"';
 }
@@ -5103,7 +5131,11 @@ function parseSql(text, cols) {
   return { query: errors.length ? null : q, errors, warnings };
 }
 
-/* ----------------------------------------------------------------- UI */
+// The Query panel: the drag-and-drop zone builder (SELECT/GROUP BY/METRICS/
+// WHERE/ORDER BY) and the SQL text box it stays in sync with — `renderZones`
+// draws the builder from the query object, `adoptSql` parses edited SQL
+// back into one.
+
 
 const TYPE_TAG = { number: "NUM", string: "STR", bool: "BOOL", temporal: "TS", binary: "BIN", nested: "LIST" };
 function typeTag(spec) {
@@ -5447,9 +5479,11 @@ function queryHeight(px) {
   return h;
 }
 
+// Predicate pushdown: turns a query's WHERE clause into a plan of which row
+// groups (and, within a group, which page ranges) could hold a matching row,
+// using footer statistics, page indexes, and bloom filters (with its own
+// xxh64) before `runScan` rebuilds the table from only what survived.
 
-/* below this a row group is a page or two, and narrowing costs more than it
-   saves — the index reads alone would outweigh the pages they rule out */
 
 const PAGE_NARROW_MIN = 4096;
 /* and narrowing that leaves most of the group behind is not narrowing */
@@ -5601,7 +5635,6 @@ function partitionCanMatch(f, col, value) {
   return !test || test(0);
 }
 
-/* ------------------------------------------------------- bloom filters */
 /* xxh64, which is the only hash parquet's bloom filters use. BigInt keeps
    the 64-bit arithmetic honest; one small value is hashed per clause per
    row group, so its cost never shows. */
@@ -5706,7 +5739,6 @@ function bloomBytes(f, col) {
   return b;
 }
 
-/* ------------------------------------------------------------ the plan */
 /**
  * Walks every row group and decides, from the footer alone plus any bloom
  * filters, which ones could hold a matching row. Returns null when there
@@ -5852,7 +5884,6 @@ function planReport(plan) {
     " in " + num(plan.ms) + " ms";
 }
 
-/* ---------------------------------------------------------- the scan */
 /**
  * Plans, then rebuilds the table from only the row groups that survived,
  * then runs the query over them. The answer is the same as reading the
@@ -5924,13 +5955,11 @@ function updateScanButton() {
   b.classList.toggle("on", !!(t && t.scan));
 }
 
+// The Diff panel: compares two datasets (A, the open file, and B, a chosen
+// second one) at three levels — file-level shape, schema drift between their
+// columns, and per-column statistics — and can match rows up by key to show
+// which ones were added, removed, or changed cell by cell.
 
-/**
- * What makes two columns of the same name the same column. The spec label
- * carries the logical type in full ("decimal(9,2)", "timestamp[millis, UTC]"),
- * so it says more than the physical type on its own. The utf-8 note is a
- * sniffing result rather than a property of the file, so it is not compared.
- */
 
 const diff = { on: false, b: null, keys: [], rows: null, cap: 200 };
 
@@ -6074,7 +6103,6 @@ function columnStats(dataset, col) {
     codecs: [...codecs].sort().join(", "), encs: [...encs].sort().join(", ") };
 }
 
-/* -------------------------------------------------------------- row diff */
 /** A stable string for a value, used only to match rows up by key. */
 function cellKey(v, spec) {
   if (v === null || v === undefined) return "\u0000";
@@ -6216,7 +6244,6 @@ function rowDiff(aT, bT, keyKeys) {
     rowsA: akeys.length, rowsB: bkeys.length };
 }
 
-/* --------------------------------------------------------------- render */
 function diffCell(v, spec) {
   if (v === null || v === undefined) return "<span class='null'>null</span>";
   let text = fmtValue(v, spec);
@@ -6599,7 +6626,12 @@ function swapSides() {
   renderDiff();
 }
 
-/* ---------------------------------------------------------- resizing */
+// The Join panel: builds a hash join between the open table and a second
+// file on one equality key, materializing the result in memory as a table
+// the rest of the app treats like any other. See the `join` doc below for
+// the constraints (one join at a time, inner only) and `runJoin` for the
+// build/probe side selection and row-group narrowing.
+
 
 /**
  * One join at a time, single equality key, inner join only -- see #13. A
@@ -7036,6 +7068,12 @@ function initJoin() {
     if (e.target.closest("#jundo")) undoJoin();
   });
 }
+
+// The folder tree panel: browses a granted live directory
+// (showDirectoryPicker), a picked snapshot (webkitdirectory), or the
+// session's own list of files seen so far, and doubles as the file list
+// for picking the join panel's side B.
+
 
 /**
  * Browsing state for the left-side folder tree. Nothing here is persisted
@@ -7581,6 +7619,12 @@ function treeWidth(px) {
   try { localStorage.setItem("paris-parquet-treew", String(w)); } catch (_e) { /* fine */ }
   return w;
 }
+
+// App entry point: file/folder intake (picker, drop, drag), opening a
+// dataset onto the page (`openEntries`/`adoptDataset`), the resize/theme/
+// drag-and-drop UI wiring in `init()`, and the `PARIS` global that exposes
+// the internals to the test harness and, when run as a worker, to workers.js.
+
 
 function columnWidth(index, px) {
   const view = state.view;

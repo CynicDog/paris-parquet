@@ -1,3 +1,7 @@
+// The data grid: renders the header (with per-column summary cards —
+// histograms, top values, null bars) and virtualized rows for the current
+// view, plus the column picker panel and the cell inspector popup.
+
 import { $ } from "./columns.js";
 import { diff } from "./diff.js";
 import { runQuery, sortMark } from "./query.js";
@@ -226,7 +230,6 @@ export function renderRows(force) {
   if (state.inspectAt) closeInspector();
 }
 
-/* -------------------------------------------------------- column picker */
 export function refreshView(keepPage) {
   const page = state.page;
   if (state.query && state.query.active) runQuery();
@@ -337,7 +340,6 @@ export function initPicker() {
   }, true);
 }
 
-/* ------------------------------------------------------- cell inspector */
 export function hexDump(bytes) {
   const lines = [];
   for (let off = 0; off < bytes.length; off += 16) {
@@ -416,6 +418,3 @@ export function openInspector(viewRow, ci, cell) {
     setTimeout(() => { const b = $("icopy"); if (b) b.textContent = "copy"; }, 1200);
   };
 }
-
-/* ------------------------------------------------------------ metadata */
-/** The physical value a statistics blob holds, before any logical type. */

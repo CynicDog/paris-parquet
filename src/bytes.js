@@ -1,3 +1,6 @@
+// Byte-level primitives: a cursor over a Uint8Array with thrift-compact
+// varint/zigzag reads, plus the shared UTF-8 decoder instance.
+
 export const utf8 = new TextDecoder("utf-8");
 
 export class Cursor {
@@ -16,5 +19,3 @@ export class Cursor {
   }
   zigzag() { const v = this.uvarint(); return v % 2 ? -(v + 1) / 2 : v / 2; }
 }
-
-/* --------------------------------------------------- thrift compact read */

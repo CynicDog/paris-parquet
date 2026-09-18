@@ -1,3 +1,8 @@
+// Thrift-compact deserialization and the parquet metadata built on top of
+// it: the raw struct/value reader, schema tree construction (folding LIST/
+// MAP wrapper levels out of the displayed path), and the footer parse
+// (`readFooter`) into row groups, column chunks, and statistics.
+
 import { Cursor, utf8 } from "./bytes.js";
 
 export const TSTOP = 0, TTRUE = 1, TFALSE = 2, TBYTE = 3, TI16 = 4, TI32 = 5, TI64 = 6,
@@ -51,7 +56,6 @@ export function thriftValue(c, type) {
 }
 export const str = (v) => (v == null ? null : utf8.decode(v));
 
-/* ------------------------------------------------------------- constants */
 export const PTYPE = ["BOOLEAN", "INT32", "INT64", "INT96", "FLOAT", "DOUBLE", "BYTE_ARRAY", "FIXED_LEN_BYTE_ARRAY"];
 export const REP = ["REQUIRED", "OPTIONAL", "REPEATED"];
 export const CODEC = ["UNCOMPRESSED", "SNAPPY", "GZIP", "LZO", "BROTLI", "LZ4", "ZSTD", "LZ4_RAW"];
@@ -67,7 +71,6 @@ export const LOGICAL = { 1: "STRING", 2: "MAP", 3: "LIST", 4: "ENUM", 5: "DECIMA
   8: "TIMESTAMP", 10: "INTEGER", 11: "NULL", 12: "JSON", 13: "BSON", 14: "UUID", 15: "FLOAT16",
   16: "VARIANT", 17: "GEOMETRY", 18: "GEOGRAPHY" };
 
-/* ------------------------------------------------------- schema handling */
 /** Decodes SchemaElement.logicalType (a thrift union) into something usable. */
 export function logicalType(raw) {
   if (!raw) return null;
@@ -151,7 +154,6 @@ export function buildSchema(elements) {
   return { root, nodes, leaves };
 }
 
-/* ------------------------------------------------------- footer / header */
 export const MAGIC = [0x50, 0x41, 0x52, 0x31];          // "PAR1"
 export const MAGIC_ENC = [0x50, 0x41, 0x52, 0x45];      // "PARE" (encrypted footer)
 export const eq4 = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
@@ -244,6 +246,3 @@ export function parseStatistics(s) {
     maxExact: s[7] ?? null, minExact: s[8] ?? null,
   };
 }
-
-
-/* -------------------------------------------------------------- snappy */

@@ -1,3 +1,7 @@
+// The view layer: what columns the grid shows (`newDisplay`/`baseView`),
+// which of the loaded columns still need decoding, pagination, and export
+// to CSV/TSV/JSON/Markdown (both download and clipboard).
+
 import { $, fillColumns, unfilled } from "./columns.js";
 import { busy, showError } from "./main.js";
 import { fmtValue, summarize } from "./types.js";
@@ -128,7 +132,6 @@ export function setView(view) {
   renderPager();
 }
 
-/* ------------------------------------------------------------ pagination */
 export function pageBounds() {
   const v = state.view;
   if (!v) return [0, 0];
@@ -219,7 +222,6 @@ export function renderPager() {
   };
 }
 
-/* -------------------------------------------------------------- export */
 /** The value as the grid shows it, minus the display truncation. */
 export function exportText(v, spec) {
   return v === null || v === undefined ? null : fmtValue(v, spec);
@@ -322,5 +324,3 @@ export function doExport(format) {
   const ext = format;
   download(exportParts(format, from, to), mime + ";charset=utf-8", exportName(ext));
 }
-
-/* ---------------------------------------------------------------- grid */

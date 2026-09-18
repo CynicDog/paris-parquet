@@ -1,3 +1,8 @@
+// Parquet page decoding: every value encoding (PLAIN, RLE/dictionary, the
+// DELTA family, BYTE_STREAM_SPLIT), page and column-chunk reading, the
+// offset/column index for narrowing a chunk to a row range, and record
+// assembly — turning (values, def levels, rep levels) back into nested rows.
+
 import { Cursor } from "./bytes.js";
 import { bitWidth, decompress, POW2, u32le } from "./codecs.js";
 import { ENC, PAGE_TYPE, thriftStruct } from "./thrift.js";
@@ -341,7 +346,6 @@ export async function readColumnChunk(src, chunk, leaf, convert) {
   return { values: out.values, defs: out.defs, reps: out.reps, count: seen };
 }
 
-/* ------------------------------------------------------- page indexes */
 /**
  * A parquet file may carry, beside the footer, an index per column chunk:
  * where each page starts and which row it begins at (the offset index), and
@@ -474,7 +478,6 @@ export function pushLevels(sink, b, pos, end, width, count, enc) {
   return lv;
 }
 
-/* ----------------------------------------------------- record assembly */
 /**
  * Turns (values, definition levels, repetition levels) back into one value
  * per row, nesting arrays wherever the path repeats.

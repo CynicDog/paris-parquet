@@ -1,3 +1,8 @@
+// The Diff panel: compares two datasets (A, the open file, and B, a chosen
+// second one) at three levels — file-level shape, schema drift between their
+// columns, and per-column statistics — and can match rows up by key to show
+// which ones were added, removed, or changed cell by cell.
+
 import { $, fillColumns, loadMore } from "./columns.js";
 import { newTable, readDataset } from "./dataset.js";
 import { join, showJoin } from "./join.js";
@@ -149,7 +154,6 @@ export function columnStats(dataset, col) {
     codecs: [...codecs].sort().join(", "), encs: [...encs].sort().join(", ") };
 }
 
-/* -------------------------------------------------------------- row diff */
 /** A stable string for a value, used only to match rows up by key. */
 export function cellKey(v, spec) {
   if (v === null || v === undefined) return "\u0000";
@@ -291,7 +295,6 @@ export function rowDiff(aT, bT, keyKeys) {
     rowsA: akeys.length, rowsB: bkeys.length };
 }
 
-/* --------------------------------------------------------------- render */
 export function diffCell(v, spec) {
   if (v === null || v === undefined) return "<span class='null'>null</span>";
   let text = fmtValue(v, spec);
@@ -673,5 +676,3 @@ export function swapSides() {
   diff.keys = suggestKey(state.table, diff.b.table);
   renderDiff();
 }
-
-/* ---------------------------------------------------------- resizing */

@@ -1,3 +1,8 @@
+// The Query panel: the drag-and-drop zone builder (SELECT/GROUP BY/METRICS/
+// WHERE/ORDER BY) and the SQL text box it stays in sync with — `renderZones`
+// draws the builder from the query object, `adoptSql` parses edited SQL
+// back into one.
+
 import { $ } from "./columns.js";
 import { drag } from "./main.js";
 import { runScan, updateScanButton } from "./pushdown.js";
@@ -346,7 +351,3 @@ export function queryHeight(px) {
   renderRows(true);
   return h;
 }
-
-
-/* below this a row group is a page or two, and narrowing costs more than it
-   saves — the index reads alone would outweigh the pages they rule out */

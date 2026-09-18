@@ -1,3 +1,7 @@
+// Decompressors for the codecs parquet pages arrive in: snappy, lz4 (raw and
+// Hadoop-framed), gzip/deflate/brotli via the browser's DecompressionStream,
+// and a from-scratch zstd frame decoder (FSE + huffman + sequence decode).
+// `decompress()` is the single dispatch point the rest of the app calls.
 
 export function snappyDecompress(src, expected) {
   let p = 0, shift = 0, len = 0, b;
@@ -48,7 +52,6 @@ export function snappyCopy(out, o, off, n) {
   return o;
 }
 
-/* ----------------------------------------------------------- lz4 block */
 export function lz4BlockDecompress(src, expected) {
   const out = new Uint8Array(expected);
   let p = 0, o = 0;
@@ -87,7 +90,6 @@ export function lz4HadoopDecompress(src, expected) {
   }
 }
 
-/* ----------------------------------------------- gzip (browser builtin) */
 export async function inflate(src, format) {
   const ds = new DecompressionStream(format);
   const stream = new Blob([src]).stream().pipeThrough(ds);
@@ -521,7 +523,6 @@ export function zstdFrame(src, p, grow, getOut, setO, getO) {
   return p;
 }
 
-/* ------------------------------------------------------- codec dispatch */
 export async function decompress(codec, src, uncompressedSize) {
   switch (codec) {
     case "UNCOMPRESSED": return src;
@@ -540,5 +541,3 @@ export async function decompress(codec, src, uncompressedSize) {
 
 export const bitWidth = (max) => (max === 0 ? 0 : 32 - Math.clz32(max));
 export const u32le = (b, p) => (b[p] | (b[p + 1] << 8) | (b[p + 2] << 16) | (b[p + 3] << 24)) >>> 0;
-
-/** RLE / bit-packing hybrid (parquet's level + dictionary-index encoding). */
