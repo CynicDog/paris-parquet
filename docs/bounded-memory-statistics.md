@@ -1,6 +1,6 @@
 # Bounded-memory statistics: academic background and implementation approach
 
-**Status: research note.** Nothing here is implemented in the page. It records the theory behind computing statistics over files far larger than memory, how it maps onto Parquet and this codebase, and a way to build it. The results in [A prototype](#a-prototype-what-was-measured) come from a throwaway script that is not in the repo; they are one machine, one runtime and no Parquet decoding, and are reported as such. Tracked in [#36](https://github.com/CynicDog/paris-parquet/issues/36); its companion, memory budgets and spilling for what cannot be bounded, is [#16](https://github.com/CynicDog/paris-parquet/issues/16).
+**Status: research note.** Nothing here is implemented in the page. It records the theory behind computing statistics over files far larger than memory, how it maps onto Parquet and this codebase, and a way to build it. The results in [A prototype](#a-prototype-what-was-measured) come from a throwaway script that is not in the repo; they are one machine, one runtime and no Parquet decoding, and are reported as such. Tracked in [#36](https://github.com/CynicDog/paris-parquet/issues/36); its companion, [#16](https://github.com/CynicDog/paris-parquet/issues/16), covers what summaries cannot bound: a byte budget, partitioning by re-reading the source, and spilling only as a last resort.
 
 ## The problem, and what the code does today
 
@@ -155,9 +155,15 @@ The radix method's first pass already yields a guaranteed interval for every qua
 - **Say what was done,** as `Scan file` does: passes used, row groups skipped, and whether the figure is exact or approximate.
 - **Memory accounting** is the page's own, tracking bytes it allocates: `performance.measureUserAgentSpecificMemory()` needs cross-origin isolation, which a `file://` page does not have.
 
-## What summaries cannot bound
+## What summaries cannot bound, and what comes next
 
-A **high-cardinality `GROUP BY`** (memory is the number of groups), **exact distinct counts** on high-cardinality columns, **joins**, an **unbounded full sort**, and **per-group percentiles** with many groups (one sketch per group). These need external-memory algorithms, partitioned hash aggregation and joins (Kitsuregawa et al.'s Grace hash join; Graefe's 1993 survey of query evaluation techniques) and a spill target: [#16](https://github.com/CynicDog/paris-parquet/issues/16). The aim of this work is to take the statistics off that list so far less needs spilling.
+A **high-cardinality `GROUP BY`** (memory is the number of groups), **exact distinct counts** on high-cardinality columns, **joins**, an **unbounded full sort**, and **per-group percentiles** with many groups (one sketch per group) cannot be reduced to a small summary. [#16](https://github.com/CynicDog/paris-parquet/issues/16) handles them, in this order:
+
+1. **A byte budget, accounting and a planner.** A first pass estimates the number of groups with HyperLogLog (a few KB, mergeable); the number of passes is `P = ceil(estimated groups x bytes per group / budget)`. If `P` is unreasonable the query is refused with a named reason rather than started and lost.
+2. **Partition by re-reading the source.** Classic external hash aggregation and joins (Kitsuregawa et al.'s Grace hash join; Shapiro's and DeWitt et al.'s hybrid hash join; Graefe's 1993 survey) *write partitions to disk* because their input is a stream that can be read once. Here the input is the Parquet file itself, a read-only random-access store, so a partition can be **recomputed instead of stored**: pass `k` decodes again and processes only the rows whose hash falls in slice `k`. That trades decoding `P` times for not needing temporary storage at all, and it works identically from `file://`. Whether it beats writing a temporary file is unmeasured; the crossover depends on how expensive decoding is (snappy or zstd against plain or dictionary) relative to storage. A page of a *sorted* result needs no full sort either: select the rank range of the page (radix selection, above) and gather only those rows.
+3. **Spill as a last resort.** Browser storage is unreliable for this. A probe in Chromium 153 found that from a page opened as `file://` the Origin Private File System **exists but throws `SecurityError`** on use, while over `http(s)` it works; IndexedDB works in both. So IndexedDB is the baseline, OPFS only where a real `getDirectory()` call succeeds (feature-detect by calling, not by checking for the property), and the UI says which store is in use. Firefox and Safari were not tested.
+
+The aim of this work is to take the statistics off the list of things that need any of that, and re-reading takes most of what remains, so that little has to be spilled.
 
 ## How to verify it
 
@@ -188,6 +194,6 @@ The project checks against ground truth, and this fits.
 - Moerkotte, "Small materialized aggregates: a light weight index structure for data warehousing", VLDB 1998.
 - Abadi, Madden and Ferreira, "Integrating compression and execution in column-oriented database systems", SIGMOD 2006.
 - Alabi, Blanchard, Gordon and Steinbach, "Fast k-selection algorithms for graphics processing units", *ACM J. Experimental Algorithmics* 2012.
-- Kitsuregawa, Tanaka and Moto-oka, 1983 (Grace hash join); Graefe, "Query evaluation techniques for large databases", *ACM Computing Surveys* 1993.
+- Kitsuregawa, Tanaka and Moto-oka, 1983 (Grace hash join); DeWitt et al., "Implementation techniques for main memory database systems", SIGMOD 1984, and Shapiro, "Join processing in database systems with large main memories", *ACM TODS* 1986 (hybrid hash join); Graefe, "Query evaluation techniques for large databases", *ACM Computing Surveys* 1993.
 - Apache Parquet format specification, `parquet.thrift`: <https://github.com/apache/parquet-format>
 - DuckDB aggregate functions (`approx_quantile`, `quantile_cont`): <https://duckdb.org/docs/current/sql/functions/aggregates>; Spark `percentile_approx`: <https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.functions.percentile_approx.html>
