@@ -571,5 +571,5 @@ if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, 
   bloomBytes, groupsLeft, rowsAhead, readOffsetIndex, readColumnIndex, readRowsRanges, clauseRanges,
   intersectRanges, unionRanges, mergeRanges, rangeCount,
   pool, poolStart, workerCan,
-  loadAllBoth, wholeCard, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
+  loadAllBoth, wholeCard, groupsAhead, groupsBytes, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };

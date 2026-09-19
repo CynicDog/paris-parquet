@@ -1,0 +1,177 @@
+{
+ "file": "/private/tmp/claude-501/-Users-eunsang-Documents-Sources-paris-parquet/64a35111-9357-4c6e-817e-0953fde9a5d1/scratchpad/big/extra_500k.parquet",
+ "limitMB": 9000,
+ "when": "2026-09-19T15:39:24.865Z",
+ "results": [
+  {
+   "label": "calibrate id",
+   "cols": 1,
+   "cells": 250000,
+   "deltaMB": 15,
+   "bytesPerCell": 63.4,
+   "estimatedMB": 8,
+   "ratio": 0.5,
+   "verdict": "too small to judge"
+  },
+  {
+   "label": "calibrate ts",
+   "cols": 1,
+   "cells": 250000,
+   "deltaMB": 22,
+   "bytesPerCell": 92.7,
+   "estimatedMB": 23,
+   "ratio": 1.04,
+   "verdict": "too small to judge"
+  },
+  {
+   "label": "calibrate cat_i",
+   "cols": 20,
+   "cells": 5000000,
+   "deltaMB": 54,
+   "bytesPerCell": 11.3,
+   "estimatedMB": 153,
+   "ratio": 2.82,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate cat_s",
+   "cols": 20,
+   "cells": 5000000,
+   "deltaMB": 60,
+   "bytesPerCell": 12.6,
+   "estimatedMB": 153,
+   "ratio": 2.54,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate hi_s",
+   "cols": 4,
+   "cells": 1000000,
+   "deltaMB": 259,
+   "bytesPerCell": 271.7,
+   "estimatedMB": 377,
+   "ratio": 1.45,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate metric_f",
+   "cols": 40,
+   "cells": 10000000,
+   "deltaMB": 156,
+   "bytesPerCell": 16.4,
+   "estimatedMB": 305,
+   "ratio": 1.95,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate count_l",
+   "cols": 40,
+   "cells": 10000000,
+   "deltaMB": 79,
+   "bytesPerCell": 8.3,
+   "estimatedMB": 305,
+   "ratio": 3.86,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate ratio_f32",
+   "cols": 20,
+   "cells": 5000000,
+   "deltaMB": 107,
+   "bytesPerCell": 22.5,
+   "estimatedMB": 153,
+   "ratio": 1.42,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate flag_b",
+   "cols": 20,
+   "cells": 5000000,
+   "deltaMB": 55,
+   "bytesPerCell": 11.6,
+   "estimatedMB": 191,
+   "ratio": 3.46,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate money_d",
+   "cols": 4,
+   "cells": 1000000,
+   "deltaMB": 142,
+   "bytesPerCell": 149,
+   "estimatedMB": 229,
+   "ratio": 1.61,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate day_d",
+   "cols": 4,
+   "cells": 1000000,
+   "deltaMB": 34,
+   "bytesPerCell": 35.8,
+   "estimatedMB": 92,
+   "ratio": 2.68,
+   "verdict": "too small to judge"
+  },
+  {
+   "label": "calibrate sparse",
+   "cols": 26,
+   "cells": 6500000,
+   "deltaMB": 62,
+   "bytesPerCell": 10,
+   "estimatedMB": 198,
+   "ratio": 3.19,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate long_s",
+   "cols": 2,
+   "cells": 500000,
+   "deltaMB": 31,
+   "bytesPerCell": 65.2,
+   "estimatedMB": 2125,
+   "ratio": 68.3,
+   "verdict": "too small to judge"
+  },
+  {
+   "label": "calibrate list_i",
+   "cols": 2,
+   "cells": 500000,
+   "deltaMB": 122,
+   "bytesPerCell": 256.1,
+   "estimatedMB": 240,
+   "ratio": 1.96,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate list_s",
+   "cols": 2,
+   "cells": 500000,
+   "deltaMB": 95,
+   "bytesPerCell": 199.5,
+   "estimatedMB": 138,
+   "ratio": 1.45,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate struct_m",
+   "cols": 6,
+   "cells": 1500000,
+   "deltaMB": 43,
+   "bytesPerCell": 30.1,
+   "estimatedMB": 46,
+   "ratio": 1.06,
+   "verdict": "ok"
+  },
+  {
+   "label": "calibrate dec_w",
+   "cols": 2,
+   "cells": 500000,
+   "deltaMB": 104,
+   "bytesPerCell": 218.3,
+   "estimatedMB": 114,
+   "ratio": 1.1,
+   "verdict": "ok"
+  }
+ ]
+}

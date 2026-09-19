@@ -336,7 +336,7 @@ const SCENARIOS = {
    * column first, and the noise from that swamps the numbers).
    */
   async calibrate() {
-    const kinds = ["id", "ts", "cat_i", "cat_s", "hi_s", "metric_f", "count_l", "ratio_f32", "flag_b", "money_d", "day_d", "sparse"];
+    const kinds = ["id", "ts", "cat_i", "cat_s", "hi_s", "metric_f", "count_l", "ratio_f32", "flag_b", "money_d", "day_d", "sparse", "long_s", "list_i", "list_s", "struct_m", "dec_w"];
     for (const kind of kinds) {
       const s2 = await fresh();
       try {
@@ -352,17 +352,23 @@ const SCENARIOS = {
           const want = new Set();
           t.cols.forEach((c, i) => { if (c.name === k || c.name.startsWith(k + "_")) want.add(i); });
           t.need = want;
+          const est = P.groupsBytes(d, t, P.groupsAhead(d, t, 1), [...want]);      /* what the page would have said before decoding */
           await P.loadMore(d, t, 1);
           let cells = 0; for (const i of want) cells += t.cols[i].rows.length;
           window.__held = t;
-          return { cols: want.size, cells };
+          return { cols: want.size, cells, est };
         }, kind);
         await s2.page.evaluate(() => window.gc && window.gc());
         await new Promise((r) => setTimeout(r, 700));
         const after = memoryMB(s2.dir);
         const per = (after - base) * 1048576 / Math.max(1, info.cells);
-        results.push({ label: "calibrate " + kind, cols: info.cols, cells: info.cells, deltaMB: mb(after - base), bytesPerCell: +per.toFixed(1) });
-        console.log(`  ${kind.padEnd(10)} ${String(info.cols).padStart(3)} cols  ${String(info.cells).padStart(10)} cells   +${String(mb(after - base)).padStart(5)} MB   ${per.toFixed(1).padStart(6)} bytes/cell`);
+        if (!info.cells) { console.log("  " + kind + ": not in this file"); await close(s2); continue; }
+        /* the estimate includes a factor of two for the decode's peak, so it should sit above what stays held: at least 0.8x (the measure is good to about 15 MB) and, to not refuse needlessly, not far above */
+        const ratio = info.est / Math.max(1, (after - base) * 1048576);
+        /* under about 40 MB the reading is dominated by what starting a decode costs (workers, buffers), not by the cells */
+        const verdict = (after - base) < 40 ? "too small to judge" : ratio < 0.8 ? "UNDER-ESTIMATE" : ratio > 6 ? "over-estimate (safe)" : "ok";
+        results.push({ label: "calibrate " + kind, cols: info.cols, cells: info.cells, deltaMB: mb(after - base), bytesPerCell: +per.toFixed(1), estimatedMB: mb(info.est / 1048576), ratio: +ratio.toFixed(2), verdict });
+        console.log(`  ${kind.padEnd(10)} ${String(info.cols).padStart(3)} cols  ${String(info.cells).padStart(10)} cells   +${String(mb(after - base)).padStart(5)} MB   ${per.toFixed(1).padStart(6)} bytes/cell   estimate ${String(mb(info.est / 1048576)).padStart(6)} MB = ${ratio.toFixed(2)}x  ${verdict}`);
       } catch (e) { console.log("  " + kind + " failed: " + String(e.message).split("\n")[0]); }
       await close(s2);
     }
@@ -380,3 +386,6 @@ for (const name of WANT) {
 }
 const out = opt("json", null);
 if (out) writeFileSync(out, JSON.stringify({ file, limitMB: LIMIT_MB, when: new Date().toISOString(), results }, null, 1));
+/* the estimate must not fall below what decoding actually left held: that is the check calibrate exists for */
+const under = results.filter((r) => r.verdict === "UNDER-ESTIMATE");
+if (under.length) { console.log("\nthe memory estimate is below the measurement for: " + under.map((r) => r.label + " (" + r.ratio + "x)").join(", ")); process.exitCode = 1; }

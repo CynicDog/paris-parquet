@@ -33,7 +33,7 @@ test("a decoded cell costs what it was measured to cost", () => {
 test("a plain string costs more the longer it is, dictionary strings do not", () => {
   const short = cellBytes({ kind: "string" }, "BYTE_ARRAY", { encodings: ["PLAIN"], numValues: 100, totalUncompressedSize: 100 * 6 });
   const long = cellBytes({ kind: "string" }, "BYTE_ARRAY", { encodings: ["PLAIN"], numValues: 100, totalUncompressedSize: 100 * 64 });
-  assert.ok(long > short * 2, `${long} vs ${short}`);
+  assert.ok(long > short * 1.4 && long > short + 100, `${long} vs ${short}`);
   const dict = cellBytes({ kind: "string" }, "BYTE_ARRAY", { encodings: ["RLE_DICTIONARY"], numValues: 100, totalUncompressedSize: 100 * 64 });
   assert.ok(dict < short);
 });
@@ -105,4 +105,27 @@ test("reading everything is costed from where the table has read to, and refused
   assert.equal(loadAllRefusal("both files", 100, 1000, "x"), null);
   const why = loadAllRefusal("both files", 5 * MB, 1 * MB, "Compare a smaller file.");
   assert.match(why, /^Not run: reading every row of both files would take about 5 MB once decoded, over this page's 1 MB memory budget\. Compare a smaller file\.$/);
+});
+
+test("a chunk that lists a dictionary but fell back to plain pages is priced as plain text", () => {
+  const spec = { kind: "string" };
+  const mostlyPlain = { encodings: ["RLE_DICTIONARY", "PLAIN"], numValues: 1000, totalUncompressedSize: 12000,
+    encodingStats: [{ pageType: "DICTIONARY_PAGE", encoding: "PLAIN", count: 1 }, { pageType: "DATA_PAGE", encoding: "RLE_DICTIONARY", count: 1 }, { pageType: "DATA_PAGE", encoding: "PLAIN", count: 9 }] };
+  const mostlyDict = { ...mostlyPlain, encodingStats: [{ pageType: "DATA_PAGE", encoding: "RLE_DICTIONARY", count: 9 }, { pageType: "DATA_PAGE", encoding: "PLAIN", count: 1 }] };
+  assert.ok(cellBytes(spec, "BYTE_ARRAY", mostlyPlain) > CELL.dictionary * 4);
+  assert.equal(cellBytes(spec, "BYTE_ARRAY", mostlyDict), CELL.dictionary);
+  assert.equal(cellBytes(spec, "BYTE_ARRAY", { encodings: ["RLE_DICTIONARY"], numValues: 10, totalUncompressedSize: 500 }), CELL.dictionary, "no page statistics: the list of encodings decides");
+});
+
+test("dates and timestamps are converted per row, so a dictionary does not make them cheap", () => {
+  assert.equal(cellBytes({ kind: "temporal" }, "INT32", { encodings: ["RLE_DICTIONARY"] }), CELL.temporal);
+  assert.ok(CELL.temporal > CELL.dictionary);
+});
+
+test("a list is priced by how many values the footer says it holds per row", () => {
+  const short = cellBytes({ nested: true }, "INT32", { numValues: 1000 }, 1000);
+  const long = cellBytes({ nested: true }, "INT32", { numValues: 100000 }, 1000);
+  assert.equal(short, CELL.nested, "one value per row costs no more than the floor");
+  assert.equal(long, CELL.nestedBase + CELL.nestedPerElement * 100);
+  assert.ok(long > 10 * short);
 });

@@ -54,10 +54,21 @@ KINDS = [
 ]
 
 
-def schema_plan(limit):
+# columns unlike the ones the memory estimate was first calibrated on (--extra): long text, lists,
+# structs and wide decimals, the shapes where a fixed per-cell cost is most likely to be wrong
+KINDS_EXTRA = [
+    ("long_s", 2),      # string, 200-2000 characters
+    ("list_i", 2),      # list<int32>, 0-20 elements
+    ("list_s", 2),      # list<string>, 0-8 short strings
+    ("struct_m", 2),    # struct<a: int64, b: string, c: double>
+    ("dec_w", 2),       # decimal(38,10)
+]
+
+
+def schema_plan(limit, extra=False):
     """The ordered (name, kind, index) of every column, cut to `limit`."""
     plan = [("id", "id", 0), ("ts", "ts", 0)]
-    for kind, n in KINDS:
+    for kind, n in KINDS + (KINDS_EXTRA if extra else []):
         for i in range(n):
             plan.append(("%s_%03d" % (kind, i), kind, i))
     return plan[:limit]
@@ -105,6 +116,24 @@ def column(rng, kind, i, start, n):
         else:
             vals = pa.array(np.array(WORDS, dtype=object)[rng.integers(0, len(WORDS), n)])
         return pa.compute.if_else(pa.array(keep), vals, pa.scalar(None, vals.type))
+    if kind == "long_s":
+        lens = rng.integers(200, 2000, n)
+        base = np.array(WORDS, dtype=object)[rng.integers(0, len(WORDS), n)]
+        return pa.array([(str(b) + " ") * (int(l) // (len(str(b)) + 1) + 1) for b, l in zip(base, lens)]).cast(pa.string())
+    if kind == "list_i":
+        lens = rng.integers(0, 21, n)
+        return pa.array([rng.integers(0, 1000, int(l), dtype=np.int32).tolist() for l in lens], pa.list_(pa.int32()))
+    if kind == "list_s":
+        lens = rng.integers(0, 9, n)
+        return pa.array([[WORDS[j] for j in rng.integers(0, len(WORDS), int(l))] for l in lens], pa.list_(pa.string()))
+    if kind == "struct_m":
+        a = rng.integers(0, 1_000_000, n)
+        b = np.array(WORDS, dtype=object)[rng.integers(0, len(WORDS), n)]
+        c = np.round(rng.random(n) * 100, 2)
+        return pa.StructArray.from_arrays([pa.array(a), pa.array(b), pa.array(c)], names=["a", "b", "c"])
+    if kind == "dec_w":
+        v = rng.integers(0, 10**12, n)
+        return pa.array([decimal.Decimal(int(x)).scaleb(-10) for x in v], pa.decimal128(38, 10))
     raise ValueError(kind)
 
 
@@ -116,11 +145,12 @@ def main():
     ap.add_argument("--row-group", type=int, default=250_000, help="rows per row group")
     ap.add_argument("--compression", default="zstd")
     ap.add_argument("--seed", type=int, default=20260919)
+    ap.add_argument("--extra", action="store_true", help="add long text, list, struct and wide decimal columns (for calibration)")
     a = ap.parse_args()
 
     import pyarrow.compute  # noqa: F401  (pa.compute is used above)
 
-    plan = schema_plan(a.columns)
+    plan = schema_plan(a.columns, a.extra)
     if len(plan) < a.columns:
         sys.exit("only %d columns are defined" % len(plan))
     t0 = time.time()

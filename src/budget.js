@@ -25,7 +25,9 @@ export class Refusal extends Error {
   constructor(message) { super(message); this.name = "Refusal"; }
 }
 /** Bytes per decoded cell, by the kind of column, measured. */
-export const CELL = { fixed: 20, dictionary: 16, decimal: 120, nested: 120, unknown: 32, stringBase: 64, stringPerByte: 16 };
+export const CELL = { fixed: 20, dictionary: 16, decimal: 120, nested: 120, unknown: 32, stringBase: 180, stringPerByte: 2,
+  /* a date or timestamp is converted per row whatever its encoding, so a dictionary saves nothing; a list costs a base and a share per element */
+  temporal: 48, nestedBase: 70, nestedPerElement: 18 };
 /**
  * Estimates are multiplied by this. The per-cell costs above are what a decoded value keeps once
  * decoding is done; what takes a tab down is the peak while it is happening, when a row group's
@@ -57,12 +59,35 @@ export function budgetBytes() {
  * What one decoded cell of this column costs, from what the footer says about its chunk.
  * `type` is the physical type, `meta` the column chunk's metadata.
  */
-export function cellBytes(spec, type, meta) {
+export function cellBytes(spec, type, meta, groupRows) {
   if (!spec) return CELL.unknown;
-  if (spec.nested) return CELL.nested;
+  if (spec.nested) {
+    /* the footer says how many leaf values the chunk holds for how many rows, so a long list is priced as one */
+    const per = groupRows && meta && meta.numValues ? meta.numValues / groupRows : 0;
+    return Math.max(CELL.nested, Math.ceil(CELL.nestedBase + CELL.nestedPerElement * per));
+  }
   if (spec.decimal) return CELL.decimal;
-  const dict = !!(meta && meta.encodings && (meta.encodings.indexOf("RLE_DICTIONARY") >= 0 ||
-    meta.encodings.indexOf("PLAIN_DICTIONARY") >= 0));
+  if (spec.kind === "temporal") return CELL.temporal;
+  return cellBytesPlain(spec, type, meta);
+}
+/**
+ * Whether a chunk's data pages are mostly dictionary-encoded. A writer starts a dictionary and falls back to
+ * plain when it grows too big, so a chunk can list a dictionary encoding while nearly every value is stored
+ * (and decoded) as a full value: what the pages actually used decides, where the footer says.
+ */
+function mostlyDictionary(meta) {
+  const listed = !!(meta && meta.encodings && (meta.encodings.indexOf("RLE_DICTIONARY") >= 0 || meta.encodings.indexOf("PLAIN_DICTIONARY") >= 0));
+  if (!listed || !meta.encodingStats || !meta.encodingStats.length) return listed;
+  let dict = 0, all = 0;
+  for (const s of meta.encodingStats) {
+    if (s.pageType !== "DATA_PAGE" && s.pageType !== "DATA_PAGE_V2") continue;
+    all += s.count;
+    if (s.encoding === "RLE_DICTIONARY" || s.encoding === "PLAIN_DICTIONARY") dict += s.count;
+  }
+  return all ? dict / all >= 0.5 : listed;
+}
+function cellBytesPlain(spec, type, meta) {
+  const dict = mostlyDictionary(meta);
   if (type === "BYTE_ARRAY" || type === "FIXED_LEN_BYTE_ARRAY") {
     if (dict) return CELL.dictionary;      /* a row holds a reference to a string the dictionary already owns */
     const n = meta && meta.numValues ? meta.numValues : 0;
@@ -77,7 +102,7 @@ export function columnGroupBytes(part, rg, col, rows) {
   if (col.partKey !== undefined) return rows * 8;
   const chunk = chunkFor(rg, col.key);
   const leaf = part.leafByPath.get(col.key);
-  return Math.ceil(rows * cellBytes(col.spec, leaf ? leaf.type : null, chunk ? chunk.meta : null) * SAFETY);
+  return Math.ceil(rows * cellBytes(col.spec, leaf ? leaf.type : null, chunk ? chunk.meta : null, rg.numRows) * SAFETY);
 }
 
 /**
@@ -120,7 +145,7 @@ export function cellCost(dataset, col) {
     const part = dataset.parts[0], rg = part ? part.meta.rowGroups[0] : null;    /* a joined table has no file behind it */
     const chunk = rg ? chunkFor(rg, col.key) : null;
     const leaf = part ? part.leafByPath.get(col.key) : null;
-    col.costPerCell = Math.ceil(cellBytes(col.spec, leaf ? leaf.type : null, chunk ? chunk.meta : null) * SAFETY);
+    col.costPerCell = Math.ceil(cellBytes(col.spec, leaf ? leaf.type : null, chunk ? chunk.meta : null, rg ? rg.numRows : 0) * SAFETY);
   }
   return col.costPerCell;
 }
