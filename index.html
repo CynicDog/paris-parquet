@@ -118,6 +118,8 @@ button:focus-visible,label.btn:focus-visible,[role=radio]:focus-visible{outline:
 #progress{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;
   padding:16px 18px 14px;width:min(480px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.28)}
 #progress::backdrop{background:rgba(0,0,0,.4)}
+/* after the work is done the popup stays a moment as a non-modal dialog: keep it where the modal one was */
+#progress[open]:not(:modal){position:fixed;inset:0;margin:auto;height:fit-content}
 #progress h2{margin:0 0 10px;font:600 14px/1.4 var(--mono)}
 #pbar{position:relative;height:10px;border-radius:5px;background:var(--line);overflow:hidden}
 #pfill{height:100%;width:0;background:var(--accent);border-radius:5px;transition:width .15s linear}
@@ -2393,6 +2395,12 @@ function progressFinish() {
   pg.at = pg.steps.length;
   pg.frac = 0;
   pgPaint();
+  /* the work is done, so the page must not stay inert for the rest of the minimum display time: the popup
+     lingers so it does not flicker, but as a plain (non-modal) dialog that lets input through */
+  const dlg = pgEl("progress");
+  if (dlg && dlg.open && dlg.matches(":modal")) {
+    try { dlg.close(); dlg.show(); } catch (_e) { /* if it cannot be reopened it simply closes */ }
+  }
   const left = MIN_VISIBLE - (performance.now() - pg.shownAt);
   clearTimeout(pg.closeTimer);
   pg.closeTimer = setTimeout(pgHide, Math.max(0, left));
@@ -2413,6 +2421,141 @@ function initProgress() {
   pgEl("pcancel").addEventListener("click", progressRequestCancel);
   /* Escape closes a modal dialog by default; here it asks the work to stop instead */
   dlg.addEventListener("cancel", (e) => { e.preventDefault(); progressRequestCancel(); });
+}
+
+// Exact percentiles without sorting a copy of the column.
+//
+// A percentile is a selection problem, not a sorting one, and selection can be done out of memory by
+// counting: map every value to an unsigned 64-bit key whose order is the numeric order, count how many
+// values fall in each of the 65,536 buckets of its top 16 bits (256 KB, however many values there
+// are), and read off which bucket each wanted rank lands in. If that bucket is small, one more pass
+// over the data collects just its values and the rank is picked from them; if it is large, the pass
+// counts the next 16 bits within it instead. Typically two passes, at most four, and the answer is
+// exactly the one a full sort would give. docs/bounded-memory-statistics.md has the theory and the
+// measurements from a prototype.
+//
+// One value's state is a `Radix`; the caller (query.js) owns the passes over the data:
+//
+//   const r = newRadix();  radixAdd(r, x) ...          the pass that counts
+//   planRadix(r, [0.99]);                              which buckets the wanted ranks fall in
+//   while (radixOpen(r)) { radixVisit(r, x) ...; radixAdvance(r); }    the passes that narrow it
+//   radixQuantile(r, 0.99)
+//
+// The key is built from the double's bits through a typed-array view, which assumes a little-endian
+// machine: every browser this runs in is.
+
+/**
+ * Tunables, exported so a test can force the multi-pass paths on a few dozen values. `promote` is how many
+ * values a group keeps before it counts them instead: a histogram costs 256 KB and a kept value 16 bytes,
+ * so counting is only the cheaper of the two beyond about 16,000 values.
+ */
+const RADIX = { promote: 16384, gather: 1 << 20 };
+/** What a counting histogram costs, in bytes. */
+const RADIX_BYTES = 65536 * 4;
+
+const F = new Float64Array(1);
+const U = new Uint32Array(F.buffer);
+const D = [0, 0, 0, 0];
+
+/** The four 16-bit digits of a double's order-preserving key: comparing digit by digit is comparing the numbers. */
+function digitsOf(x, out) {
+  F[0] = x;
+  let hi = U[1], lo = U[0];
+  if (hi >>> 31) { hi = ~hi >>> 0; lo = ~lo >>> 0; } else hi = (hi ^ 0x80000000) >>> 0;
+  out[0] = hi >>> 16; out[1] = hi & 0xffff; out[2] = lo >>> 16; out[3] = lo & 0xffff;
+  return out;
+}
+/** The double a full set of digits stands for. */
+function valueOfDigits(d) {
+  let hi = ((d[0] << 16) | d[1]) >>> 0, lo = ((d[2] << 16) | d[3]) >>> 0;
+  if (hi >>> 31) hi = (hi ^ 0x80000000) >>> 0; else { hi = ~hi >>> 0; lo = ~lo >>> 0; }
+  U[1] = hi; U[0] = lo;
+  return F[0];
+}
+
+function newRadix() {
+  return { h: new Uint32Array(65536), n: 0, targets: null, rv: null };
+}
+/** Counts one value (the first pass). NaN must not be added: it has no place in the order. */
+function radixAdd(r, x) {
+  F[0] = x;
+  const hi = U[1];
+  r.h[(hi >>> 31 ? ~hi >>> 0 : (hi ^ 0x80000000) >>> 0) >>> 16]++;
+  r.n++;
+}
+
+/** The bucket, among `counts`, that holds rank `t.rel`; leaves the target one digit more resolved. */
+function resolve(t, counts) {
+  let cum = 0, b = 0;
+  for (; b < 65536; b++) {
+    if (cum + counts[b] > t.rel) break;
+    cum += counts[b];
+  }
+  t.rel -= cum;
+  t.digits.push(b);
+  t.count = counts[b];
+  if (t.digits.length === 4) { t.value = valueOfDigits(t.digits); t.done = true; }
+}
+/** Sets up how the next pass will treat this target: gather its bucket if it is small, count its next digits if not. */
+function prepare(t) {
+  if (t.done) return;
+  if (t.count <= RADIX.gather) { t.gather = new Float64Array(t.count); t.fill = 0; t.counts = null; }
+  else { t.counts = new Uint32Array(65536); t.gather = null; }
+}
+
+/** After the counting pass: the ranks the wanted quantiles need (the value at a rank and the next one, to interpolate), and where they fall. */
+function planRadix(r, quantiles) {
+  const ranks = new Set();
+  for (const p of quantiles) {
+    const h = (r.n - 1) * p, lo = Math.floor(h);
+    ranks.add(lo);
+    if (h - lo) ranks.add(lo + 1);
+  }
+  r.targets = [...ranks].sort((a, b) => a - b).map((rank) => ({ rank, rel: rank, digits: [], count: 0, counts: null, gather: null, fill: 0, done: false, value: 0 }));
+  for (const t of r.targets) { resolve(t, r.h); prepare(t); }
+  if (!radixOpen(r)) finish(r);
+}
+function radixOpen(r) {
+  return !!r.targets && r.targets.some((t) => !t.done);
+}
+/** One value during a narrowing pass: it counts toward, or is gathered by, whichever targets its digits still match. */
+function radixVisit(r, x) {
+  digitsOf(x, D);
+  for (const t of r.targets) {
+    if (t.done) continue;
+    const L = t.digits.length;
+    let same = true;
+    for (let j = 0; j < L; j++) if (D[j] !== t.digits[j]) { same = false; break; }
+    if (!same) continue;
+    if (t.gather) t.gather[t.fill++] = x; else t.counts[D[L]]++;
+  }
+}
+/** After a narrowing pass over all the data: settle what it collected. */
+function radixAdvance(r) {
+  for (const t of r.targets) {
+    if (t.done) continue;
+    if (t.gather) { t.gather.sort(); t.value = t.gather[t.rel]; t.done = true; t.gather = null; }
+    else { resolve(t, t.counts); t.counts = null; prepare(t); }
+  }
+  if (!radixOpen(r)) finish(r);
+}
+function finish(r) {
+  r.rv = new Map(r.targets.map((t) => [t.rank, t.value]));
+  r.targets = null;
+  r.h = null;
+}
+/** The exact quantile, linearly interpolated between neighbouring values the way QUANTILE_CONT does it. */
+function radixQuantile(r, p) {
+  if (!r.n || !r.rv) return null;
+  const h = (r.n - 1) * p, lo = Math.floor(h), d = h - lo;
+  const a = r.rv.get(lo);
+  return d ? a + (r.rv.get(lo + 1) - a) * d : a;
+}
+/** What the passes still to come will hold, in bytes: buckets to gather and digit counters. */
+function radixPending(r) {
+  let bytes = 0;
+  if (r.targets) for (const t of r.targets) if (!t.done) bytes += t.gather ? t.gather.byteLength : RADIX_BYTES;
+  return bytes;
 }
 
 // Dataset assembly: reads every part's footer, reconciles files into one
@@ -4564,9 +4707,9 @@ function addSum(a, x) {
  * What feeding rows into groups needs to know about the metrics, worked out once per batch of rows
  * rather than once per row.
  */
-function groupScanCtx(metrics, mKeys, mSpecs) {
+function groupScanCtx(metrics, mKeys, mSpecs, radix) {
   return {
-    metrics, mKeys,
+    metrics, mKeys, radix: !!radix,
     needs: metrics.map((m) => accNeeds(m.agg)),
     /* one comparator per metric, built here rather than per row */
     less: metrics.map((_m, i) => (mKeys[i]
@@ -4621,7 +4764,23 @@ function feedGroups(groups, ctx, gRows, mRows, positions, index, n, keepKeys, tr
             a.m2 += d * (x - a.mean);
           }
           if (f.span) { if (x < a.lo) a.lo = x; if (x > a.hi) a.hi = x; }
-          if (f.vals) { if (!a.vals) a.vals = []; a.vals.push(x); if (track) bytes += STATE_BYTES.value; }
+          if (f.vals) {
+            if (a.rh) radixAdd(a.rh, x);
+            else {
+              if (!a.vals) a.vals = [];
+              a.vals.push(x);
+              if (track) bytes += STATE_BYTES.value;
+              /* a streamed group that keeps more values than this stops keeping them and counts them into
+                 buckets instead (src/radix.js): its percentiles are then found by narrowing passes over the
+                 file, exactly, without a sorted copy */
+              if (ctx.radix && a.vals.length > RADIX.promote) {
+                a.rh = newRadix();
+                for (const v of a.vals) radixAdd(a.rh, v);
+                if (track) bytes += RADIX_BYTES - a.vals.length * STATE_BYTES.value;
+                a.vals = null;
+              }
+            }
+          }
         }
       }
       else if (f.set) {
@@ -4655,6 +4814,7 @@ function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n) {
  * the group that a streaming one does not.
  */
 function quantileOf(a, p) {
+  if (a.rh) return radixQuantile(a.rh, p);
   const v = a.vals;
   if (!v || !v.length) return null;
   if (!a.sorted) { v.sort((x, y) => x - y); a.sorted = true; }
@@ -4783,13 +4943,73 @@ function feedAggBatch(st, cols, n) {
   const index = matchIndex(q, cols, n);
   const gRows = gcis.map((ci) => cols[ci].rows);
   const mRows = st.metrics.map((m) => cols[m.ci].rows);
-  const ctx = groupScanCtx(st.metrics, st.metrics.map((m) => sortKey(cols[m.ci].spec)), st.metrics.map((m) => cols[m.ci].spec));
+  const ctx = groupScanCtx(st.metrics, st.metrics.map((m) => sortKey(cols[m.ci].spec)), st.metrics.map((m) => cols[m.ci].spec), true);
   for (let i = 0; i < st.sets.length; i++) feedGroups(st.maps[i], ctx, gRows, mRows, st.sets[i], index, n, true, st.track);
   st.rows += n;
   st.matched += index ? index.length : n;
   st.batches++;
   st.last = cols;
 }
+/* ---- the passes that find exact percentiles for groups that kept counts instead of values ---- */
+const QUANTILES = { MED: [0.5], P90: [0.9], P95: [0.95], P99: [0.99], IQR: [0.25, 0.75] };
+const isQuantile = (agg) => !!QUANTILES[agg];
+const eachRadix = (st, fn) => {
+  for (const map of st.maps) for (const acc of map.values()) for (let m = 0; m < st.metrics.length; m++) if (acc.m[m].rh) fn(acc.m[m].rh, m);
+};
+/** After the first pass: where in its buckets each wanted rank falls. */
+function radixPlanStream(st) {
+  eachRadix(st, (rh, m) => planRadix(rh, QUANTILES[st.metrics[m].agg]));
+}
+function radixOpenStream(st) {
+  let open = false;
+  eachRadix(st, (rh) => { if (radixOpen(rh)) open = true; });
+  return open;
+}
+/** What the next narrowing pass will hold: the buckets it gathers and the digit counters it fills. */
+function radixPendingBytes(st) {
+  let bytes = 0;
+  eachRadix(st, (rh) => { bytes += radixPending(rh); });
+  return bytes;
+}
+/** The columns a narrowing pass has to read: what groups and filters need, and only the percentile columns still open. */
+function radixColumns(st) {
+  const need = new Set(st.q.groupBy);
+  for (const f of st.q.filters) need.add(f.ci);
+  eachRadix(st, (rh, m) => { if (radixOpen(rh)) need.add(st.metrics[m].ci); });
+  return need;
+}
+/** One batch of a narrowing pass: every value goes to the targets its group's buckets still want. */
+function radixFeedBatch(st, cols, n) {
+  const q = st.q, gcis = q.groupBy;
+  const index = matchIndex(q, cols, n);
+  const total = index ? index.length : n;
+  const gRows = gcis.map((ci) => cols[ci].rows);
+  const mRows = st.metrics.map((m) => cols[m.ci].rows);
+  const mKeys = st.metrics.map((m) => sortKey(cols[m.ci].spec));
+  for (let s = 0; s < st.sets.length; s++) {
+    const positions = st.sets[s], map = st.maps[s];
+    for (let i = 0; i < total; i++) {
+      const r = index ? index[i] : i;
+      let key = "";
+      for (const g of positions) key += keyPart(gRows[g][r]) + "\u0001";
+      const acc = map.get(key);
+      if (!acc) continue;
+      for (let m = 0; m < st.metrics.length; m++) {
+        const rh = acc.m[m].rh;
+        if (!rh || !rh.targets) continue;
+        const v = mRows[m][r];
+        if (v === null || v === undefined) continue;
+        const x = mKeys[m] ? mKeys[m](v) : NaN;
+        if (x === x) radixVisit(rh, x);
+      }
+    }
+  }
+}
+/** After a narrowing pass over the whole file. */
+function radixAdvanceStream(st) {
+  eachRadix(st, (rh) => { if (radixOpen(rh)) radixAdvance(rh); });
+}
+
 /** The output columns of a finished stream, named and typed from the last batch's columns. */
 function finishAggStream(st) {
   const q = st.q, gcis = q.groupBy, cols = st.last, metrics = st.metrics;
@@ -6451,6 +6671,10 @@ const RUN_STEPS = [
   { label: "Read", why: "Decoding only the columns the query uses, from only the row groups that could match. An aggregate folds each row group into running totals and lets it go, so memory does not grow with the file." },
   { label: "Compute", why: "Working out the answer from what was read." },
 ];
+/* a query with a percentile has one more step: the passes that find it exactly */
+const RUN_STEPS_PCT = RUN_STEPS.slice(0, 3).concat([
+  { label: "Refine percentiles", why: "Percentiles are exact and found without sorting: the first pass counted values into buckets, and each further pass collects only the bucket a percentile falls in (or narrows it by another 16 bits), so a sorted copy of the column is never held." },
+], RUN_STEPS.slice(3));
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 /** Frees the decoded rows a table holds, so its replacement can be read without both in memory at once. */
@@ -6494,7 +6718,10 @@ async function runWhole() {
   if ((!hasWhere && !agg) || complete) { runQuery(); return; }
   const stop = { asked: false };
   let needRestore = false;
-  busy(true, agg ? "Aggregating the whole file" : "Searching the whole file", RUN_STEPS, () => { stop.asked = true; });
+  const pct = !!agg && q.metrics.some((m) => isQuantile(m.agg));
+  const steps = pct ? RUN_STEPS_PCT : RUN_STEPS;
+  const computeStep = steps.length - 1;
+  busy(true, agg ? "Aggregating the whole file" : "Searching the whole file", steps, () => { stop.asked = true; });
   await tick();
   try {
     progressStep(0, 0.1, hasWhere ? "reading row group statistics for the WHERE clause" : "no WHERE clause, so every row group is needed");
@@ -6550,7 +6777,42 @@ async function runWhole() {
         await tick();
       }
       if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
-      progressStep(3, 0.5, num(st.maps[0].size) + " group" + (st.maps[0].size === 1 ? "" : "s") + " from " + num(st.rows) + " rows");
+      /* the groups that kept counts instead of values now find their percentiles by narrowing passes: each
+         re-reads only the columns it still needs, and collects only the bucket a percentile falls in */
+      if (pct) {
+        radixPlanStream(st);
+        let pass = 1;
+        while (radixOpenStream(st) && !stop.asked) {
+          pass++;
+          const pending = radixPendingBytes(st);
+          if (st.track.bytes + pending > room) {
+            showMemNote("Not run over the whole file: finding exact percentiles for " + num(st.maps[0].size) + " groups needs about " + bytesText(pending) +
+              " more than the running totals already hold, over what this page can hold beside a decoded row group (" + bytesText(room) +
+              "). Group by a column with fewer distinct values, or ask for fewer percentiles.",
+              [{ label: "Run on the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
+            return;
+          }
+          const need = radixColumns(st);
+          for (let i = 0; i < groups.length; i++) {
+            if (stop.asked) break;
+            const g = groups[i], of = groups.length;
+            progressStep(3, i / of, "pass " + num(pass) + ", row group " + num(i + 1) + " of " + num(of) + ": collecting the buckets the percentiles fall in");
+            const batch = newTable(dataset);
+            batch.plan = table.plan;
+            batch.need = need;
+            batch.nextPart = g.pi;
+            batch.nextGroup = g.gi;
+            await loadMore(dataset, batch, 1);
+            if (stop.asked) break;
+            radixFeedBatch(st, batch.cols, batch.rowsLoaded);
+            await tick();
+          }
+          if (stop.asked) break;
+          radixAdvanceStream(st);
+        }
+        if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+      }
+      progressStep(computeStep, 0.5, num(st.maps[0].size) + " group" + (st.maps[0].size === 1 ? "" : "s") + " from " + num(st.rows) + " rows");
       await tick();
       state.agg = { sig: aggSignature(q), dataset, outCols: finishAggStream(st), rows: st.rows, plan, ms: Math.round(performance.now() - t0) };
       showMemNote(null);

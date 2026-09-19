@@ -97,8 +97,15 @@ console.log(`${path.basename(file)}: ${rowsInFile.toLocaleString()} rows; every 
  */
 async function run(sql, expectName) {
   await page.fill("#qsql", sql);
+  const atFill = await page.evaluate(() => ({ dialogOpen: document.getElementById("progress").open, busy: !document.getElementById("busy").hidden, at: Math.round(performance.now()) }));
+  const afterFill = await page.inputValue("#qsql");
   await page.dispatchEvent("#qsql", "input");
   await page.waitForTimeout(450);
+  const afterWait = await page.inputValue("#qsql");
+  if (afterFill !== sql || afterWait !== sql) {
+    const focus = await page.evaluate(() => ({ active: document.activeElement && (document.activeElement.id || document.activeElement.tagName), ro: document.getElementById("qsql").readOnly, dis: document.getElementById("qsql").disabled, dlg: document.getElementById("progress").open, pages: 0 }));
+    console.log(`  (the SQL box is not what the script typed; expected ${expectName}; after fill: ${JSON.stringify(afterFill.slice(0, 70))}; after the wait: ${JSON.stringify(afterWait.slice(0, 70))}; ${JSON.stringify(focus)}; pages open: ${context.pages().length}; state just after the fill: ${JSON.stringify(atFill)})`);
+  }
   await page.click("#qrun");
   await idle();
   const problem = await page.evaluate(() => { const m = document.getElementById("qsqlmsg"); return m && !m.hidden ? m.textContent.trim() : ""; });
@@ -108,20 +115,31 @@ async function run(sql, expectName) {
     const num = (x) => (typeof x === "bigint" ? Number(x) : typeof x === "string" && x !== "" && !Number.isNaN(+x) ? +x : x);
     return { rows: v.cols[0].rows.length, names: v.cols.map((c) => c.name), get: v.cols.map((c) => c.rows.map(num)),
       covered: window.PARIS.state.agg ? window.PARIS.state.agg.rows : window.PARIS.state.table.rowsLoaded,   /* a streamed aggregate says how many rows it folded */ busy: !document.getElementById("busy").hidden,
-      err: (document.getElementById("err") || {}).textContent || "" };
+      err: (document.getElementById("err") || {}).textContent || "",
+      note: (document.getElementById("memnote") || {}).textContent || "", plan: (document.getElementById("qplan") || {}).textContent || "" };
   });
   let got = await read(), waited = 0;
   while (expectName && got.names[0] !== expectName && waited < 120000) {
     await page.waitForTimeout(500); waited += 500; await idle(); got = await read();
   }
-  if (expectName && got.names[0] !== expectName) throw new Error(`the view never became this query's (showing ${got.names[0]}); page error: ${got.err.slice(0, 160)}`);
+  if (expectName && got.names[0] !== expectName) {
+    const state = await page.evaluate(() => ({ dirty: window.PARIS.state.sqlDirty, sql: document.getElementById("qsql").value.slice(0, 60), metrics: window.PARIS.state.query.metrics.length, active: window.PARIS.state.query.active, disabled: document.getElementById("qrun").disabled, filling: !!window.PARIS.state.filling }));
+    console.log("  (view stale after the first click; page state: " + JSON.stringify(state) + "; clicking Run again)");
+    await page.click("#qrun");
+    await idle();
+    await page.waitForTimeout(1500);
+    got = await read();
+    if (got.names[0] === expectName) console.log("  (the second click ran it: the first click was lost)");
+  }
+  if (expectName && got.names[0] !== expectName) throw new Error(`the view never became this query's (showing ${got.names[0]}); page error: ${got.err.slice(0, 160)}; note: ${got.note.slice(0, 300)}; scope: ${got.plan.slice(0, 120)}`);
   got.waitedMs = waited;
   return got;
 }
 const rel = (a, b) => (a === b ? 0 : Math.abs(a - b) / Math.max(1e-300, Math.abs(a), Math.abs(b)));
 
 let bad = 0, checks = 0, worst = 0;
-for (const { c, note, tol } of COLUMNS) {
+const ONLY = process.env.ONLY ? process.env.ONLY.split(",") : null;   // e.g. ONLY=count_l_003,ratio_f32_002
+for (const { c, note, tol } of COLUMNS.filter((x) => !ONLY || ONLY.includes(x.c))) {
   const want = expectedFor(c);
   const got = await run("SELECT " + METRICS.map(([, sql]) => sql(c)).join(", ") + "\nFROM t;", `COUNT(${c})`);
   if (got.waitedMs) console.log(`  (the page took ${got.waitedMs / 1000}s longer to replace the previous answer than the script expected)`);

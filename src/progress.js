@@ -142,6 +142,12 @@ export function progressFinish() {
   pg.at = pg.steps.length;
   pg.frac = 0;
   pgPaint();
+  /* the work is done, so the page must not stay inert for the rest of the minimum display time: the popup
+     lingers so it does not flicker, but as a plain (non-modal) dialog that lets input through */
+  const dlg = pgEl("progress");
+  if (dlg && dlg.open && dlg.matches(":modal")) {
+    try { dlg.close(); dlg.show(); } catch (_e) { /* if it cannot be reopened it simply closes */ }
+  }
   const left = MIN_VISIBLE - (performance.now() - pg.shownAt);
   clearTimeout(pg.closeTimer);
   pg.closeTimer = setTimeout(pgHide, Math.max(0, left));

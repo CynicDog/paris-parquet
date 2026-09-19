@@ -117,6 +117,8 @@ button:focus-visible,label.btn:focus-visible,[role=radio]:focus-visible{outline:
 #progress{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;
   padding:16px 18px 14px;width:min(480px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.28)}
 #progress::backdrop{background:rgba(0,0,0,.4)}
+/* after the work is done the popup stays a moment as a non-modal dialog: keep it where the modal one was */
+#progress[open]:not(:modal){position:fixed;inset:0;margin:auto;height:fit-content}
 #progress h2{margin:0 0 10px;font:600 14px/1.4 var(--mono)}
 #pbar{position:relative;height:10px;border-radius:5px;background:var(--line);overflow:hidden}
 #pfill{height:100%;width:0;background:var(--accent);border-radius:5px;transition:width .15s linear}

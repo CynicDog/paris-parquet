@@ -83,8 +83,12 @@ else bad("Escape did not cancel");
 if (await page.$eval("#progress", (d) => d.open)) ok("the popup stays up while the work winds down");
 else bad("the popup closed before the work said it was done");
 await page.evaluate(() => window.PARIS.progressFinish());
+/* it lingers a moment so it does not flicker, but must not keep the page inert while it does */
+const lingering = await page.evaluate(() => { const d = document.getElementById("progress"); return { open: d.open, modal: d.matches(":modal") }; });
+if (lingering.open && !lingering.modal) ok("once the work is done the popup lingers as a non-modal dialog, so it does not block input");
+else bad("popup right after the work finished: " + JSON.stringify(lingering));
 await page.waitForFunction(() => !document.getElementById("progress").open, null, { timeout: 5000 });
-ok("and closes once it is");
+ok("and closes on its own");
 
 /* ---------- the budget, on a wide file ---------- */
 await page.evaluate(() => window.PARIS.setBudgetMB(1));
@@ -150,6 +154,14 @@ if (folded.first && folded.first[0] === 200000 && folded.first[1] === 99999.5 &&
 else bad("streamed aggregate under 1 MB: " + JSON.stringify(folded));
 if (/^Whole file\. Searched all 200,000 rows\./.test(folded.plan) && !folded.memnote) ok("with no refusal, and the scope line says it covered every row: " + folded.plan);
 else bad("scope/note after the streamed aggregate: " + JSON.stringify(folded));
+/* a popup that lingers after the work must not eat what is typed straight after it */
+await page.evaluate(() => { window.PARIS.progressStart("Lingering", [{ label: "One", why: "x" }]); });
+await page.waitForFunction(() => document.getElementById("progress").open, null, { timeout: 5000 });
+await page.evaluate(() => window.PARIS.progressFinish());
+await page.fill("#qsql", "SELECT 7 AS typed_at_once");
+if ((await page.inputValue("#qsql")) === "SELECT 7 AS typed_at_once" && (await page.evaluate(() => document.activeElement.id)) === "qsql") ok("typing straight after a run, while the popup lingers, lands in the SQL box");
+else bad("typing while the popup lingered was lost");
+await page.waitForFunction(() => !document.getElementById("progress").open, null, { timeout: 5000 });
 const std = folded.first && folded.first[4];
 if (Math.abs(std - Math.sqrt((200000 * 200001) / 12)) < 1e-6) ok("its sample standard deviation is the exact one for 0..199,999: " + std);
 else bad("STDDEV_SAMP folded across 20 row groups: " + std);
@@ -164,12 +176,28 @@ else bad("grouped, ordered, streamed: " + JSON.stringify(sorted));
 if (sum === 200000) ok("and the group counts add up to every row of the file: " + sum);
 else bad("the groups' counts add up to " + sum + ", not 200,000");
 
-/* what cannot be folded away -- a percentile keeps every value -- is watched as it grows and stopped with the numbers */
-const median = await ask("SELECT MEDIAN(id) FROM sorted");
-if (/^Not run over the whole file: after \d+ of 20 row groups its running totals \(1 groups, and the values a percentile/.test(median.memnote)) ok("a percentile that would keep every value is stopped when it outgrows the budget: " + median.memnote.slice(0, 110) + "…");
-else bad("MEDIAN under a 1 MB budget: " + JSON.stringify(median));
-if (/Run on the 20,000 rows already read/.test(median.action)) ok("with an explicit, labelled way to run on what is loaded");
-else bad("no fallback action: " + median.action);
+/* a percentile is found exactly without a sorted copy of the column: the first pass counts values into buckets,
+   a second collects the one bucket the percentile falls in. That fits a budget the column itself never could */
+const p50 = await ask("SELECT MEDIAN(id) FROM sorted");
+if (p50.first && p50.first[0] === 99999.5 && !p50.memnote) ok("under a 1 MB budget the median of 200,000 rows is found exactly, by counting and narrowing: " + p50.first[0]);
+else bad("MEDIAN under 1 MB: " + JSON.stringify(p50));
+const p99 = await ask("SELECT QUANTILE_CONT(id, 0.99) FROM sorted");
+if (p99.first && Math.abs(p99.first[0] - 197999.01) < 1e-6) ok("and so is the 99th percentile, interpolated as QUANTILE_CONT does: " + p99.first[0]);
+else bad("P99 under 1 MB: " + JSON.stringify(p99));
+await page.evaluate(() => window.PARIS.setBudgetMB(8));      /* ninety-odd groups keep about 2,000 values each: a few MB */
+const byGroup = await ask("SELECT grp, MEDIAN(id) FROM sorted GROUP BY grp");
+if (byGroup.cols && byGroup.cols[0].length > 20 && !byGroup.memnote && byGroup.cols[1].every((v) => typeof v === "number")) ok("and a median for each of " + byGroup.cols[0].length + "+ groups under 8 MB (each small enough to keep its values, so none needs the extra pass)");
+else bad("MEDIAN by group under 8 MB: " + JSON.stringify(byGroup).slice(0, 200));
+await page.evaluate(() => window.PARIS.setBudgetMB(1));
+
+/* what still has to be kept is watched as it grows and stopped with the numbers: several percentiles at once need
+   a set of buckets each, and a distinct count keeps every distinct value */
+const several = await ask("SELECT MEDIAN(id), QUANTILE_CONT(id, 0.9), QUANTILE_CONT(id, 0.95), QUANTILE_CONT(id, 0.99) FROM sorted");
+if (/^Not run over the whole file: after \d+ of 20 row groups its running totals \(1 groups, and the values a percentile/.test(several.memnote)) ok("four percentiles at once outgrow that budget and are stopped, with the numbers: " + several.memnote.slice(0, 110) + "…");
+else bad("four percentiles under a 1 MB budget: " + JSON.stringify(several));
+const distinct = await ask("SELECT COUNT(DISTINCT id) FROM sorted");
+if (/^Not run over the whole file: after \d+ of 20 row groups its running totals/.test(distinct.memnote) && /Run on the 20,000 rows already read/.test(distinct.action)) ok("a distinct count, which keeps every distinct value, is stopped too, with a labelled way to run on what is loaded");
+else bad("COUNT(DISTINCT) under 1 MB: " + JSON.stringify(distinct));
 await page.click("#memnote button");
 await idle();
 const partial = await text("#qplan");

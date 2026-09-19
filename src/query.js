@@ -6,6 +6,7 @@
 
 import { $ } from "./columns.js";
 import { describeScope, showPlan, unscan } from "./pushdown.js";
+import { newRadix, planRadix, RADIX, RADIX_BYTES, radixAdd, radixAdvance, radixOpen, radixPending, radixQuantile, radixVisit } from "./radix.js";
 import { binBounds, fmtValue, lessThan, numeric } from "./types.js";
 import { adoptSql, renderQuery } from "./ui-query-builder.js";
 import { baseView, displayCols, neededColumns, needFilled, num, setView, state } from "./view.js";
@@ -295,9 +296,9 @@ function addSum(a, x) {
  * What feeding rows into groups needs to know about the metrics, worked out once per batch of rows
  * rather than once per row.
  */
-export function groupScanCtx(metrics, mKeys, mSpecs) {
+export function groupScanCtx(metrics, mKeys, mSpecs, radix) {
   return {
-    metrics, mKeys,
+    metrics, mKeys, radix: !!radix,
     needs: metrics.map((m) => accNeeds(m.agg)),
     /* one comparator per metric, built here rather than per row */
     less: metrics.map((_m, i) => (mKeys[i]
@@ -352,7 +353,23 @@ export function feedGroups(groups, ctx, gRows, mRows, positions, index, n, keepK
             a.m2 += d * (x - a.mean);
           }
           if (f.span) { if (x < a.lo) a.lo = x; if (x > a.hi) a.hi = x; }
-          if (f.vals) { if (!a.vals) a.vals = []; a.vals.push(x); if (track) bytes += STATE_BYTES.value; }
+          if (f.vals) {
+            if (a.rh) radixAdd(a.rh, x);
+            else {
+              if (!a.vals) a.vals = [];
+              a.vals.push(x);
+              if (track) bytes += STATE_BYTES.value;
+              /* a streamed group that keeps more values than this stops keeping them and counts them into
+                 buckets instead (src/radix.js): its percentiles are then found by narrowing passes over the
+                 file, exactly, without a sorted copy */
+              if (ctx.radix && a.vals.length > RADIX.promote) {
+                a.rh = newRadix();
+                for (const v of a.vals) radixAdd(a.rh, v);
+                if (track) bytes += RADIX_BYTES - a.vals.length * STATE_BYTES.value;
+                a.vals = null;
+              }
+            }
+          }
         }
       }
       else if (f.set) {
@@ -386,6 +403,7 @@ export function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, inde
  * the group that a streaming one does not.
  */
 export function quantileOf(a, p) {
+  if (a.rh) return radixQuantile(a.rh, p);
   const v = a.vals;
   if (!v || !v.length) return null;
   if (!a.sorted) { v.sort((x, y) => x - y); a.sorted = true; }
@@ -514,13 +532,73 @@ export function feedAggBatch(st, cols, n) {
   const index = matchIndex(q, cols, n);
   const gRows = gcis.map((ci) => cols[ci].rows);
   const mRows = st.metrics.map((m) => cols[m.ci].rows);
-  const ctx = groupScanCtx(st.metrics, st.metrics.map((m) => sortKey(cols[m.ci].spec)), st.metrics.map((m) => cols[m.ci].spec));
+  const ctx = groupScanCtx(st.metrics, st.metrics.map((m) => sortKey(cols[m.ci].spec)), st.metrics.map((m) => cols[m.ci].spec), true);
   for (let i = 0; i < st.sets.length; i++) feedGroups(st.maps[i], ctx, gRows, mRows, st.sets[i], index, n, true, st.track);
   st.rows += n;
   st.matched += index ? index.length : n;
   st.batches++;
   st.last = cols;
 }
+/* ---- the passes that find exact percentiles for groups that kept counts instead of values ---- */
+const QUANTILES = { MED: [0.5], P90: [0.9], P95: [0.95], P99: [0.99], IQR: [0.25, 0.75] };
+export const isQuantile = (agg) => !!QUANTILES[agg];
+const eachRadix = (st, fn) => {
+  for (const map of st.maps) for (const acc of map.values()) for (let m = 0; m < st.metrics.length; m++) if (acc.m[m].rh) fn(acc.m[m].rh, m);
+};
+/** After the first pass: where in its buckets each wanted rank falls. */
+export function radixPlanStream(st) {
+  eachRadix(st, (rh, m) => planRadix(rh, QUANTILES[st.metrics[m].agg]));
+}
+export function radixOpenStream(st) {
+  let open = false;
+  eachRadix(st, (rh) => { if (radixOpen(rh)) open = true; });
+  return open;
+}
+/** What the next narrowing pass will hold: the buckets it gathers and the digit counters it fills. */
+export function radixPendingBytes(st) {
+  let bytes = 0;
+  eachRadix(st, (rh) => { bytes += radixPending(rh); });
+  return bytes;
+}
+/** The columns a narrowing pass has to read: what groups and filters need, and only the percentile columns still open. */
+export function radixColumns(st) {
+  const need = new Set(st.q.groupBy);
+  for (const f of st.q.filters) need.add(f.ci);
+  eachRadix(st, (rh, m) => { if (radixOpen(rh)) need.add(st.metrics[m].ci); });
+  return need;
+}
+/** One batch of a narrowing pass: every value goes to the targets its group's buckets still want. */
+export function radixFeedBatch(st, cols, n) {
+  const q = st.q, gcis = q.groupBy;
+  const index = matchIndex(q, cols, n);
+  const total = index ? index.length : n;
+  const gRows = gcis.map((ci) => cols[ci].rows);
+  const mRows = st.metrics.map((m) => cols[m.ci].rows);
+  const mKeys = st.metrics.map((m) => sortKey(cols[m.ci].spec));
+  for (let s = 0; s < st.sets.length; s++) {
+    const positions = st.sets[s], map = st.maps[s];
+    for (let i = 0; i < total; i++) {
+      const r = index ? index[i] : i;
+      let key = "";
+      for (const g of positions) key += keyPart(gRows[g][r]) + "\u0001";
+      const acc = map.get(key);
+      if (!acc) continue;
+      for (let m = 0; m < st.metrics.length; m++) {
+        const rh = acc.m[m].rh;
+        if (!rh || !rh.targets) continue;
+        const v = mRows[m][r];
+        if (v === null || v === undefined) continue;
+        const x = mKeys[m] ? mKeys[m](v) : NaN;
+        if (x === x) radixVisit(rh, x);
+      }
+    }
+  }
+}
+/** After a narrowing pass over the whole file. */
+export function radixAdvanceStream(st) {
+  eachRadix(st, (rh) => { if (radixOpen(rh)) radixAdvance(rh); });
+}
+
 /** The output columns of a finished stream, named and typed from the last batch's columns. */
 export function finishAggStream(st) {
   const q = st.q, gcis = q.groupBy, cols = st.last, metrics = st.metrics;

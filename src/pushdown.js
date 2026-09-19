@@ -10,7 +10,7 @@ import { newTable } from "./dataset.js";
 import { intersectRanges, mergeRanges, rangeCount, readColumnIndex, readOffsetIndex, unionRanges } from "./encoding.js";
 import { busy, FIRST_ROWS, showError, showMemNote, updateButtons } from "./main.js";
 import { progressStep } from "./progress.js";
-import { aggKept, aggSignature, compileFilter, feedAggBatch, finishAggStream, newAggStream, parseOperand, runQuery, sortKey, streamable, textOf } from "./query.js";
+import { aggKept, aggSignature, compileFilter, feedAggBatch, finishAggStream, isQuantile, newAggStream, parseOperand, radixAdvanceStream, radixColumns, radixFeedBatch, radixOpenStream, radixPendingBytes, radixPlanStream, runQuery, sortKey, streamable, textOf } from "./query.js";
 import { thriftStruct } from "./thrift.js";
 import { rawStat, renderMeta } from "./ui-metadata.js";
 import { adoptSql } from "./ui-query-builder.js";
@@ -421,6 +421,10 @@ const RUN_STEPS = [
   { label: "Read", why: "Decoding only the columns the query uses, from only the row groups that could match. An aggregate folds each row group into running totals and lets it go, so memory does not grow with the file." },
   { label: "Compute", why: "Working out the answer from what was read." },
 ];
+/* a query with a percentile has one more step: the passes that find it exactly */
+const RUN_STEPS_PCT = RUN_STEPS.slice(0, 3).concat([
+  { label: "Refine percentiles", why: "Percentiles are exact and found without sorting: the first pass counted values into buckets, and each further pass collects only the bucket a percentile falls in (or narrows it by another 16 bits), so a sorted copy of the column is never held." },
+], RUN_STEPS.slice(3));
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 /** Frees the decoded rows a table holds, so its replacement can be read without both in memory at once. */
@@ -464,7 +468,10 @@ export async function runWhole() {
   if ((!hasWhere && !agg) || complete) { runQuery(); return; }
   const stop = { asked: false };
   let needRestore = false;
-  busy(true, agg ? "Aggregating the whole file" : "Searching the whole file", RUN_STEPS, () => { stop.asked = true; });
+  const pct = !!agg && q.metrics.some((m) => isQuantile(m.agg));
+  const steps = pct ? RUN_STEPS_PCT : RUN_STEPS;
+  const computeStep = steps.length - 1;
+  busy(true, agg ? "Aggregating the whole file" : "Searching the whole file", steps, () => { stop.asked = true; });
   await tick();
   try {
     progressStep(0, 0.1, hasWhere ? "reading row group statistics for the WHERE clause" : "no WHERE clause, so every row group is needed");
@@ -520,7 +527,42 @@ export async function runWhole() {
         await tick();
       }
       if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
-      progressStep(3, 0.5, num(st.maps[0].size) + " group" + (st.maps[0].size === 1 ? "" : "s") + " from " + num(st.rows) + " rows");
+      /* the groups that kept counts instead of values now find their percentiles by narrowing passes: each
+         re-reads only the columns it still needs, and collects only the bucket a percentile falls in */
+      if (pct) {
+        radixPlanStream(st);
+        let pass = 1;
+        while (radixOpenStream(st) && !stop.asked) {
+          pass++;
+          const pending = radixPendingBytes(st);
+          if (st.track.bytes + pending > room) {
+            showMemNote("Not run over the whole file: finding exact percentiles for " + num(st.maps[0].size) + " groups needs about " + bytesText(pending) +
+              " more than the running totals already hold, over what this page can hold beside a decoded row group (" + bytesText(room) +
+              "). Group by a column with fewer distinct values, or ask for fewer percentiles.",
+              [{ label: "Run on the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
+            return;
+          }
+          const need = radixColumns(st);
+          for (let i = 0; i < groups.length; i++) {
+            if (stop.asked) break;
+            const g = groups[i], of = groups.length;
+            progressStep(3, i / of, "pass " + num(pass) + ", row group " + num(i + 1) + " of " + num(of) + ": collecting the buckets the percentiles fall in");
+            const batch = newTable(dataset);
+            batch.plan = table.plan;
+            batch.need = need;
+            batch.nextPart = g.pi;
+            batch.nextGroup = g.gi;
+            await loadMore(dataset, batch, 1);
+            if (stop.asked) break;
+            radixFeedBatch(st, batch.cols, batch.rowsLoaded);
+            await tick();
+          }
+          if (stop.asked) break;
+          radixAdvanceStream(st);
+        }
+        if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+      }
+      progressStep(computeStep, 0.5, num(st.maps[0].size) + " group" + (st.maps[0].size === 1 ? "" : "s") + " from " + num(st.rows) + " rows");
       await tick();
       state.agg = { sig: aggSignature(q), dataset, outCols: finishAggStream(st), rows: st.rows, plan, ms: Math.round(performance.now() - t0) };
       showMemNote(null);

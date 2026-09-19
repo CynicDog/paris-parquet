@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AGG_MORE, AGGS, aggregate, feedAggBatch, finishAggStream, matchIndex, newAggStream, streamable } from "../../src/query.js";
+import { AGG_MORE, AGGS, aggregate, feedAggBatch, finishAggStream, matchIndex, newAggStream, radixAdvanceStream, radixFeedBatch, radixOpenStream, radixPlanStream, streamable } from "../../src/query.js";
+import { RADIX } from "../../src/radix.js";
 
 const numSpec = { kind: "number", label: "double", physical: "DOUBLE", convert: (v) => v };
 const strSpec = { kind: "string", label: "string", physical: "BYTE_ARRAY", convert: (v) => v };
@@ -22,16 +23,30 @@ function table(n) {
 const query = (over) => Object.assign({ mode: "agg", filters: [], groupBy: [], groupMode: "", metrics: [], sort: [], limit: null }, over);
 const slice = (cols, a, b) => cols.map((c) => Object.assign({}, c, { rows: c.rows.slice(a, b) }));
 
-/** Runs the whole table through the stream in batches of the given sizes, dropping each batch as it is folded. */
+/** The batch boundaries a list of sizes makes over n rows. */
+function bounds(n, sizes) {
+  const out = [];
+  let at = 0;
+  for (const size of sizes) { const end = Math.min(n, at + size); out.push([at, end]); at = end; }
+  if (at < n) out.push([at, n]);
+  return out;
+}
+/**
+ * Runs the whole table through the stream in batches of the given sizes, dropping each batch as it is
+ * folded, then does what the page does for percentiles: narrowing passes over the same batches until
+ * every group that counted its values has found its ranks.
+ */
 function streamed(q, cols, n, sizes) {
   const st = newAggStream(q, cols);
-  let at = 0;
-  for (const size of sizes) {
-    const end = Math.min(n, at + size);
-    feedAggBatch(st, slice(cols, at, end), end - at);
-    at = end;
+  const parts = bounds(n, sizes);
+  for (const [a, b] of parts) feedAggBatch(st, slice(cols, a, b), b - a);
+  radixPlanStream(st);
+  st.passes = 1;
+  while (radixOpenStream(st)) {
+    st.passes++;
+    for (const [a, b] of parts) radixFeedBatch(st, slice(cols, a, b), b - a);
+    radixAdvanceStream(st);
   }
-  if (at < n) feedAggBatch(st, slice(cols, at, n), n - at);
   return { out: finishAggStream(st), st };
 }
 const whole = (q, cols, n) => aggregate(q, cols, matchIndex(q, cols, n), n);
@@ -89,4 +104,38 @@ test("only a pivot cannot be folded one row group at a time", () => {
   assert.equal(streamable(query({ groupBy: [0], metrics: [{ id: "m", ci: 2, agg: "SUM", alias: "" }] })), true);
   assert.equal(streamable(query({ groupBy: [0], groupMode: "PIVOT", metrics: [{ id: "m", ci: 2, agg: "SUM", alias: "" }] })), false);
   assert.equal(streamable(query({ mode: "rows" })), false);
+});
+
+test("groups that count their values instead of keeping them still give exact percentiles, in as many passes as it takes", () => {
+  const saved = { promote: RADIX.promote, gather: RADIX.gather };
+  try {
+    RADIX.promote = 8;        /* nearly every group now counts, so nearly every percentile is found by narrowing */
+    for (const gather of [1 << 20, 32, 1]) {
+      RADIX.gather = gather;
+      for (const agg of ["MED", "P90", "P95", "P99", "IQR"]) {
+        const q = query({ groupBy: [0, 1], groupMode: "ROLLUP", metrics: [{ id: "m", ci: 2, agg, alias: "" }] });
+        const want = rowsOf(whole(q, cols, N));
+        for (const [name, sizes] of Object.entries(SPLITS)) {
+          const { out, st } = streamed(q, cols, N, sizes);
+          assert.deepEqual(rowsOf(out), want, `${agg}, gather ${gather}, ${name}, ${st.passes} passes`);
+        }
+      }
+    }
+  } finally { Object.assign(RADIX, saved); }
+});
+
+test("a percentile stops keeping values and counts them past the threshold, so its memory stops growing with the rows", () => {
+  const saved = RADIX.promote;
+  try {
+    const q = query({ metrics: [{ id: "m", ci: 2, agg: "P99", alias: "" }] });
+    RADIX.promote = 1 << 30;                                   /* never: keep every value */
+    const kept = streamed(q, cols, N, [N]).st;
+    RADIX.promote = 100;
+    const counted = streamed(q, cols, N, [N]).st;
+    assert.ok(kept.track.bytes > N * 8, `values kept: ${kept.track.bytes}`);
+    assert.ok(counted.track.bytes < kept.track.bytes / 2 + 262144 + 1, `counted instead: ${counted.track.bytes} against ${kept.track.bytes}`);
+    const bigger = table(N * 4);
+    const more = streamed(q, bigger, N * 4, [N * 4]).st;
+    assert.ok(more.track.bytes < counted.track.bytes + 1024, `four times the rows cost no more: ${more.track.bytes} vs ${counted.track.bytes}`);
+  } finally { RADIX.promote = saved; }
 });
