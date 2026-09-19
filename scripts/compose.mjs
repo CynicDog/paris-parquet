@@ -21,8 +21,8 @@ const root = path.join(here, "..");
 const srcDir = path.join(root, "src");
 
 const MANIFEST = [
-  "bytes", "thrift", "codecs", "encoding", "types", "dataset", "workers",
-  "columns", "view", "ui-grid", "ui-metadata", "query", "ui-query-builder",
+  "bytes", "thrift", "codecs", "encoding", "types", "progress", "dataset", "workers",
+  "columns", "budget", "view", "ui-grid", "ui-metadata", "query", "ui-query-builder",
   "pushdown", "diff", "join", "ui-tree", "main",
 ];
 

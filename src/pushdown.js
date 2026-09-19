@@ -1,13 +1,15 @@
 // Predicate pushdown: turns a query's WHERE clause into a plan of which row
 // groups (and, within a group, which page ranges) could hold a matching row,
 // using footer statistics, page indexes, and bloom filters (with its own
-// xxh64) before `runScan` rebuilds the table from only what survived.
+// xxh64) before `runWhole` rebuilds the table from only what survived.
 
+import { budgetBytes, bytesText, groupsAhead, groupsBytes, heldBytes } from "./budget.js";
 import { Cursor } from "./bytes.js";
-import { $, loadMore } from "./columns.js";
+import { $, loadMore, unfilled } from "./columns.js";
 import { newTable } from "./dataset.js";
 import { intersectRanges, mergeRanges, rangeCount, readColumnIndex, readOffsetIndex, unionRanges } from "./encoding.js";
-import { busy, FIRST_ROWS, showError, updateButtons } from "./main.js";
+import { busy, FIRST_ROWS, showError, showMemNote, updateButtons } from "./main.js";
+import { progressStep } from "./progress.js";
 import { compileFilter, parseOperand, runQuery, sortKey, textOf } from "./query.js";
 import { thriftStruct } from "./thrift.js";
 import { rawStat, renderMeta } from "./ui-metadata.js";
@@ -413,44 +415,132 @@ export function planReport(plan) {
     " in " + num(plan.ms) + " ms";
 }
 
-/**
- * Plans, then rebuilds the table from only the row groups that survived,
- * then runs the query over them. The answer is the same as reading the
- * whole file; the difference is how much of it came off disk.
- */
-export async function runScan() {
-  const dataset = state.dataset, q = state.query;
-  if (!dataset || !state.table) return;
-  if (state.sqlDirty && !adoptSql(true)) return;
-  busy(true, "reading what the footers claim…");
-  await new Promise((r) => setTimeout(r, 0));
+const RUN_STEPS = [
+  { label: "Plan", why: "Ruling row groups out from what the file's footer says about each one (min and max, bloom filters, page index), without reading any data." },
+  { label: "Check the memory budget", why: "Estimating what the row groups that remain will take once decoded, so a query that would not fit is refused now rather than run out of memory halfway." },
+  { label: "Read", why: "Decoding only the columns the query uses, from only the row groups that could match." },
+  { label: "Compute", why: "Running the query over what was read." },
+];
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+/** Frees the decoded rows a table holds, so its replacement can be read without both in memory at once. */
+function releaseRows(table) {
+  for (const c of table.cols) { c.rows = []; c.filled = 0; }
+}
+/** Reads the first rows back after a run that released them was cancelled or failed. */
+async function restoreBrowse(dataset) {
+  busy(true, "Restoring the view");
   try {
-    const plan = await planScan(dataset, q, state.table, async (i, n) => {
-      busy(true, "planning… " + num(i + 1) + " of " + num(n) + " files");
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    if (!plan) {
-      showPlan("<em>Nothing to push down — this needs a WHERE clause the file's own " +
-        "statistics can be tested against.</em>");
-      return;
-    }
     const table = newTable(dataset);
-    table.plan = plan.keep;
-    table.scan = plan;
-    table.need = neededColumns(table, true);
-    busy(true, "decoding " + num(Math.min(plan.rows, FIRST_ROWS)) + " rows of "
-      + num(plan.kept) + " row groups…");
-    await new Promise((r) => setTimeout(r, 0));
+    table.need = neededColumns(table);
     await loadMore(dataset, table, FIRST_ROWS);
     state.table = table;
+    if (state.query && state.query.active) runQuery(); else setView(baseView(table));
+    renderMeta();
+    updateButtons();
+    describeScope();
+  } catch (e) { showError(e); } finally { busy(false); }
+}
+
+/**
+ * Runs the query against the whole file, which is what a query means. A WHERE is first planned
+ * against the footer so only the row groups that could match are read (the answer is the same as
+ * reading everything; the difference is how much came off disk). An aggregate then reads every
+ * row of the columns it needs, and a plain query reads the first matches and pages on demand.
+ * Either is checked against the memory budget before anything is decoded, and refused with the
+ * numbers if it will not fit, rather than quietly answering about fewer rows.
+ */
+export async function runWhole() {
+  const dataset = state.dataset, q = state.query, cur = state.table;
+  if (!dataset || !cur) return;
+  if (state.sqlDirty && !adoptSql(false)) return;
+  const agg = q.mode === "agg" && (q.groupBy.length || q.metrics.length);
+  const hasWhere = clauseGroups(q.filters, cur.cols).length > 0;
+  /* nothing further to read: browsing a file with no filter, or a table that already holds every row
+     of every column this query needs. A table that holds every row but lacks a column is NOT topped up:
+     that would keep the columns of every earlier query in memory too, so what is held would grow with
+     the history of queries instead of with what this one needs. It is rebuilt with just what is needed. */
+  const complete = cur.rowsLoaded >= dataset.numRows && !cur.scan && !unfilled(cur, [...neededColumns(cur, true)]).length;
+  if ((!hasWhere && !agg) || complete) { runQuery(); return; }
+  const stop = { asked: false };
+  let needRestore = false;
+  busy(true, agg ? "Aggregating the whole file" : "Searching the whole file", RUN_STEPS, () => { stop.asked = true; });
+  await tick();
+  try {
+    progressStep(0, 0.1, hasWhere ? "reading row group statistics for the WHERE clause" : "no WHERE clause, so every row group is needed");
+    const plan = hasWhere ? await planScan(dataset, q, cur, async (i, n) => {
+      progressStep(0, (i + 1) / n, "file " + num(i + 1) + " of " + num(n));
+      await tick();
+    }) : null;
+    const table = newTable(dataset);
+    if (plan) { table.plan = plan.keep; table.scan = plan; }
+    table.need = neededColumns(table, true);
+
+    progressStep(1, 0.3, "estimating the size of the row groups that remain");
+    const groups = groupsAhead(dataset, table, agg ? Infinity : FIRST_ROWS);
+    const cols = [...table.need];
+    const budget = budgetBytes();
+    const cost = groupsBytes(dataset, table, groups, cols);
+    if (agg && cost > budget) {
+      showMemNote("Not run over the whole file: reading " + num(groups.reduce((n, g) => n + g.rows, 0)) + " rows of " + num(cols.length) +
+        " column" + (cols.length === 1 ? "" : "s") + " would take about " + bytesText(cost) + ", over this page's " + bytesText(budget) +
+        " memory budget. Narrow it with a WHERE clause on a column the file is sorted or clustered by, or aggregate fewer columns.",
+        [{ label: "Run on the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
+      return;
+    }
+
+    /* the table on screen is about to be replaced, so what it holds is freed first: the old rows and
+       the new ones are never in memory together (if this is cancelled or fails, the view is read back) */
+    if (heldBytes(dataset, cur) > 0) { releaseRows(cur); state.view = null; needRestore = true; }
+    progressStep(2, 0, "row group 1 of " + num(groups.length));
+    await tick();
+    await loadMore(dataset, table, agg ? Infinity : FIRST_ROWS, (_pi, _gi, ci, n) => {
+      progressStep(2, (table.groupsLoaded + ci / n) / Math.max(1, groups.length),
+        "row group " + num(Math.min(groups.length, table.groupsLoaded + 1)) + " of " + num(groups.length) + ", column " + num(ci + 1) + " of " + num(n));
+    });
+    if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+
+    progressStep(3, 0.5, num(table.rowsLoaded) + " rows in memory");
+    await tick();
+    state.table = table;
+    needRestore = false;
     if (state.display.order.length !== table.cols.length) state.display = newDisplay(table.cols);
     renderMeta();
     updateButtons();
+    showMemNote(null);
     runQuery();
-    showPlan(planReport(plan));
   } catch (e) {
     showError(e);
-  } finally { busy(false); }
+  } finally {
+    busy(false);
+    /* in the finally, not after it: a cancelled run leaves the try block by return, and would skip this */
+    if (needRestore) await restoreBrowse(dataset);
+  }
+}
+
+/**
+ * The line under the query bar: what the answer on screen covers. It says so every time, because
+ * an answer about the first quarter of a percent of a file reads exactly like an answer about all of it.
+ */
+export function describeScope() {
+  const t = state.table, d = state.dataset, q = state.query;
+  if (!t || !d) { showPlan(""); return; }
+  const total = d.numRows, read = t.rowsLoaded;
+  const pctRead = total ? Math.min(100, (read / total) * 100) : 100;
+  const share = pctRead >= 10 ? Math.round(pctRead) : pctRead >= 1 ? pctRead.toFixed(1) : pctRead.toFixed(2);
+  if (!(q && q.active)) {
+    showPlan(read < total ? "Showing the first <b>" + num(read) + "</b> of " + num(total) + " rows (" + share + "%). <b>Run</b> searches the whole file." : "");
+    return;
+  }
+  if (t.scan) {
+    const agg = q.mode === "agg";
+    const more = t.truncated ? " Showing matches from the first " + num(t.groupsLoaded) + " of them; <b>Load more</b> reads on." : "";
+    showPlan("<b>Whole file.</b> " + (agg ? "Aggregated over " : "") + planReport(t.scan) + "." + (agg ? "" : more));
+    return;
+  }
+  if (read >= total) { showPlan("<b>Whole file.</b> Searched all " + num(total) + " rows."); return; }
+  showPlan("<em>Only the " + num(read) + " rows read so far (" + share + "% of the file), not the whole file.</em> " +
+    "Use <b>Run</b> to search all of it" + (t.truncated ? ", or Load more to read further" : "") + ".");
 }
 export function showPlan(html) {
   const el = $("qplan");
@@ -471,15 +561,6 @@ export async function unscan() {
     setView(baseView(table));
     renderMeta();
     updateButtons();
+    describeScope();               /* it described the scanned table until this read finished */
   } catch (e) { showError(e); } finally { busy(false); }
-}
-/** The button is only worth pressing when there is something to push down. */
-export function updateScanButton() {
-  const b = $("qscan");
-  if (!b) return;
-  const t = state.table;
-  const groups = t ? t.dataset.numGroups : 0;
-  const has = !!(t && state.query && clauseGroups(state.query.filters, t.cols).length);
-  b.disabled = !has || groups < 2;
-  b.classList.toggle("on", !!(t && t.scan));
 }

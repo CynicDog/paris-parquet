@@ -5,7 +5,7 @@
 
 import { $ } from "./columns.js";
 import { drag } from "./main.js";
-import { runScan, updateScanButton } from "./pushdown.js";
+import { describeScope, runWhole } from "./pushdown.js";
 import { AGG_GROUPS, AGG_SHORT, AGG_TITLE, AGGS, CUBE_MAX_COLS, filterIssue, NO_OPERAND, newQuery, nextQid, PREDS, parseSql, querySql, resetQuery, runQuery } from "./query.js";
 import { renderRows } from "./ui-grid.js";
 import { esc, state } from "./view.js";
@@ -145,7 +145,7 @@ export function renderQuery() {
   state.sqlDirty = false;
   renderZones();
   renderSql(true);
-  updateScanButton();
+  describeScope();
 }
 /** The builder owns the text unless the user is in the middle of editing it. */
 export function renderSql(force) {
@@ -190,8 +190,8 @@ export function adoptSql(andRun) {
   state.query = res.query;
   state.sqlDirty = false;
   renderZones();                       /* zones follow the text, text stays put */
-  updateScanButton();
-  if (andRun) { renderSql(true); runQuery(); }
+  describeScope();
+  if (andRun) { renderSql(true); runWhole(); }
   return true;
 }
 
@@ -295,7 +295,7 @@ export function initQuery() {
     renderSql();
   });
   $("qzones").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); runQuery(); }
+    if (e.key === "Enter") { e.preventDefault(); runWhole(); }
   });
   let sqlTimer = 0;
   $("qsql").addEventListener("input", () => {
@@ -308,11 +308,9 @@ export function initQuery() {
   });
   $("qsql").addEventListener("blur", () => { clearTimeout(sqlTimer); adoptSql(false); });
   $("qformat").addEventListener("click", () => { if (adoptSql(false)) renderSql(true); });
-  $("qrun").addEventListener("click", () => {
-    if (state.sqlDirty && !adoptSql(true)) return;    /* refuse to run text that does not parse */
-    runQuery();
-  });
-  $("qscan").addEventListener("click", () => runScan());
+  /* running searches the whole file: runWhole takes text that has not been adopted yet and
+     refuses it if it does not parse, so this does not adopt it first */
+  $("qrun").addEventListener("click", () => runWhole());
   $("qclear").addEventListener("click", () => resetQuery());
   $("qcopy").addEventListener("click", () => {
     const text = querySql();

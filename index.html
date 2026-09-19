@@ -110,8 +110,35 @@ input[type=file]{display:none}
 body.dragging #drop{background:var(--accent-soft);outline:2px dashed var(--accent);outline-offset:-14px}
 #err{margin:14px;padding:10px 12px;border:1px solid var(--err);border-radius:6px;color:var(--err);
   font:12px/1.5 var(--mono);white-space:pre-wrap;background:var(--panel)}
-#busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  background:color-mix(in srgb,var(--bg) 80%,transparent);font:12px var(--mono);color:var(--dim);z-index:30}
+#busy{display:none}   /* a flag only: hidden means idle; the popup below is what people see */
+
+/* ---------- the progress popup ---------- */
+.sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+button:focus-visible,label.btn:focus-visible,[role=radio]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#progress{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;
+  padding:16px 18px 14px;width:min(480px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.28)}
+#progress::backdrop{background:rgba(0,0,0,.4)}
+#progress h2{margin:0 0 10px;font:600 14px/1.4 var(--mono)}
+#pbar{position:relative;height:10px;border-radius:5px;background:var(--line);overflow:hidden}
+#pfill{height:100%;width:0;background:var(--accent);border-radius:5px;transition:width .15s linear}
+#pbar.indet #pfill{width:40%;animation:pindet 1.1s ease-in-out infinite}
+@keyframes pindet{0%{margin-left:-40%}100%{margin-left:100%}}
+@media (prefers-reduced-motion:reduce){
+  #pbar.indet #pfill{animation:none;width:100%;opacity:.45}
+  #pfill{transition:none}
+}
+#ppct{text-align:right;font:11px var(--mono);color:var(--dim);margin:3px 0 6px;min-height:14px}
+#psteps{list-style:none;margin:0 0 6px;padding:0;font:12px/1.5 var(--mono)}
+#psteps li{color:var(--dim)}
+#psteps li.now{color:var(--ink);font-weight:600}
+#psteps li.done{color:var(--ok)}
+.pmark{display:inline-block;width:1.5em}
+.pwhy{margin:1px 0 5px 1.5em;font-weight:400;color:var(--dim)}
+#pdetail{margin:4px 0 10px;font:12px/1.5 var(--mono);color:var(--dim);min-height:1.5em;overflow-wrap:anywhere}
+.pfoot{display:flex;justify-content:flex-end}
+#memnote{flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 12px;
+  border-bottom:1px solid var(--line);background:var(--accent-soft);font:12px/1.5 var(--mono);color:var(--ink)}
+#memnote button{font-size:11px;padding:2px 8px}
 
 /* ---------- pagination ---------- */
 #pager{flex:none;display:flex;align-items:center;gap:7px;padding:4px 10px;border-top:1px solid var(--line);
@@ -315,7 +342,6 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
   color:var(--dim);background:var(--accent-soft)}
 #qplan b{color:var(--accent);font-weight:600}
 #qplan em{font-style:normal;color:var(--warn)}
-#qscan.on{border-color:var(--accent);color:var(--accent)}
 
 /* ---------- diff ---------- */
 #diffwrap{flex:1;overflow:auto;min-height:0;background:var(--panel)}
@@ -468,6 +494,7 @@ details[open]>summary::before{content:"▾ "}
 </header>
 
 <div id="stage">
+  <div id="memnote" role="status" aria-live="polite" hidden></div>
   <div id="drop">
     <div class="big">Drop a .parquet file here</div>
     <div class="hint">A file, several files, or a whole partitioned folder.
@@ -484,7 +511,7 @@ details[open]>summary::before{content:"▾ "}
     <div id="diffbody"></div>
   </div>
   <div id="pager" hidden></div>
-  <div id="busy" hidden>reading…</div>
+  <div id="busy" hidden aria-hidden="true"></div>
 </div>
 
 <div id="inspect" hidden></div>
@@ -499,14 +526,12 @@ details[open]>summary::before{content:"▾ "}
     <span class="qtitle">QUERY</span>
     <span class="seg" id="qmode"><button data-mode="rows" class="on">Rows</button><button data-mode="agg">Aggregate</button></span>
     <button id="qrun" title="Run the query (Enter)">Run</button>
-    <button id="qscan" disabled
-      title="Read only the row groups whose own statistics allow a match, then run">Scan file</button>
     <button id="qclear" disabled>Reset</button>
     <span id="qstat"></span>
     <span class="grow"></span>
     <span class="muted">drag a column into a zone, or double-click it</span>
   </div>
-  <div id="qplan" hidden></div>
+  <div id="qplan" role="status" aria-live="polite" hidden></div>
   <div class="qbody">
     <div class="qcols" id="qcols"></div>
     <div class="qzones" id="qzones"></div>
@@ -527,6 +552,15 @@ details[open]>summary::before{content:"▾ "}
   <div class="mbody" id="mbody"></div>
 </div>
 </div>
+
+<dialog id="progress" aria-labelledby="ptitle" aria-describedby="pdetail">
+  <h2 id="ptitle">Working…</h2>
+  <div id="pbar" role="progressbar" aria-labelledby="ptitle" aria-valuemin="0" aria-valuemax="100"><div id="pfill"></div></div>
+  <div id="ppct" aria-hidden="true"></div>
+  <ol id="psteps"></ol>
+  <p id="pdetail" role="status" aria-live="polite"></p>
+  <div class="pfoot"><button id="pcancel" type="button">Cancel</button></div>
+</dialog>
 
 <script>
 "use strict";
@@ -2215,6 +2249,172 @@ function summarize(col, index, count) {
   return s;
 }
 
+// The progress popup: what the page is doing, which step of it, and why, for
+// anything that takes long enough to notice. It is a native <dialog>, so the page
+// behind it is inert, focus is held inside, and Escape asks to cancel, with no
+// script for any of that.
+//
+// A caller declares the steps up front ("read the footers", "plan which row groups
+// can match", "decode") so the person sees the whole path and where they are on it,
+// then moves through them, giving each a fraction and a one-line explanation:
+//
+//   progressStart("Running your query", [
+//     { label: "Plan", why: "Ruling row groups out from their own statistics." },
+//     { label: "Read", why: "Decoding only the row groups that could match." } ]);
+//   progressStep(1, 0.4, "row group 12 of 30");
+//   progressFinish();
+//
+// Nothing shows for the first SHOW_AFTER ms, so quick work never flashes a popup,
+// and once shown it stays MIN_VISIBLE ms so it does not flicker. #busy stays as a
+// plain flag (hidden = idle) that the tests and the rest of the page read; it is
+// never displayed.
+
+const SHOW_AFTER = 250;
+const MIN_VISIBLE = 450;
+
+const pg = { open: false, steps: [], at: 0, frac: 0, shownAt: 0, showTimer: 0, closeTimer: 0, title: "", detail: "", cancelled: false, onCancel: null, depth: 0 };
+const pgEl = (id) => document.getElementById(id);
+
+function pgPaint() {
+  const dlg = pgEl("progress");
+  if (!dlg) return;
+  pgEl("ptitle").textContent = pg.title || "Working…";
+  const n = pg.steps.length;
+  const list = pgEl("psteps");
+  list.hidden = !n;
+  list.innerHTML = "";
+  pg.steps.forEach((st, i) => {
+    const li = document.createElement("li");
+    const state = i < pg.at ? "done" : i === pg.at ? "now" : "todo";
+    li.className = state;
+    const mark = document.createElement("span");
+    mark.className = "pmark";
+    mark.setAttribute("aria-hidden", "true");
+    mark.textContent = state === "done" ? "✓" : state === "now" ? "▶" : "○";
+    const text = document.createElement("span");
+    text.className = "ptext";
+    text.textContent = st.label;
+    const sr = document.createElement("span");
+    sr.className = "sr";
+    sr.textContent = state === "done" ? " (done)" : state === "now" ? " (in progress)" : " (waiting)";
+    li.append(mark, text, sr);
+    if (state === "now" && st.why) {
+      const why = document.createElement("div");
+      why.className = "pwhy";
+      why.textContent = st.why;
+      li.append(why);
+    }
+    if (state === "now") li.setAttribute("aria-current", "step");
+    list.append(li);
+  });
+  const bar = pgEl("pbar");
+  const determinate = n > 0 && pg.frac != null;
+  const overall = n ? Math.min(1, (pg.at + (pg.frac || 0)) / n) : 0;
+  bar.classList.toggle("indet", !determinate);
+  if (determinate) {
+    bar.setAttribute("aria-valuenow", String(Math.round(overall * 100)));
+    bar.setAttribute("aria-valuetext", "step " + (pg.at + 1) + " of " + n + ", " + Math.round(overall * 100) + " percent");
+  } else {
+    bar.removeAttribute("aria-valuenow");
+    bar.setAttribute("aria-valuetext", "working");
+  }
+  pgEl("pfill").style.width = determinate ? Math.round(overall * 100) + "%" : "";
+  pgEl("ppct").textContent = determinate ? Math.round(overall * 100) + "%" : "";
+  pgEl("pdetail").textContent = pg.detail || "";
+  pgEl("pcancel").disabled = !pg.onCancel;
+  pgEl("pcancel").textContent = pg.cancelled ? "Stopping…" : "Cancel";
+  if (pg.cancelled) pgEl("pcancel").disabled = true;
+}
+
+function pgReveal() {
+  const dlg = pgEl("progress");
+  if (!dlg || pg.open || !pg.depth) return;
+  pg.open = true;
+  pg.shownAt = performance.now();
+  pgPaint();
+  try { if (!dlg.open) dlg.showModal(); } catch (_e) { /* not attached yet: stay quiet rather than throw */ }
+}
+
+function pgHide() {
+  const dlg = pgEl("progress");
+  clearTimeout(pg.showTimer);
+  pg.showTimer = 0;
+  if (dlg && dlg.open) dlg.close();
+  pg.open = false;
+}
+
+/** Marks the page busy; the popup itself only appears if the work outlasts SHOW_AFTER. */
+function progressStart(title, steps, onCancel) {
+  clearTimeout(pg.closeTimer);
+  pg.depth++;
+  if (pg.depth === 1) {
+    pg.steps = steps || [];
+    pg.at = 0;
+    pg.frac = steps && steps.length ? 0 : null;
+    pg.detail = "";
+    pg.cancelled = false;
+    pg.onCancel = onCancel || null;
+  } else if (steps && steps.length && !pg.steps.length) {
+    pg.steps = steps; pg.at = 0; pg.frac = 0;
+  }
+  if (title) pg.title = title;
+  const flag = pgEl("busy");
+  if (flag) flag.hidden = false;
+  if (!pg.open && !pg.showTimer) pg.showTimer = setTimeout(pgReveal, SHOW_AFTER);
+  if (pg.open) pgPaint();
+}
+
+/** Moves to step `i` (0-based), `frac` of the way through it, with a one-line detail. */
+function progressStep(i, frac, detail) {
+  if (!pg.depth) return;
+  pg.at = Math.max(0, Math.min(i, Math.max(0, pg.steps.length - 1)));
+  pg.frac = frac == null ? null : Math.max(0, Math.min(1, frac));
+  if (detail != null) pg.detail = detail;
+  if (pg.open) pgPaint();
+}
+
+/** Just says something, for work that has no declared steps. */
+function progressSay(text) {
+  if (!pg.depth) return;
+  if (!pg.steps.length) pg.title = text || pg.title;
+  pg.detail = pg.steps.length ? text : "";
+  if (pg.open) pgPaint();
+}
+
+function progressFinish() {
+  if (!pg.depth) return;
+  pg.depth = Math.max(0, pg.depth - 1);
+  if (pg.depth) return;
+  const flag = pgEl("busy");
+  if (flag) flag.hidden = true;
+  clearTimeout(pg.showTimer);
+  pg.showTimer = 0;
+  if (!pg.open) return;
+  pg.at = pg.steps.length;
+  pg.frac = 0;
+  pgPaint();
+  const left = MIN_VISIBLE - (performance.now() - pg.shownAt);
+  clearTimeout(pg.closeTimer);
+  pg.closeTimer = setTimeout(pgHide, Math.max(0, left));
+}
+
+function progressCancelled() { return pg.cancelled; }
+function progressRequestCancel() {
+  if (!pg.onCancel || pg.cancelled) return;
+  pg.cancelled = true;
+  try { pg.onCancel(); } catch (_e) { /* the work is stopping either way */ }
+  if (pg.open) pgPaint();
+}
+
+/** Wires the dialog's own controls; called once when the page starts. */
+function initProgress() {
+  const dlg = pgEl("progress");
+  if (!dlg) return;
+  pgEl("pcancel").addEventListener("click", progressRequestCancel);
+  /* Escape closes a modal dialog by default; here it asks the work to stop instead */
+  dlg.addEventListener("cancel", (e) => { e.preventDefault(); progressRequestCancel(); });
+}
+
 // Dataset assembly: reads every part's footer, reconciles files into one
 // column list (union of leaves, Hive partition columns folded in, real
 // schema conflicts rejected), and builds the empty `table` a view loads into.
@@ -2726,6 +2926,7 @@ async function readColumnRows(dataset, part, rg, col, sel, took, firstGroup, ctx
 async function loadMore(dataset, table, maxRows, onProgress) {
   let added = 0;
   while (table.nextPart < dataset.parts.length && added < maxRows) {
+    if (progressCancelled()) break;         /* the popup's Cancel: stop at a row group boundary */
     const part = dataset.parts[table.nextPart];
     const meta = part.meta;
     if (table.nextGroup >= meta.rowGroups.length) { table.nextPart++; table.nextGroup = 0; continue; }
@@ -2847,6 +3048,214 @@ function rowsAhead(dataset, table, limit) {
 
 const $ = (id) => document.getElementById(id);
 
+// The memory budget: how many bytes of decoded cells the page is willing to
+// hold, an estimate of what decoding a row group costs, and the planning that
+// keeps a load inside it. Nothing here touches the page; it reads the footer's
+// own numbers and answers "will this fit?" before anything is decoded, so a file
+// that would not fit is narrowed or refused with a reason rather than left to
+// take the tab down.
+//
+// The per-cell costs are measured, not guessed: docs/stress-test.md records
+// them (tests/stress/stress.mjs, calibrate scenario). They are the size of a
+// decoded value once the JS engine has built it, which is several times the
+// size on disk, and by far the most for plain strings and decimals. They are
+// rounded up and multiplied by SAFETY, because underestimating is the
+// expensive mistake.
+
+
+const MB = 1048576;
+
+/**
+ * "This would not fit" is an answer, not a bug: it is shown to the person like any other
+ * error, but it is not logged to the console as one.
+ */
+class Refusal extends Error {
+  constructor(message) { super(message); this.name = "Refusal"; }
+}
+/** Bytes per decoded cell, by the kind of column, measured. */
+const CELL = { fixed: 20, dictionary: 16, decimal: 120, nested: 120, unknown: 32, stringBase: 64, stringPerByte: 16 };
+/**
+ * Estimates are multiplied by this. The per-cell costs above are what a decoded value keeps once
+ * decoding is done; what takes a tab down is the peak while it is happening, when a row group's
+ * buffers and the arrays built from them are alive together. Measured on a 200-column file, the
+ * peak was about twice what the estimate of the retained size gave.
+ */
+const SAFETY = 2;
+
+/**
+ * The most decoded data the page will hold, in bytes. About a quarter of what a tab can
+ * comfortably use: the estimate is not exact, decoding needs headroom for its own buffers,
+ * and the rest of the page has to live somewhere too. navigator.deviceMemory (Chromium
+ * only, coarse, capped at 8) scales it down on small machines; a stored setting
+ * ("paris-parquet-memory-mb") or setBudgetMB() overrides it.
+ */
+let override = null;
+function setBudgetMB(mb) { override = mb == null ? null : Math.max(0.0001, +mb); }
+function budgetBytes() {
+  if (override != null) return override * MB;
+  try {
+    const v = +localStorage.getItem("paris-parquet-memory-mb");
+    if (v >= 64) return v * MB;
+  } catch (_e) { /* no storage: use the default */ }
+  const gb = typeof navigator !== "undefined" ? navigator.deviceMemory : undefined;
+  return (gb ? Math.max(512, Math.min(2048, gb * 256)) : 1536) * MB;
+}
+
+/**
+ * What one decoded cell of this column costs, from what the footer says about its chunk.
+ * `type` is the physical type, `meta` the column chunk's metadata.
+ */
+function cellBytes(spec, type, meta) {
+  if (!spec) return CELL.unknown;
+  if (spec.nested) return CELL.nested;
+  if (spec.decimal) return CELL.decimal;
+  const dict = !!(meta && meta.encodings && (meta.encodings.indexOf("RLE_DICTIONARY") >= 0 ||
+    meta.encodings.indexOf("PLAIN_DICTIONARY") >= 0));
+  if (type === "BYTE_ARRAY" || type === "FIXED_LEN_BYTE_ARRAY") {
+    if (dict) return CELL.dictionary;      /* a row holds a reference to a string the dictionary already owns */
+    const n = meta && meta.numValues ? meta.numValues : 0;
+    const avg = n ? Math.min(1024, Math.max(0, meta.totalUncompressedSize / n - 4)) : 16;
+    return CELL.stringBase + CELL.stringPerByte * avg;
+  }
+  return dict ? CELL.dictionary : CELL.fixed;
+}
+
+/** Bytes to hold `rows` values of column `col` from one row group, rounded up. */
+function columnGroupBytes(part, rg, col, rows) {
+  if (col.partKey !== undefined) return rows * 8;
+  const chunk = chunkFor(rg, col.key);
+  const leaf = part.leafByPath.get(col.key);
+  return Math.ceil(rows * cellBytes(col.spec, leaf ? leaf.type : null, chunk ? chunk.meta : null) * SAFETY);
+}
+
+/**
+ * The row groups a load of about `maxRows` more rows would read, in the order loadMore reads
+ * them and skipping what a scan plan ruled out: [{ pi, gi, rows }].
+ */
+function groupsAhead(dataset, table, maxRows) {
+  const out = [];
+  let added = 0;
+  let pi = table.nextPart, gi = table.nextGroup;
+  while (pi < dataset.parts.length && added < maxRows) {
+    const groups = dataset.parts[pi].meta.rowGroups;
+    if (gi >= groups.length) { pi++; gi = 0; continue; }
+    const key = pi + ":" + gi;
+    if (table.plan && !table.plan.has(key)) { gi++; continue; }
+    const sel = table.plan ? table.plan.get(key) : null;
+    const rows = sel ? rangeCount(sel) : groups[gi].numRows;
+    out.push({ pi, gi, rows });
+    added += rows;
+    gi++;
+  }
+  return out;
+}
+
+/** Estimated bytes to decode the given columns of the given groups. */
+function groupsBytes(dataset, table, groups, columns) {
+  let bytes = 0;
+  for (const g of groups) {
+    const part = dataset.parts[g.pi], rg = part.meta.rowGroups[g.gi];
+    for (const ci of columns) bytes += columnGroupBytes(part, rg, table.cols[ci], g.rows);
+  }
+  return bytes;
+}
+
+/** What the decoded rows the table already holds are estimated to cost. */
+function heldBytes(dataset, table) {
+  let bytes = 0;
+  for (let ci = 0; ci < table.cols.length; ci++) {
+    const col = table.cols[ci];
+    const n = col.rows.length;
+    if (!n) continue;
+    if (col.partKey !== undefined) { bytes += n * 8; continue; }
+    if (col.costPerCell === undefined) {
+      const part = dataset.parts[0], rg = part.meta.rowGroups[0];
+      const chunk = rg ? chunkFor(rg, col.key) : null;
+      const leaf = part.leafByPath.get(col.key);
+      col.costPerCell = Math.ceil(cellBytes(col.spec, leaf ? leaf.type : null, chunk ? chunk.meta : null) * SAFETY);
+    }
+    bytes += n * col.costPerCell;
+  }
+  return bytes;
+}
+
+/**
+ * Which of `columns` (in priority order) fit in `budget` for the given groups. Always keeps
+ * at least the first, since a file with nothing decoded shows nothing, and says so if even
+ * that one does not fit.
+ */
+function fitColumns(dataset, table, columns, groups, budget) {
+  const keep = [], drop = [];
+  let used = 0;
+  for (const ci of columns) {
+    const cost = groupsBytes(dataset, table, groups, [ci]);
+    if (!keep.length || used + cost <= budget) { keep.push(ci); used += cost; } else drop.push(ci);
+  }
+  return { keep, drop, bytes: used, over: keep.length === 1 && used > budget };
+}
+
+/**
+ * How many of the coming groups can be loaded and still leave the held total under `budget`,
+ * for the columns the table is decoding. `all` says whether every one of them fits.
+ */
+function affordableGroups(dataset, table, groups, columns, budget) {
+  let used = heldBytes(dataset, table), n = 0, rows = 0;
+  for (const g of groups) {
+    const cost = groupsBytes(dataset, table, [g], columns);
+    if (used + cost > budget) break;
+    used += cost; n++; rows += g.rows;
+  }
+  return { groups: n, rows, bytes: used, all: n === groups.length };
+}
+
+/** Estimated bytes to decode the given columns for every row group the table has already read. */
+function fillBytes(dataset, table, columns) {
+  let bytes = 0;
+  for (const ci of columns) {
+    const col = table.cols[ci];
+    for (let r = col.filled; r < table.reads.length; r++) {
+      const read = table.reads[r];
+      const part = dataset.parts[read.pi];
+      bytes += columnGroupBytes(part, part.meta.rowGroups[read.gi], col, read.rows);
+    }
+  }
+  return bytes;
+}
+
+/**
+ * Which of the columns the page is about to fill in (behind the reads the table has already
+ * made) still fit in `budget` beside what it holds. Whatever does not fit is `drop`.
+ */
+function fitFill(dataset, table, columns, budget) {
+  const keep = [], drop = [];
+  let used = heldBytes(dataset, table);
+  for (const ci of columns) {
+    const cost = fillBytes(dataset, table, [ci]);
+    if (used + cost <= budget) { keep.push(ci); used += cost; } else drop.push(ci);
+  }
+  return { keep, drop, bytes: used };
+}
+
+/**
+ * Estimated bytes to hold every row of `columns`, from wherever `table` has read to, plus what it
+ * already holds. For the operations that need whole files at once (a join, a row-by-row diff).
+ */
+function loadAllBytes(dataset, table, columns) {
+  return heldBytes(dataset, table) + groupsBytes(dataset, table, groupsAhead(dataset, table, Infinity), columns);
+}
+
+/** Null if reading all of it fits `budget`; otherwise the sentence that says why not, and what to do. */
+function loadAllRefusal(what, bytes, budget, advice) {
+  if (bytes <= budget) return null;
+  return "Not run: reading every row of " + what + " would take about " + bytesText(bytes) + " once decoded, over this page's " +
+    bytesText(budget) + " memory budget. " + advice;
+}
+
+function bytesText(n) {
+  if (n >= 1024 * MB) return (n / (1024 * MB)).toFixed(n >= 10 * 1024 * MB ? 0 : 1) + " GB";
+  return Math.max(1, Math.round(n / MB)) + " MB";
+}
+
 // The view layer: what columns the grid shows (`newDisplay`/`baseView`),
 // which of the loaded columns still need decoding, pagination, and export
 // to CSV/TSV/JSON/Markdown (both download and clipboard).
@@ -2955,11 +3364,37 @@ const wantedColumns = (table) => [...neededColumns(table)];
  * find one behind. Rather than draw a hole, fill it in and come back.
  * Returns true when it has taken over: the caller should stop.
  */
+/**
+ * After columns are shown: any that could not be decoded for the rows already read without going
+ * over the memory budget are hidden again, and the note says which and why. The query's own
+ * columns are never hidden here; needFilled refuses those instead.
+ */
+function keepWithinBudget() {
+  const t = state.table, d = state.dataset;
+  if (!t || !d) return;
+  const q = new Set(queryColumns(state.query));
+  const behind = unfilled(t, wantedColumns(t));
+  const fit = fitFill(d, t, behind, budgetBytes());
+  const hide = fit.drop.filter((ci) => !q.has(ci));
+  if (!hide.length) return;
+  for (const ci of hide) state.display.hidden.add(ci);
+  showMemNote("Kept " + num(hide.length) + " column" + (hide.length === 1 ? "" : "s") + " hidden: decoding " + (hide.length === 1 ? "it" : "them") +
+    " for the rows already read would take this page over its " + bytesText(budgetBytes()) + " memory budget. Hide other columns to make room.");
+}
 function needFilled(indexes, again) {
   if (!state.table || !state.dataset) return false;
   const behind = unfilled(state.table, indexes);
   if (!behind.length) return false;
   if (state.filling) return true;
+  /* the picker and the open flow keep what is shown inside the budget, so what
+     reaches here is a query naming columns that were left out; decode them only if they fit */
+  const fit = fitFill(state.dataset, state.table, behind, budgetBytes());
+  if (fit.drop.length) {
+    const names = fit.drop.slice(0, 3).map((ci) => '"' + state.table.cols[ci].name + '"').join(", ") + (fit.drop.length > 3 ? " and more" : "");
+    showMemNote("Not run: decoding " + names + " for the rows already read would take this page over its " + bytesText(budgetBytes()) +
+      " memory budget. Hide other columns first (Columns), or use a WHERE clause on other columns and Run: Run searches the whole file without loading all of it.");
+    return true;
+  }
   state.filling = true;
   const names = behind.map((ci) => state.table.cols[ci].name);
   busy(true, "decoding " + (names.length === 1 ? '"' + names[0] + '"' : num(names.length) + " more columns") + "…");
@@ -3465,6 +3900,7 @@ function initPicker() {
       case "cpclose": togglePicker(false); return;
       default: return;
     }
+    if (el.dataset.act === "cpshow" || el.dataset.act === "cpall") keepWithinBudget();
     renderPicker();
     refreshView(true);
   };
@@ -4446,14 +4882,16 @@ function runQuery() {
   const ms = Math.round(performance.now() - t0);
   setView(view);
   const skipped = q.filters.filter((f) => filterIssue(f, cols)).length;
+  /* a partial answer says how partial: "from 250,000 read" hides that the file has ten million */
+  const ofTotal = table.scan ? table.scan.rows : table.dataset.numRows;
   $("qstat").innerHTML = "<b>" + num(view.count) + "</b> " + (view.agg ? "groups" : "rows") +
-    " from " + num(n) + (table.truncated ? " read" : "") + " &middot; " + ms + " ms" +
+    " from " + (table.truncated ? "the first " + num(n) + " of " + num(ofTotal) + " rows" : num(n)) + " &middot; " + ms + " ms" +
     (skipped ? " &middot; <em class='qwarn'>" + skipped + " clause" + (skipped === 1 ? "" : "s") +
       " skipped</em>" : "") +
     (table.scan ? " &middot; over " + num(table.scan.kept) + " of " + num(table.scan.total) +
       " row groups" : "");
   $("qclear").disabled = false;
-  updateScanButton();
+  describeScope();
 }
 /** Which output column a sort clause means in aggregate mode, or -1. */
 function aggSortIndex(q, s) {
@@ -5301,7 +5739,7 @@ function renderQuery() {
   state.sqlDirty = false;
   renderZones();
   renderSql(true);
-  updateScanButton();
+  describeScope();
 }
 /** The builder owns the text unless the user is in the middle of editing it. */
 function renderSql(force) {
@@ -5346,8 +5784,8 @@ function adoptSql(andRun) {
   state.query = res.query;
   state.sqlDirty = false;
   renderZones();                       /* zones follow the text, text stays put */
-  updateScanButton();
-  if (andRun) { renderSql(true); runQuery(); }
+  describeScope();
+  if (andRun) { renderSql(true); runWhole(); }
   return true;
 }
 
@@ -5451,7 +5889,7 @@ function initQuery() {
     renderSql();
   });
   $("qzones").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); runQuery(); }
+    if (e.key === "Enter") { e.preventDefault(); runWhole(); }
   });
   let sqlTimer = 0;
   $("qsql").addEventListener("input", () => {
@@ -5464,11 +5902,9 @@ function initQuery() {
   });
   $("qsql").addEventListener("blur", () => { clearTimeout(sqlTimer); adoptSql(false); });
   $("qformat").addEventListener("click", () => { if (adoptSql(false)) renderSql(true); });
-  $("qrun").addEventListener("click", () => {
-    if (state.sqlDirty && !adoptSql(true)) return;    /* refuse to run text that does not parse */
-    runQuery();
-  });
-  $("qscan").addEventListener("click", () => runScan());
+  /* running searches the whole file: runWhole takes text that has not been adopted yet and
+     refuses it if it does not parse, so this does not adopt it first */
+  $("qrun").addEventListener("click", () => runWhole());
   $("qclear").addEventListener("click", () => resetQuery());
   $("qcopy").addEventListener("click", () => {
     const text = querySql();
@@ -5511,7 +5947,7 @@ function queryHeight(px) {
 // Predicate pushdown: turns a query's WHERE clause into a plan of which row
 // groups (and, within a group, which page ranges) could hold a matching row,
 // using footer statistics, page indexes, and bloom filters (with its own
-// xxh64) before `runScan` rebuilds the table from only what survived.
+// xxh64) before `runWhole` rebuilds the table from only what survived.
 
 
 const PAGE_NARROW_MIN = 4096;
@@ -5913,44 +6349,132 @@ function planReport(plan) {
     " in " + num(plan.ms) + " ms";
 }
 
-/**
- * Plans, then rebuilds the table from only the row groups that survived,
- * then runs the query over them. The answer is the same as reading the
- * whole file; the difference is how much of it came off disk.
- */
-async function runScan() {
-  const dataset = state.dataset, q = state.query;
-  if (!dataset || !state.table) return;
-  if (state.sqlDirty && !adoptSql(true)) return;
-  busy(true, "reading what the footers claim…");
-  await new Promise((r) => setTimeout(r, 0));
+const RUN_STEPS = [
+  { label: "Plan", why: "Ruling row groups out from what the file's footer says about each one (min and max, bloom filters, page index), without reading any data." },
+  { label: "Check the memory budget", why: "Estimating what the row groups that remain will take once decoded, so a query that would not fit is refused now rather than run out of memory halfway." },
+  { label: "Read", why: "Decoding only the columns the query uses, from only the row groups that could match." },
+  { label: "Compute", why: "Running the query over what was read." },
+];
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+/** Frees the decoded rows a table holds, so its replacement can be read without both in memory at once. */
+function releaseRows(table) {
+  for (const c of table.cols) { c.rows = []; c.filled = 0; }
+}
+/** Reads the first rows back after a run that released them was cancelled or failed. */
+async function restoreBrowse(dataset) {
+  busy(true, "Restoring the view");
   try {
-    const plan = await planScan(dataset, q, state.table, async (i, n) => {
-      busy(true, "planning… " + num(i + 1) + " of " + num(n) + " files");
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    if (!plan) {
-      showPlan("<em>Nothing to push down — this needs a WHERE clause the file's own " +
-        "statistics can be tested against.</em>");
-      return;
-    }
     const table = newTable(dataset);
-    table.plan = plan.keep;
-    table.scan = plan;
-    table.need = neededColumns(table, true);
-    busy(true, "decoding " + num(Math.min(plan.rows, FIRST_ROWS)) + " rows of "
-      + num(plan.kept) + " row groups…");
-    await new Promise((r) => setTimeout(r, 0));
+    table.need = neededColumns(table);
     await loadMore(dataset, table, FIRST_ROWS);
     state.table = table;
+    if (state.query && state.query.active) runQuery(); else setView(baseView(table));
+    renderMeta();
+    updateButtons();
+    describeScope();
+  } catch (e) { showError(e); } finally { busy(false); }
+}
+
+/**
+ * Runs the query against the whole file, which is what a query means. A WHERE is first planned
+ * against the footer so only the row groups that could match are read (the answer is the same as
+ * reading everything; the difference is how much came off disk). An aggregate then reads every
+ * row of the columns it needs, and a plain query reads the first matches and pages on demand.
+ * Either is checked against the memory budget before anything is decoded, and refused with the
+ * numbers if it will not fit, rather than quietly answering about fewer rows.
+ */
+async function runWhole() {
+  const dataset = state.dataset, q = state.query, cur = state.table;
+  if (!dataset || !cur) return;
+  if (state.sqlDirty && !adoptSql(false)) return;
+  const agg = q.mode === "agg" && (q.groupBy.length || q.metrics.length);
+  const hasWhere = clauseGroups(q.filters, cur.cols).length > 0;
+  /* nothing further to read: browsing a file with no filter, or a table that already holds every row
+     of every column this query needs. A table that holds every row but lacks a column is NOT topped up:
+     that would keep the columns of every earlier query in memory too, so what is held would grow with
+     the history of queries instead of with what this one needs. It is rebuilt with just what is needed. */
+  const complete = cur.rowsLoaded >= dataset.numRows && !cur.scan && !unfilled(cur, [...neededColumns(cur, true)]).length;
+  if ((!hasWhere && !agg) || complete) { runQuery(); return; }
+  const stop = { asked: false };
+  let needRestore = false;
+  busy(true, agg ? "Aggregating the whole file" : "Searching the whole file", RUN_STEPS, () => { stop.asked = true; });
+  await tick();
+  try {
+    progressStep(0, 0.1, hasWhere ? "reading row group statistics for the WHERE clause" : "no WHERE clause, so every row group is needed");
+    const plan = hasWhere ? await planScan(dataset, q, cur, async (i, n) => {
+      progressStep(0, (i + 1) / n, "file " + num(i + 1) + " of " + num(n));
+      await tick();
+    }) : null;
+    const table = newTable(dataset);
+    if (plan) { table.plan = plan.keep; table.scan = plan; }
+    table.need = neededColumns(table, true);
+
+    progressStep(1, 0.3, "estimating the size of the row groups that remain");
+    const groups = groupsAhead(dataset, table, agg ? Infinity : FIRST_ROWS);
+    const cols = [...table.need];
+    const budget = budgetBytes();
+    const cost = groupsBytes(dataset, table, groups, cols);
+    if (agg && cost > budget) {
+      showMemNote("Not run over the whole file: reading " + num(groups.reduce((n, g) => n + g.rows, 0)) + " rows of " + num(cols.length) +
+        " column" + (cols.length === 1 ? "" : "s") + " would take about " + bytesText(cost) + ", over this page's " + bytesText(budget) +
+        " memory budget. Narrow it with a WHERE clause on a column the file is sorted or clustered by, or aggregate fewer columns.",
+        [{ label: "Run on the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
+      return;
+    }
+
+    /* the table on screen is about to be replaced, so what it holds is freed first: the old rows and
+       the new ones are never in memory together (if this is cancelled or fails, the view is read back) */
+    if (heldBytes(dataset, cur) > 0) { releaseRows(cur); state.view = null; needRestore = true; }
+    progressStep(2, 0, "row group 1 of " + num(groups.length));
+    await tick();
+    await loadMore(dataset, table, agg ? Infinity : FIRST_ROWS, (_pi, _gi, ci, n) => {
+      progressStep(2, (table.groupsLoaded + ci / n) / Math.max(1, groups.length),
+        "row group " + num(Math.min(groups.length, table.groupsLoaded + 1)) + " of " + num(groups.length) + ", column " + num(ci + 1) + " of " + num(n));
+    });
+    if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+
+    progressStep(3, 0.5, num(table.rowsLoaded) + " rows in memory");
+    await tick();
+    state.table = table;
+    needRestore = false;
     if (state.display.order.length !== table.cols.length) state.display = newDisplay(table.cols);
     renderMeta();
     updateButtons();
+    showMemNote(null);
     runQuery();
-    showPlan(planReport(plan));
   } catch (e) {
     showError(e);
-  } finally { busy(false); }
+  } finally {
+    busy(false);
+    /* in the finally, not after it: a cancelled run leaves the try block by return, and would skip this */
+    if (needRestore) await restoreBrowse(dataset);
+  }
+}
+
+/**
+ * The line under the query bar: what the answer on screen covers. It says so every time, because
+ * an answer about the first quarter of a percent of a file reads exactly like an answer about all of it.
+ */
+function describeScope() {
+  const t = state.table, d = state.dataset, q = state.query;
+  if (!t || !d) { showPlan(""); return; }
+  const total = d.numRows, read = t.rowsLoaded;
+  const pctRead = total ? Math.min(100, (read / total) * 100) : 100;
+  const share = pctRead >= 10 ? Math.round(pctRead) : pctRead >= 1 ? pctRead.toFixed(1) : pctRead.toFixed(2);
+  if (!(q && q.active)) {
+    showPlan(read < total ? "Showing the first <b>" + num(read) + "</b> of " + num(total) + " rows (" + share + "%). <b>Run</b> searches the whole file." : "");
+    return;
+  }
+  if (t.scan) {
+    const agg = q.mode === "agg";
+    const more = t.truncated ? " Showing matches from the first " + num(t.groupsLoaded) + " of them; <b>Load more</b> reads on." : "";
+    showPlan("<b>Whole file.</b> " + (agg ? "Aggregated over " : "") + planReport(t.scan) + "." + (agg ? "" : more));
+    return;
+  }
+  if (read >= total) { showPlan("<b>Whole file.</b> Searched all " + num(total) + " rows."); return; }
+  showPlan("<em>Only the " + num(read) + " rows read so far (" + share + "% of the file), not the whole file.</em> " +
+    "Use <b>Run</b> to search all of it" + (t.truncated ? ", or Load more to read further" : "") + ".");
 }
 function showPlan(html) {
   const el = $("qplan");
@@ -5971,17 +6495,8 @@ async function unscan() {
     setView(baseView(table));
     renderMeta();
     updateButtons();
+    describeScope();               /* it described the scanned table until this read finished */
   } catch (e) { showError(e); } finally { busy(false); }
-}
-/** The button is only worth pressing when there is something to push down. */
-function updateScanButton() {
-  const b = $("qscan");
-  if (!b) return;
-  const t = state.table;
-  const groups = t ? t.dataset.numGroups : 0;
-  const has = !!(t && state.query && clauseGroups(state.query.filters, t.cols).length);
-  b.disabled = !has || groups < 2;
-  b.classList.toggle("on", !!(t && t.scan));
 }
 
 // The Diff panel: compares two datasets (A, the open file, and B, a chosen
@@ -6598,6 +7113,13 @@ async function loadAllBoth() {
   busy(true, "decoding every row…");
   await new Promise((r) => setTimeout(r, 0));
   try {
+    /* every column of every row of both files at once: refuse up front if that cannot fit */
+    const everyCol = (t) => t.cols.map((_c, i) => i);
+    const need = loadAllBytes(state.dataset, state.table, everyCol(state.table)) +
+      (diff.b ? loadAllBytes(diff.b.dataset, diff.b.table, everyCol(diff.b.table)) : 0);
+    const why = loadAllRefusal("both files", need, budgetBytes(),
+      "Compare a smaller file, or use the schema and statistics comparison, which needs no rows.");
+    if (why) throw new Refusal(why);
     state.table.need = null;                       /* the diff wants every column */
     await loadMore(state.dataset, state.table, Infinity);
     await fillColumns(state.dataset, state.table, state.table.cols.map((_c, i) => i));
@@ -6875,6 +7397,14 @@ async function runJoin() {
     const probeSeed = aIsBuild ? b.table : aTableIn;
     const probeKeyCi = aIsBuild ? join.keyB : join.keyA;
 
+    /* a join holds both sides (every column of them) at once, so it is refused up front when they cannot fit */
+    const everyCol = (t) => t.cols.map((_c, i) => i);
+    const budget = budgetBytes();
+    if (!materialized(buildDataset)) {
+      const why = loadAllRefusal("the smaller side of the join", loadAllBytes(buildDataset, buildTable, everyCol(buildTable)), budget,
+        "Join a smaller file, or one with fewer columns.");
+      if (why) throw new Refusal(why);
+    }
     if (!materialized(buildDataset)) {
       busy(true, "reading the smaller side fully…");
       await new Promise((r) => setTimeout(r, 0));
@@ -6918,6 +7448,10 @@ async function runJoin() {
       }
     }
     if (!materialized(probeDataset)) {
+      const why = loadAllRefusal("the larger side of the join, beside the smaller one already read",
+        loadAllBytes(probeDataset, probeTable, everyCol(probeTable)) + heldBytes(buildDataset, buildTable), budget,
+        "Join a smaller file, or narrow the larger side with a WHERE first (a join reads only the row groups that can match).");
+      if (why) throw new Refusal(why);
       busy(true, "reading the larger side…");
       await new Promise((r) => setTimeout(r, 0));
       await loadMore(probeDataset, probeTable, Infinity);
@@ -7707,14 +8241,57 @@ function showError(e) {
   box.id = "err";
   box.textContent = (e && e.message) ? e.message : String(e);
   $("stage").prepend(box);
-  if (e && e.stack) console.error(e);
+  if (e && e.stack && !(e instanceof Refusal)) console.error(e);
 }
-function busy(on, text) {
-  const b = $("busy");
-  b.hidden = !on;
-  if (text) b.textContent = text;
+/**
+ * Says the page is working. The first call opens the progress popup (once the work has lasted
+ * long enough to notice); with `steps` it shows the whole path and `progressStep` moves along
+ * it, without them the text is all it says. Later calls only change what is said, and
+ * `busy(false)` ends it, so callers that only ever passed text keep working unchanged.
+ * `onCancel` makes the popup's Cancel button (and Escape) available.
+ */
+let busyOn = false;
+function busy(on, text, steps, onCancel) {
+  if (on) {
+    if (!busyOn) { busyOn = true; progressStart(text || "Working…", steps || null, onCancel || null); }
+    else if (text && !steps) progressSay(text);
+  } else if (busyOn) {
+    busyOn = false;
+    progressFinish();
+  }
+}
+/**
+ * The line under the toolbar that says something the person should not miss about memory: that
+ * columns were left out to stay inside the budget, or that a load stopped at it. `actions` are
+ * buttons ({ label, run }). Cleared with no text.
+ */
+function showMemNote(text, actions) {
+  const el = $("memnote");
+  if (!el) return;
+  el.innerHTML = "";
+  if (!text) { el.hidden = true; return; }
+  const span = document.createElement("span");
+  span.textContent = text;
+  el.append(span);
+  for (const a of actions || []) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = a.label;
+    b.addEventListener("click", a.run);
+    el.append(b);
+  }
+  el.hidden = false;
 }
 const FIRST_ROWS = 20000;
+const OPEN_STEPS = [
+  { label: "Read the file's footer", why: "A parquet file ends with its own table of contents: the schema, the row groups and their statistics. Only that is read." },
+  { label: "Decide what to decode", why: "Decoded values take several times a file's size in memory, so only as many columns as fit the memory budget are read first." },
+  { label: "Decode the first rows", why: "The first row group of those columns, so there is something to look at while the rest of the file waits." },
+];
+const LOAD_STEPS = [
+  { label: "Check the memory budget", why: "Estimating what these row groups will take once decoded, so a load that would not fit is stopped before it starts." },
+  { label: "Decode row groups", why: "Each row group is read and decoded a column at a time; only the columns on screen or in the query." },
+];
 
 function isParquetFile(f) { return isParquetPath(f.webkitRelativePath || f.name); }
 
@@ -7812,18 +8389,19 @@ function adoptDataset(dataset, table, name, showCount, keepDisplay) {
 async function openEntries(entries, label) {
   const old = $("err");
   if (old) old.remove();
-  busy(true, "reading footers...");
+  busy(true, "Opening the file", OPEN_STEPS, () => {});
+  progressStep(0, null, "reading the footer…");
   poolStart();                     /* the other cores, once there is a file for them */
   const named = !!label || entries.length === 1;
   const name = label || (entries.length === 1 ? entries[0].path : entries.length + " files");
   $("fileline").innerHTML = "<b>" + esc(name) + "</b>";
   try {
     if (!entries.length) throw new Error("No .parquet files here.");
-    let parts = 0;
+    let parts = 0, memNote = null;
     const dataset = await readDataset(entries, async (i, n, _path) => {
       parts = n;
       if (n > 1 && (i % 16 === 0 || i === n - 1)) {
-        busy(true, "reading footers… " + (i + 1) + " of " + n);
+        progressStep(0, (i + 1) / n, "footer " + num(i + 1) + " of " + num(n));
         await new Promise((r) => setTimeout(r, 0));
       }
     });
@@ -7833,15 +8411,38 @@ async function openEntries(entries, label) {
        they are settled before the first read rather than after it */
     state.display = newDisplay(table.cols);
     state.query = newQuery();
+    /* decoding costs several times the file's size in memory, so what is read
+       first is limited to the columns that fit the budget; the rest stay
+       hidden, and the note says so and how to bring them in */
+    progressStep(1, 0.3, "estimating what decoding the first row group would cost");
+    const first = groupsAhead(dataset, table, FIRST_ROWS);
+    const everything = table.cols.map((_c, i) => i);
+    const fit = fitColumns(dataset, table, everything, first, budgetBytes());
+    if (fit.drop.length) {
+      for (const ci of fit.drop) state.display.hidden.add(ci);
+      const all = groupsBytes(dataset, table, first, everything);
+      memNote = "Showing " + num(fit.keep.length) + " of " + num(everything.length) + " columns. Decoding all of them would take about " +
+        bytesText(all) + ", and this page keeps its decoded data under " + bytesText(budgetBytes()) +
+        " so the browser tab stays alive.";
+    } else if (fit.over) {
+      memNote = "Even one column of this file's first row group is estimated at " + bytesText(fit.bytes) +
+        ", over this page's " + bytesText(budgetBytes()) + " budget. It is shown anyway; expect it to be slow.";
+    }
     table.need = neededColumns(table);
-    busy(true, "decoding " + num(Math.min(dataset.numRows, FIRST_ROWS)) + " rows...");
+    const openOnProgress = (_pi, _gi, ci, n) => {
+      const g = Math.min(first.length, table.groupsLoaded + 1);
+      progressStep(2, (table.groupsLoaded + ci / n) / Math.max(1, first.length),
+        "row group " + num(g) + " of " + num(first.length) + ", column " + num(ci + 1) + " of " + num(n));
+    };
+    progressStep(2, 0, "row group 1 of " + num(first.length));
     await new Promise((r) => setTimeout(r, 0));
-    await loadMore(dataset, table, FIRST_ROWS);
+    await loadMore(dataset, table, FIRST_ROWS, openOnProgress);
     showPlan("");
     diff.b = null;                     /* a new file needs a new comparison */
     diff.rows = null;
     diff.keys = [];
     adoptDataset(dataset, table, name, parts > 1 && named, true);
+    showMemNote(memNote, memNote ? [{ label: "Choose columns", run: () => $("toggleCols").click() }] : null);
     if (fileHooks.onOpen) fileHooks.onOpen(entries.length === 1 ? entries[0].path : null);
   } catch (e) {
     $("gridwrap").hidden = true;
@@ -7899,19 +8500,49 @@ function updateButtons() {
   }
 }
 async function grow(n) {
-  busy(true, "decoding...");
+  const t = state.table, d = state.dataset;
+  if (!t || !d) return;
+  t.need = neededColumns(t);
+  const groups = groupsAhead(d, t, n);
+  const budget = budgetBytes();
+  const fit = affordableGroups(d, t, groups, [...t.need], budget);
+  if (!fit.groups) {
+    const next = groups.length ? groupsBytes(d, t, [groups[0]], [...t.need]) : 0;
+    showMemNote("Not loaded: the next row group would take about " + bytesText(next) + " once decoded, which would put this page over its " +
+      bytesText(budget) + " memory budget. Hide columns you do not need (Columns), or add a WHERE clause and Run: Run searches the whole file without loading all of it.",
+      [{ label: "Choose columns", run: () => $("toggleCols").click() }]);
+    return;
+  }
+  const stopped = { by: null };
+  busy(true, n === Infinity ? "Loading the rest of the file" : "Loading more rows", LOAD_STEPS, () => { stopped.by = "you"; });
+  progressStep(0, null, "about " + bytesText(fit.bytes) + " of " + bytesText(budget) + " in use after this");
   await new Promise((r) => setTimeout(r, 0));
   try {
-    state.table.need = neededColumns(state.table);
-    await loadMore(state.dataset, state.table, n);
-    if (state.query && state.query.active) runQuery(); else setView(baseView(state.table));
+    const before = t.rowsLoaded, want = fit.all ? n : fit.rows, total = fit.groups;
+    const done0 = t.groupsLoaded;
+    progressStep(1, 0, "row group 1 of " + num(total));
+    await loadMore(d, t, want, (_pi, _gi, ci, cols) => {
+      const g = t.groupsLoaded - done0;
+      progressStep(1, (g + ci / cols) / total, "row group " + num(Math.min(total, g + 1)) + " of " + num(total) + ", column " + num(ci + 1) + " of " + num(cols));
+    });
+    if (state.query && state.query.active) runQuery(); else setView(baseView(t));
     renderMeta();
     updateButtons();
+    const added = t.rowsLoaded - before;
+    if (!fit.all) {
+      const nextCost = groupsBytes(d, t, [groups[fit.groups]], [...t.need]);
+      showMemNote("Loaded " + num(added) + " rows and stopped: the next row group would take about " + bytesText(nextCost) +
+        " more, over this page's " + bytesText(budget) + " memory budget. Hide columns you do not need (Columns), or add a WHERE clause and Run: " +
+        "Run searches the whole file without loading all of it.", [{ label: "Choose columns", run: () => $("toggleCols").click() }]);
+    } else if (stopped.by) {
+      showMemNote("Stopped after " + num(added) + " rows, as you asked.");
+    } else showMemNote(null);
   } catch (e) { showError(e); } finally { busy(false); }
 }
 
 function init() {
   applyTheme(storedTheme());
+  initProgress();
   initQuery();
   initPicker();
   initDiff();
@@ -8101,6 +8732,7 @@ if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, 
   bloomBytes, groupsLeft, rowsAhead, readOffsetIndex, readColumnIndex, readRowsRanges, clauseRanges,
   intersectRanges, unionRanges, mergeRanges, rangeCount,
   pool, poolStart, workerCan,
+  loadAllBoth, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
 
 </script>

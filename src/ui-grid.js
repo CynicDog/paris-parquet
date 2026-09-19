@@ -7,7 +7,7 @@ import { diff } from "./diff.js";
 import { runQuery, sortMark } from "./query.js";
 import { compactNumber, fmtTemporal, fmtValue, HEX, hex } from "./types.js";
 import { typeTag } from "./ui-query-builder.js";
-import { baseView, bytesHuman, CELL_BUDGET, COL_W, displayOrder, esc, needFilled, num, pageBounds, pct, pinnedCount, ROW_H, renderPager, setView, state, viewValue, wantedColumns } from "./view.js";
+import { baseView, bytesHuman, CELL_BUDGET, COL_W, displayOrder, esc, keepWithinBudget, needFilled, num, pageBounds, pct, pinnedCount, ROW_H, renderPager, setView, state, viewValue, wantedColumns } from "./view.js";
 
 /* Which page of top values each column is showing, by column name, so it
    survives a re-render of the header but not a different file. */
@@ -299,6 +299,7 @@ export function initPicker() {
       case "cpclose": togglePicker(false); return;
       default: return;
     }
+    if (el.dataset.act === "cpshow" || el.dataset.act === "cpall") keepWithinBudget();
     renderPicker();
     refreshView(true);
   };

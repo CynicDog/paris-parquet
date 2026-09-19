@@ -2,8 +2,9 @@
 // which of the loaded columns still need decoding, pagination, and export
 // to CSV/TSV/JSON/Markdown (both download and clipboard).
 
+import { budgetBytes, bytesText, fitFill } from "./budget.js";
 import { $, fillColumns, unfilled } from "./columns.js";
-import { busy, showError } from "./main.js";
+import { busy, showError, showMemNote } from "./main.js";
 import { fmtValue, summarize } from "./types.js";
 import { renderGrid, renderRows } from "./ui-grid.js";
 
@@ -110,11 +111,37 @@ export const wantedColumns = (table) => [...neededColumns(table)];
  * find one behind. Rather than draw a hole, fill it in and come back.
  * Returns true when it has taken over: the caller should stop.
  */
+/**
+ * After columns are shown: any that could not be decoded for the rows already read without going
+ * over the memory budget are hidden again, and the note says which and why. The query's own
+ * columns are never hidden here; needFilled refuses those instead.
+ */
+export function keepWithinBudget() {
+  const t = state.table, d = state.dataset;
+  if (!t || !d) return;
+  const q = new Set(queryColumns(state.query));
+  const behind = unfilled(t, wantedColumns(t));
+  const fit = fitFill(d, t, behind, budgetBytes());
+  const hide = fit.drop.filter((ci) => !q.has(ci));
+  if (!hide.length) return;
+  for (const ci of hide) state.display.hidden.add(ci);
+  showMemNote("Kept " + num(hide.length) + " column" + (hide.length === 1 ? "" : "s") + " hidden: decoding " + (hide.length === 1 ? "it" : "them") +
+    " for the rows already read would take this page over its " + bytesText(budgetBytes()) + " memory budget. Hide other columns to make room.");
+}
 export function needFilled(indexes, again) {
   if (!state.table || !state.dataset) return false;
   const behind = unfilled(state.table, indexes);
   if (!behind.length) return false;
   if (state.filling) return true;
+  /* the picker and the open flow keep what is shown inside the budget, so what
+     reaches here is a query naming columns that were left out; decode them only if they fit */
+  const fit = fitFill(state.dataset, state.table, behind, budgetBytes());
+  if (fit.drop.length) {
+    const names = fit.drop.slice(0, 3).map((ci) => '"' + state.table.cols[ci].name + '"').join(", ") + (fit.drop.length > 3 ? " and more" : "");
+    showMemNote("Not run: decoding " + names + " for the rows already read would take this page over its " + bytesText(budgetBytes()) +
+      " memory budget. Hide other columns first (Columns), or use a WHERE clause on other columns and Run: Run searches the whole file without loading all of it.");
+    return true;
+  }
   state.filling = true;
   const names = behind.map((ci) => state.table.cols[ci].name);
   busy(true, "decoding " + (names.length === 1 ? '"' + names[0] + '"' : num(names.length) + " more columns") + "…");

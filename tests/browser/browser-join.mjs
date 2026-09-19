@@ -191,6 +191,28 @@ await withPage(async (page) => {
   } else bad("pushdown did not narrow anything: " + JSON.stringify(plan));
 });
 
+/* --------------------------------------- a join that will not fit is refused, not attempted */
+await withPage(async (page) => {
+  await page.goto("file://" + appPath);
+  await page.evaluate(() => window.PARIS.setBudgetMB(0.0005));      /* half a kilobyte: these files are tiny */
+  await page.setInputFiles("#picker", path.join(tmp, "big.parquet"));
+  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  await page.click("#toggleJoin");
+  await page.setInputFiles("#jpicker", path.join(tmp, "small.parquet"));
+  await page.waitForTimeout(300);
+  await page.selectOption("#jkeyA", { label: "id" });
+  await page.selectOption("#jkeyB", { label: "ref_id" });
+  await page.click("#jrun");
+  await idle(page);
+  await page.waitForTimeout(150);
+  const err = await page.evaluate(() => (document.getElementById("err") || {}).textContent || "");
+  if (/^Not run: reading every row of .* of the join would take about .* over this page's 1 MB memory budget/.test(err)) ok("a join over the memory budget is refused with the numbers: " + err.slice(0, 90) + "…");
+  else bad("join under a 1 MB budget: " + JSON.stringify(err.slice(0, 160)));
+  const rows = await page.evaluate(() => window.PARIS.state.table.rowsLoaded);
+  if (rows > 0 && !(await page.evaluate(() => !!window.PARIS.state.table.joined))) ok("and the file that was open is left as it was");
+  else bad("the table was replaced by a refused join");
+});
+
 /* ------------------------------------------ picking B from the folder panel */
 await withPage(async (page) => {
   await page.goto("file://" + appPath);

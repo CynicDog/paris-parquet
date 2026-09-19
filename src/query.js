@@ -5,7 +5,7 @@
 // reads it back. `runQuery()` ties it together against the loaded rows.
 
 import { $ } from "./columns.js";
-import { showPlan, unscan, updateScanButton } from "./pushdown.js";
+import { describeScope, showPlan, unscan } from "./pushdown.js";
 import { binBounds, fmtValue, lessThan, numeric } from "./types.js";
 import { adoptSql, renderQuery } from "./ui-query-builder.js";
 import { baseView, displayCols, neededColumns, needFilled, num, setView, state } from "./view.js";
@@ -613,14 +613,16 @@ export function runQuery() {
   const ms = Math.round(performance.now() - t0);
   setView(view);
   const skipped = q.filters.filter((f) => filterIssue(f, cols)).length;
+  /* a partial answer says how partial: "from 250,000 read" hides that the file has ten million */
+  const ofTotal = table.scan ? table.scan.rows : table.dataset.numRows;
   $("qstat").innerHTML = "<b>" + num(view.count) + "</b> " + (view.agg ? "groups" : "rows") +
-    " from " + num(n) + (table.truncated ? " read" : "") + " &middot; " + ms + " ms" +
+    " from " + (table.truncated ? "the first " + num(n) + " of " + num(ofTotal) + " rows" : num(n)) + " &middot; " + ms + " ms" +
     (skipped ? " &middot; <em class='qwarn'>" + skipped + " clause" + (skipped === 1 ? "" : "s") +
       " skipped</em>" : "") +
     (table.scan ? " &middot; over " + num(table.scan.kept) + " of " + num(table.scan.total) +
       " row groups" : "");
   $("qclear").disabled = false;
-  updateScanButton();
+  describeScope();
 }
 /** Which output column a sort clause means in aggregate mode, or -1. */
 export function aggSortIndex(q, s) {

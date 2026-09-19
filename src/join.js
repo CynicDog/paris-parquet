@@ -4,6 +4,7 @@
 // the constraints (one join at a time, inner only) and `runJoin` for the
 // build/probe side selection and row-group narrowing.
 
+import { budgetBytes, heldBytes, loadAllBytes, loadAllRefusal, Refusal } from "./budget.js";
 import { $, loadMore } from "./columns.js";
 import { newTable, readDataset } from "./dataset.js";
 import { diff, showDiff } from "./diff.js";
@@ -229,6 +230,14 @@ export async function runJoin() {
     const probeSeed = aIsBuild ? b.table : aTableIn;
     const probeKeyCi = aIsBuild ? join.keyB : join.keyA;
 
+    /* a join holds both sides (every column of them) at once, so it is refused up front when they cannot fit */
+    const everyCol = (t) => t.cols.map((_c, i) => i);
+    const budget = budgetBytes();
+    if (!materialized(buildDataset)) {
+      const why = loadAllRefusal("the smaller side of the join", loadAllBytes(buildDataset, buildTable, everyCol(buildTable)), budget,
+        "Join a smaller file, or one with fewer columns.");
+      if (why) throw new Refusal(why);
+    }
     if (!materialized(buildDataset)) {
       busy(true, "reading the smaller side fully…");
       await new Promise((r) => setTimeout(r, 0));
@@ -272,6 +281,10 @@ export async function runJoin() {
       }
     }
     if (!materialized(probeDataset)) {
+      const why = loadAllRefusal("the larger side of the join, beside the smaller one already read",
+        loadAllBytes(probeDataset, probeTable, everyCol(probeTable)) + heldBytes(buildDataset, buildTable), budget,
+        "Join a smaller file, or narrow the larger side with a WHERE first (a join reads only the row groups that can match).");
+      if (why) throw new Refusal(why);
       busy(true, "reading the larger side…");
       await new Promise((r) => setTimeout(r, 0));
       await loadMore(probeDataset, probeTable, Infinity);

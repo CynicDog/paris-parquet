@@ -1,7 +1,9 @@
 /**
- * Drives the Scan button in a real browser, and times it against reading the
+ * Drives Run in a real browser, where a WHERE is planned against the footer so only
+ * the row groups that could match are read, and times that against reading the
  * whole file, so the claim that pushdown is faster is measured rather than
- * asserted.
+ * asserted. Run searches the whole file by default: there is no separate Scan
+ * button to remember to press.
  *
  *   NODE_PATH=/opt/node22/lib/node_modules node tests/browser/browser-push.mjs /tmp/fx/push
  */
@@ -42,12 +44,17 @@ await page.goto("file://" + appPath);
 await page.setInputFiles("#picker", path.join(dir, "sorted.parquet"));
 await idle();
 
-if (await page.isDisabled("#qscan")) ok("Scan is disabled until there is something to push down");
-else bad("Scan offered with no WHERE clause");
+if (!(await page.$("#qscan"))) ok("there is no separate Scan button: whole-file search is what Run does");
+else bad("the optional Scan button is still there");
+
+/* before anything is run, the page says how much of the file it is showing */
+const browsing = await page.$eval("#qplan", (el) => el.textContent.replace(/\s+/g, " ").trim());
+if (/first 20,000 of 200,000 rows/.test(browsing) && /Run.*searches the whole file/.test(browsing)) ok("the scope line says what is on screen: " + browsing);
+else bad("scope line before running: " + browsing);
+if ((await page.getAttribute("#qplan", "role")) === "status") ok("and it is a live status region, so a screen reader hears it change");
+else bad("the scope line is not a status region");
 
 await typeSql('SELECT * FROM sorted WHERE "id" >= 195000');
-if (await page.isEnabled("#qscan")) ok("Scan wakes up once a WHERE clause is in");
-else bad("Scan still disabled with a filter typed");
 
 /* the answer needs rows the first 20,000 do not contain, so the honest
    baseline is reading the whole file and then querying it */
@@ -65,12 +72,14 @@ await page.setInputFiles("#picker", path.join(dir, "sorted.parquet"));
 await idle();
 await typeSql('SELECT * FROM sorted WHERE "id" >= 195000');
 t0 = Date.now();
-await page.click("#qscan");
+await page.click("#qrun");
 await idle();
 const scanMs = Date.now() - t0;
 const plan = await page.$eval("#qplan", (el) => el.textContent.replace(/\s+/g, " ").trim());
 console.log("     " + plan);
 console.log("     reading it all:    " + plainRows.replace(/\s+/g, " ").trim());
+if (/^Whole file\./.test(plan)) ok("the scope line says it searched the whole file");
+else bad("scope line after a run: " + plan);
 if (/read 1 of 20 row groups/.test(plan)) ok("the plan reads one row group of twenty");
 else bad("plan: " + plan);
 if (/skipped 19 \(19 by statistics\)/.test(plan)) ok("and says why it skipped the other nineteen");
@@ -90,7 +99,7 @@ else bad("metadata bar: " + mbar.slice(0, 160));
 
 /* nothing can match: no row group survives, and the grid is empty */
 await typeSql('SELECT * FROM sorted WHERE "id" > 1000000');
-await page.click("#qscan");
+await page.click("#qrun");
 await idle();
 const none = await page.$eval("#qplan", (el) => el.textContent.replace(/\s+/g, " ").trim());
 if (/read 0 of 20 row groups/.test(none)) ok("a query nothing can match reads nothing at all");
@@ -102,8 +111,9 @@ else bad(rows + " rows drawn for a query with no matches");
 /* Reset puts the file back the way it was read */
 await page.click("#qclear");
 await idle();
-if (await page.isHidden("#qplan")) ok("Reset clears the plan");
-else bad("the plan line survived a reset");
+const reset = await page.$eval("#qplan", (el) => el.textContent.replace(/\s+/g, " ").trim());
+if (!/row groups|Whole file/.test(reset) && /first 20,000 of 200,000 rows/.test(reset)) ok("Reset puts the scope line back to describing what is loaded");
+else bad("scope line after a reset: " + reset);
 const after = await page.$eval("#fileline", (el) => el.textContent.replace(/\s+/g, " "));
 const back = await page.$$eval("#tbody tr", (rs) => rs.length);
 if (back > 0) ok("and the grid is a grid again: " + after);
@@ -114,7 +124,7 @@ await page.goto("file://" + appPath);
 await page.setInputFiles("#picker", path.join(dir, "shuffled.parquet"));
 await idle();
 await typeSql("SELECT * FROM shuffled WHERE \"sku\" = 'sku-099999'");
-await page.click("#qscan");
+await page.click("#qrun");
 await idle();
 const bloom = await page.$eval("#qplan", (el) => el.textContent.replace(/\s+/g, " ").trim());
 console.log("     " + bloom);
@@ -129,7 +139,7 @@ await page.goto("file://" + appPath);
 await page.setInputFiles("#picker", path.join(dir, "pages.parquet"));
 await idle();
 await typeSql('SELECT * FROM pages WHERE "id" = 150000');
-await page.click("#qscan");
+await page.click("#qrun");
 await idle();
 const narrow = await page.$eval("#qplan", (el) => el.textContent.replace(/\s+/g, " ").trim());
 console.log("     " + narrow);
@@ -138,6 +148,20 @@ else bad("plan: " + narrow);
 const nstat = await page.$eval("#qstat", (el) => el.textContent.replace(/\s+/g, " ").trim());
 if (/^1 rows from ([1-9],\d{3}|\d{1,4})\b/.test(nstat)) ok("one row found, out of a few thousand read: " + nstat);
 else bad("qstat: " + nstat);
+
+/* an aggregate with no WHERE is a question about the whole file: Run reads every row of the columns it needs */
+await page.goto("file://" + appPath);
+await page.setInputFiles("#picker", path.join(dir, "sorted.parquet"));
+await idle();
+await typeSql('SELECT COUNT(*) FROM sorted');
+await page.click("#qrun");
+await idle();
+const counted = await page.evaluate(() => window.PARIS.state.view.cols[0].rows[0]);
+if (counted === 200000) ok("COUNT(*) with no WHERE is the whole file's 200,000, not the 20,000 that were loaded");
+else bad("COUNT(*) answered " + counted);
+const aggScope = await page.$eval("#qplan", (el) => el.textContent.replace(/\s+/g, " ").trim());
+if (/Whole file/.test(aggScope) && /200,000/.test(aggScope)) ok("and the scope line says so: " + aggScope);
+else bad("scope line after the aggregate: " + aggScope);
 
 const other = requests.filter((u) => u !== "file://" + appPath);
 console.log("\n     requests: " + requests.length + " total, " + other.length + " for anything but index.html");
@@ -149,5 +173,5 @@ if (logs.length) {
   for (const l of logs) console.log("  " + l);
 }
 await browser.close();
-console.log(failed || logs.length ? `\n${failed} check(s) failed` : "\nthe scan works in a real browser");
+console.log(failed || logs.length ? `\n${failed} check(s) failed` : "\nRun searches the whole file in a real browser");
 process.exit(failed || logs.length ? 1 : 0);

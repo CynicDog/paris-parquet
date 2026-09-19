@@ -109,8 +109,35 @@ input[type=file]{display:none}
 body.dragging #drop{background:var(--accent-soft);outline:2px dashed var(--accent);outline-offset:-14px}
 #err{margin:14px;padding:10px 12px;border:1px solid var(--err);border-radius:6px;color:var(--err);
   font:12px/1.5 var(--mono);white-space:pre-wrap;background:var(--panel)}
-#busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  background:color-mix(in srgb,var(--bg) 80%,transparent);font:12px var(--mono);color:var(--dim);z-index:30}
+#busy{display:none}   /* a flag only: hidden means idle; the popup below is what people see */
+
+/* ---------- the progress popup ---------- */
+.sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+button:focus-visible,label.btn:focus-visible,[role=radio]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#progress{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;
+  padding:16px 18px 14px;width:min(480px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.28)}
+#progress::backdrop{background:rgba(0,0,0,.4)}
+#progress h2{margin:0 0 10px;font:600 14px/1.4 var(--mono)}
+#pbar{position:relative;height:10px;border-radius:5px;background:var(--line);overflow:hidden}
+#pfill{height:100%;width:0;background:var(--accent);border-radius:5px;transition:width .15s linear}
+#pbar.indet #pfill{width:40%;animation:pindet 1.1s ease-in-out infinite}
+@keyframes pindet{0%{margin-left:-40%}100%{margin-left:100%}}
+@media (prefers-reduced-motion:reduce){
+  #pbar.indet #pfill{animation:none;width:100%;opacity:.45}
+  #pfill{transition:none}
+}
+#ppct{text-align:right;font:11px var(--mono);color:var(--dim);margin:3px 0 6px;min-height:14px}
+#psteps{list-style:none;margin:0 0 6px;padding:0;font:12px/1.5 var(--mono)}
+#psteps li{color:var(--dim)}
+#psteps li.now{color:var(--ink);font-weight:600}
+#psteps li.done{color:var(--ok)}
+.pmark{display:inline-block;width:1.5em}
+.pwhy{margin:1px 0 5px 1.5em;font-weight:400;color:var(--dim)}
+#pdetail{margin:4px 0 10px;font:12px/1.5 var(--mono);color:var(--dim);min-height:1.5em;overflow-wrap:anywhere}
+.pfoot{display:flex;justify-content:flex-end}
+#memnote{flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 12px;
+  border-bottom:1px solid var(--line);background:var(--accent-soft);font:12px/1.5 var(--mono);color:var(--ink)}
+#memnote button{font-size:11px;padding:2px 8px}
 
 /* ---------- pagination ---------- */
 #pager{flex:none;display:flex;align-items:center;gap:7px;padding:4px 10px;border-top:1px solid var(--line);
@@ -314,7 +341,6 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
   color:var(--dim);background:var(--accent-soft)}
 #qplan b{color:var(--accent);font-weight:600}
 #qplan em{font-style:normal;color:var(--warn)}
-#qscan.on{border-color:var(--accent);color:var(--accent)}
 
 /* ---------- diff ---------- */
 #diffwrap{flex:1;overflow:auto;min-height:0;background:var(--panel)}
@@ -467,6 +493,7 @@ details[open]>summary::before{content:"▾ "}
 </header>
 
 <div id="stage">
+  <div id="memnote" role="status" aria-live="polite" hidden></div>
   <div id="drop">
     <div class="big">Drop a .parquet file here</div>
     <div class="hint">A file, several files, or a whole partitioned folder.
@@ -483,7 +510,7 @@ details[open]>summary::before{content:"▾ "}
     <div id="diffbody"></div>
   </div>
   <div id="pager" hidden></div>
-  <div id="busy" hidden>reading…</div>
+  <div id="busy" hidden aria-hidden="true"></div>
 </div>
 
 <div id="inspect" hidden></div>
@@ -498,14 +525,12 @@ details[open]>summary::before{content:"▾ "}
     <span class="qtitle">QUERY</span>
     <span class="seg" id="qmode"><button data-mode="rows" class="on">Rows</button><button data-mode="agg">Aggregate</button></span>
     <button id="qrun" title="Run the query (Enter)">Run</button>
-    <button id="qscan" disabled
-      title="Read only the row groups whose own statistics allow a match, then run">Scan file</button>
     <button id="qclear" disabled>Reset</button>
     <span id="qstat"></span>
     <span class="grow"></span>
     <span class="muted">drag a column into a zone, or double-click it</span>
   </div>
-  <div id="qplan" hidden></div>
+  <div id="qplan" role="status" aria-live="polite" hidden></div>
   <div class="qbody">
     <div class="qcols" id="qcols"></div>
     <div class="qzones" id="qzones"></div>
@@ -526,6 +551,15 @@ details[open]>summary::before{content:"▾ "}
   <div class="mbody" id="mbody"></div>
 </div>
 </div>
+
+<dialog id="progress" aria-labelledby="ptitle" aria-describedby="pdetail">
+  <h2 id="ptitle">Working…</h2>
+  <div id="pbar" role="progressbar" aria-labelledby="ptitle" aria-valuemin="0" aria-valuemax="100"><div id="pfill"></div></div>
+  <div id="ppct" aria-hidden="true"></div>
+  <ol id="psteps"></ol>
+  <p id="pdetail" role="status" aria-live="polite"></p>
+  <div class="pfoot"><button id="pcancel" type="button">Cancel</button></div>
+</dialog>
 
 <script>
 {{SCRIPT}}

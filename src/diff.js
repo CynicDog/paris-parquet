@@ -3,6 +3,7 @@
 // columns, and per-column statistics — and can match rows up by key to show
 // which ones were added, removed, or changed cell by cell.
 
+import { budgetBytes, loadAllBytes, loadAllRefusal, Refusal } from "./budget.js";
 import { $, fillColumns, loadMore } from "./columns.js";
 import { newTable, readDataset } from "./dataset.js";
 import { join, showJoin } from "./join.js";
@@ -620,6 +621,13 @@ export async function loadAllBoth() {
   busy(true, "decoding every row…");
   await new Promise((r) => setTimeout(r, 0));
   try {
+    /* every column of every row of both files at once: refuse up front if that cannot fit */
+    const everyCol = (t) => t.cols.map((_c, i) => i);
+    const need = loadAllBytes(state.dataset, state.table, everyCol(state.table)) +
+      (diff.b ? loadAllBytes(diff.b.dataset, diff.b.table, everyCol(diff.b.table)) : 0);
+    const why = loadAllRefusal("both files", need, budgetBytes(),
+      "Compare a smaller file, or use the schema and statistics comparison, which needs no rows.");
+    if (why) throw new Refusal(why);
     state.table.need = null;                       /* the diff wants every column */
     await loadMore(state.dataset, state.table, Infinity);
     await fillColumns(state.dataset, state.table, state.table.cols.map((_c, i) => i));

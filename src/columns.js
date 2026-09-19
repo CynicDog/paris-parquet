@@ -4,6 +4,7 @@
 
 import { becomesText, sniffUtf8 } from "./dataset.js";
 import { assemble, rangeCount, readColumnChunk, readRowsRanges } from "./encoding.js";
+import { progressCancelled } from "./progress.js";
 import { chunkFor, groupSource, pool, poolWorthIt, readGroupBytes, workerCan, workerColumn } from "./workers.js";
 
 export async function readColumnRows(dataset, part, rg, col, sel, took, firstGroup, ctx) {
@@ -75,6 +76,7 @@ export async function readColumnRows(dataset, part, rg, col, sel, took, firstGro
 export async function loadMore(dataset, table, maxRows, onProgress) {
   let added = 0;
   while (table.nextPart < dataset.parts.length && added < maxRows) {
+    if (progressCancelled()) break;         /* the popup's Cancel: stop at a row group boundary */
     const part = dataset.parts[table.nextPart];
     const meta = part.meta;
     if (table.nextGroup >= meta.rowGroups.length) { table.nextPart++; table.nextGroup = 0; continue; }
