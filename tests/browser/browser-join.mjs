@@ -52,6 +52,16 @@ pq.write_table(big, "${tmp}/big.parquet", compression="snappy", row_group_size=1
 small = pa.table({"ref_id": pa.array(range(1900, 1910), pa.int64()),
                   "label": pa.array(["L%d" % i for i in range(1900, 1910)])})
 pq.write_table(small, "${tmp}/small.parquet", compression="snappy")
+
+# a fact table too big to hold beside its result under a small budget, a five-row dimension, and a many-to-many partner
+nf = 200000
+fact = pa.table({"id": pa.array(range(nf), pa.int64()), "k": pa.array([i % 50 for i in range(nf)], pa.int64()),
+                 "payload": pa.array(["row-%07d" % i for i in range(nf)])})
+pq.write_table(fact, "${tmp}/fact.parquet", compression="snappy", row_group_size=20000)
+dim = pa.table({"dk": pa.array(range(5), pa.int64()), "label": pa.array(["label-%d" % i for i in range(5)])})
+pq.write_table(dim, "${tmp}/dim.parquet", compression="snappy")
+many = pa.table({"mk": pa.array([i % 50 for i in range(5000)], pa.int64()), "tag": pa.array(["t%d" % i for i in range(5000)])})
+pq.write_table(many, "${tmp}/many.parquet", compression="snappy")
 `;
 try {
   execFileSync("python3", ["-c", genPy], { stdio: "inherit" });
@@ -544,6 +554,50 @@ await withPage(async (page) => {
     window.PARIS.state.table.cols).errors.map((e) => e.msg));
   if (onPlain.length && /Join panel/.test(onPlain[0])) ok("a join over a plain file is still refused");
   else bad("join over a plain file: " + JSON.stringify(onPlain));
+});
+
+/* --------------------------------------- the larger side is streamed, and the result's size is known first */
+async function joinOn(page, aFile, bFile, keyA, keyB) {
+  await page.setInputFiles("#picker", path.join(tmp, aFile));
+  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  await page.click("#toggleJoin");
+  await page.setInputFiles("#jpicker", path.join(tmp, bFile));
+  await page.waitForTimeout(300);
+  await page.selectOption("#jkeyA", { label: keyA });
+  await page.selectOption("#jkeyB", { label: keyB });
+  await page.click("#jrun");
+  await idle(page);
+  await page.waitForTimeout(150);
+}
+await withPage(async (page) => {
+  await page.goto("file://" + appPath);
+  /* fact alone is about 200,000 rows x 3 columns: far more than 24 MB once decoded; its result here is 20,000 rows */
+  await page.evaluate(() => window.PARIS.setBudgetMB(24));
+  await page.setInputFiles("#picker", path.join(tmp, "dim.parquet"));
+  await idle(page);
+  await page.evaluate(() => window.PARIS.setBudgetMB(24));
+  await joinOn(page, "fact.parquet", "dim.parquet", "k", "dk");
+  const r = await page.evaluate(() => {
+    const t = window.PARIS.state.table, at = (n) => t.cols.findIndex((c) => c.name === n);
+    const k = t.cols[at("k")].rows, id = t.cols[at("id")].rows, label = t.cols[at("label")].rows;
+    let good = true;
+    for (let i = 0; i < t.rowsLoaded; i++) if (label[i] !== "label-" + k[i] || id[i] % 50 !== k[i]) { good = false; break; }
+    return { rows: t.rowsLoaded, good, err: (document.getElementById("err") || {}).textContent || "" };
+  });
+  if (r.rows === 20000 && r.good) ok("a 200,000-row side joined to a 5-row one under a 24 MB budget streams the larger side: " + r.rows + " result rows, every one matched");
+  else bad("streamed join: " + JSON.stringify(r));
+});
+await withPage(async (page) => {
+  await page.goto("file://" + appPath);
+  await page.evaluate(() => window.PARIS.setBudgetMB(24));
+  await joinOn(page, "fact.parquet", "many.parquet", "k", "mk");
+  const r = await page.evaluate(() => ({
+    err: (document.getElementById("err") || {}).textContent || "",
+    table: window.PARIS.state.table.rowsLoaded,
+    result: !!document.querySelector(".jresult"),
+  }));
+  if (/^Not run: the join would produce 20,000,000 rows of \d+ columns, about .* over this page's 24 MB memory budget/.test(r.err) && !r.result) ok("a many-to-many join is refused with its exact size before any of it is built: " + r.err.slice(0, 120) + "…");
+  else bad("many-to-many join: " + JSON.stringify(r));
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -278,6 +278,23 @@ const SCENARIOS = {
     }
   },
 
+  /** A large-by-small join: the larger side is streamed, so the peak should not follow its row count. Needs --dim SMALL.parquet with an `id` column. */
+  async join(s) {
+    const dim = opt("dim", null);
+    if (!dim) { console.log("  join: pass --dim SMALL.parquet (a file with an id column)"); return; }
+    const o = await open(s); if (!alive(o)) return;
+    await step(s, "Join the file to " + path.basename(dim) + " on id", async () => {
+      await s.page.click("#toggleJoin");
+      await s.page.setInputFiles("#jpicker", dim);
+      await s.page.waitForTimeout(500);
+      await s.page.selectOption("#jkeyA", { label: "id" });
+      await s.page.selectOption("#jkeyB", { label: "id" });
+      await s.page.click("#jrun"); await idle(s);
+      const r = await s.page.evaluate(() => ({ rows: window.PARIS.state.table.rowsLoaded, err: (document.getElementById("err") || {}).textContent || "" }));
+      return { note: `${r.rows.toLocaleString()} result rows ${r.err.slice(0, 200)}`, rows: r.rows };
+    });
+  },
+
   async "pct-all"(s) {
     const o = await open(s); if (!alive(o)) return;
     await step(s, "Run: P99 of one column (whole file)", async () => {

@@ -113,21 +113,30 @@ export function groupsBytes(dataset, table, groups, columns) {
   return bytes;
 }
 
+/** What one decoded cell of a column is estimated to cost, from the first row group's description of it. */
+export function cellCost(dataset, col) {
+  if (col.partKey !== undefined) return 8;
+  if (col.costPerCell === undefined) {
+    const part = dataset.parts[0], rg = part ? part.meta.rowGroups[0] : null;    /* a joined table has no file behind it */
+    const chunk = rg ? chunkFor(rg, col.key) : null;
+    const leaf = part ? part.leafByPath.get(col.key) : null;
+    col.costPerCell = Math.ceil(cellBytes(col.spec, leaf ? leaf.type : null, chunk ? chunk.meta : null) * SAFETY);
+  }
+  return col.costPerCell;
+}
+/** What `rows` more rows of the given columns are estimated to cost once decoded. */
+export function rowsBytes(dataset, table, columns, rows) {
+  let bytes = 0;
+  for (const ci of columns) bytes += rows * cellCost(dataset, table.cols[ci]);
+  return bytes;
+}
 /** What the decoded rows the table already holds are estimated to cost. */
 export function heldBytes(dataset, table) {
   let bytes = 0;
   for (let ci = 0; ci < table.cols.length; ci++) {
     const col = table.cols[ci];
     const n = col.rows.length;
-    if (!n) continue;
-    if (col.partKey !== undefined) { bytes += n * 8; continue; }
-    if (col.costPerCell === undefined) {
-      const part = dataset.parts[0], rg = part.meta.rowGroups[0];
-      const chunk = rg ? chunkFor(rg, col.key) : null;
-      const leaf = part.leafByPath.get(col.key);
-      col.costPerCell = Math.ceil(cellBytes(col.spec, leaf ? leaf.type : null, chunk ? chunk.meta : null) * SAFETY);
-    }
-    bytes += n * col.costPerCell;
+    if (n) bytes += n * cellCost(dataset, col);
   }
   return bytes;
 }

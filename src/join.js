@@ -4,11 +4,12 @@
 // the constraints (one join at a time, inner only) and `runJoin` for the
 // build/probe side selection and row-group narrowing.
 
-import { budgetBytes, heldBytes, loadAllBytes, loadAllRefusal, Refusal } from "./budget.js";
+import { budgetBytes, bytesText, groupsAhead, groupsBytes, heldBytes, loadAllBytes, loadAllRefusal, Refusal, rowsBytes } from "./budget.js";
 import { $, loadMore } from "./columns.js";
 import { newTable, readDataset } from "./dataset.js";
 import { diff, showDiff } from "./diff.js";
-import { adoptDataset, busy, entriesFromDrop, entriesFromFiles, FIRST_ROWS, openEntries, showError } from "./main.js";
+import { adoptDataset, busy, entriesFromDrop, entriesFromFiles, FIRST_ROWS, openEntries, showError, showMemNote } from "./main.js";
+import { progressStep } from "./progress.js";
 import { planScan } from "./pushdown.js";
 import { keyPart, newQuery, sortKey, textOf } from "./query.js";
 import { lessThan } from "./types.js";
@@ -214,12 +215,19 @@ function adoptJoinedTable(dataset, table, description) {
     num(table.rowsLoaded) + " rows x " + num(table.cols.length) + " cols";
 }
 
+const JOIN_STEPS = [
+  { label: "Read the smaller side", why: "It is read fully and hashed by its key; this is the part of a join that has to fit in memory." },
+  { label: "Narrow the larger side", why: "The larger side's row groups are ruled out from the footer when their key range cannot meet the smaller side's." },
+  { label: "Count the matches", why: "Reading only the larger side's key column, one row group at a time, to know how big the result is before any of it is built." },
+  { label: "Build the result", why: "Reading the larger side's row groups that have matches, one at a time, and keeping only the matched rows." },
+];
 export async function runJoin() {
   if (!state.table || !join.b || join.keyA < 0 || join.keyB < 0) return;
   const aDatasetIn = state.dataset, aTableIn = state.table;
   const aNameIn = currentAName();
   const b = join.b;
-  busy(true, "joining…");
+  const stop = { asked: false };
+  busy(true, "Joining", JOIN_STEPS, () => { stop.asked = true; });
   await new Promise((r) => setTimeout(r, 0));
   try {
     const aIsBuild = aDatasetIn.numRows <= b.dataset.numRows;
@@ -239,9 +247,10 @@ export async function runJoin() {
       if (why) throw new Refusal(why);
     }
     if (!materialized(buildDataset)) {
-      busy(true, "reading the smaller side fully…");
+      progressStep(0, 0.2, "reading all " + num(buildDataset.numRows) + " rows of the smaller side");
       await new Promise((r) => setTimeout(r, 0));
       await loadMore(buildDataset, buildTable, Infinity);
+      if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
     }
 
     const buildKeyCol = buildTable.cols[buildKeyCi];
@@ -264,32 +273,23 @@ export async function runJoin() {
       }
     }
 
-    let probeTable = probeSeed;
-    /* a joined side is already whole and has no footer to plan against, so
-       there is nothing to narrow and nothing left to read */
-    if (loRaw !== null && !materialized(probeDataset)) {
-      const probeKeySpec = probeSeed.cols[probeKeyCi].spec;
-      const filter = { ci: probeKeyCi, pred: "between",
-        value: textOf(loRaw, probeKeySpec), valueTo: textOf(hiRaw, probeKeySpec) };
-      busy(true, "narrowing the larger side…");
-      await new Promise((r) => setTimeout(r, 0));
-      const plan = await planScan(probeDataset, { filters: [filter] }, probeSeed);
-      if (plan) {
-        const nt = newTable(probeDataset);
-        nt.plan = plan.keep;
-        probeTable = nt;
+    /* the larger side is streamed, one row group at a time, so what a join holds is the smaller side, the
+       result, and one row group of the larger. A joined side is already whole and has no footer to plan
+       against, so there is nothing to narrow and nothing to stream: it is used as it is. */
+    const probeMat = materialized(probeDataset);
+    let probeTable = probeSeed, groups = null;
+    if (!probeMat) {
+      probeTable = newTable(probeDataset);
+      if (loRaw !== null) {
+        const probeKeySpec = probeSeed.cols[probeKeyCi].spec;
+        const filter = { ci: probeKeyCi, pred: "between", value: textOf(loRaw, probeKeySpec), valueTo: textOf(hiRaw, probeKeySpec) };
+        progressStep(1, 0, "narrowing the larger side to the smaller side's key range");
+        await new Promise((r) => setTimeout(r, 0));
+        const plan = await planScan(probeDataset, { filters: [filter] }, probeSeed);
+        if (plan) probeTable.plan = plan.keep;
       }
+      groups = groupsAhead(probeDataset, probeTable, Infinity);
     }
-    if (!materialized(probeDataset)) {
-      const why = loadAllRefusal("the larger side of the join, beside the smaller one already read",
-        loadAllBytes(probeDataset, probeTable, everyCol(probeTable)) + heldBytes(buildDataset, buildTable), budget,
-        "Join a smaller file, or narrow the larger side with a WHERE first (a join reads only the row groups that can match).");
-      if (why) throw new Refusal(why);
-      busy(true, "reading the larger side…");
-      await new Promise((r) => setTimeout(r, 0));
-      await loadMore(probeDataset, probeTable, Infinity);
-    }
-    const probeKeyCol = probeTable.cols[probeKeyCi];
 
     const aCols = aIsBuild ? buildTable.cols : probeTable.cols;
     const aKeyCi = aIsBuild ? buildKeyCi : probeKeyCi;
@@ -306,22 +306,92 @@ export async function runJoin() {
       bKept.push(i);
     });
 
-    const buildIsA = aIsBuild;
-    const buildCols = buildTable.cols, probeCols = probeTable.cols;
+    /* count first: how many rows the join produces is known from the larger side's key column alone, before any
+       of the result exists, so a join that would not fit is refused with its size rather than run into a wall */
+    const held = heldBytes(buildDataset, buildTable);
+    const keyOnly = new Set([probeKeyCi]);
+    const perGroup = [];                       /* matches in each row group, so the build pass skips the empty ones */
     let matched = 0;
-    for (let pr = 0; pr < probeTable.rowsLoaded; pr++) {
-      const v = probeKeyCol.rows[pr];
-      if (v === null || v === undefined) continue;
-      const list = hash.get(keyPart(v));
-      if (!list) continue;
-      for (const br of list) {
-        matched++;
-        let k = 0;
-        const aSide = buildIsA ? buildCols : probeCols, aRow = buildIsA ? br : pr;
-        const bSide = buildIsA ? probeCols : buildCols, bRow = buildIsA ? pr : br;
-        for (let i = 0; i < aCols.length; i++) outCols[k++].rows.push(aSide[i].rows[aRow]);
-        for (const i of bKept) outCols[k++].rows.push(bSide[i].rows[bRow]);
+    const countRows = (keyRows, n) => {
+      let c = 0;
+      for (let pr = 0; pr < n; pr++) {
+        const v = keyRows[pr];
+        if (v === null || v === undefined) continue;
+        const list = hash.get(keyPart(v));
+        if (list) c += list.length;
       }
+      return c;
+    };
+    if (probeMat) matched = countRows(probeTable.cols[probeKeyCi].rows, probeTable.rowsLoaded);
+    else {
+      const keyBiggest = groups.reduce((mx, g) => Math.max(mx, groupsBytes(probeDataset, probeTable, [g], [probeKeyCi])), 0);
+      if (held + keyBiggest > budget) throw new Refusal("Not run: one row group of the larger side's key column would take about " + bytesText(keyBiggest) + " once decoded, beside the " +
+        bytesText(held) + " of the smaller side, over this page's " + bytesText(budget) + " memory budget.");
+      for (let i = 0; i < groups.length; i++) {
+        if (stop.asked) break;
+        const g = groups[i];
+        progressStep(2, i / groups.length, "row group " + num(i + 1) + " of " + num(groups.length) + " of the larger side (its key column only): " + num(matched) + " matches so far");
+        const batch = newTable(probeDataset);
+        batch.need = keyOnly;
+        batch.plan = probeTable.plan;
+        batch.nextPart = g.pi;
+        batch.nextGroup = g.gi;
+        await loadMore(probeDataset, batch, 1);
+        if (stop.asked) break;
+        const c = countRows(batch.cols[probeKeyCi].rows, batch.rowsLoaded);
+        perGroup.push(c);
+        matched += c;
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+    }
+    /* the result, and the largest row group of the larger side that has to be read whole beside it */
+    const outAt = aIsBuild ? [...buildTable.cols.keys()] : [...probeTable.cols.keys()];
+    const outBytes = rowsBytes(aIsBuild ? buildDataset : probeDataset, aIsBuild ? buildTable : probeTable, outAt, matched) +
+      rowsBytes(aIsBuild ? probeDataset : buildDataset, aIsBuild ? probeTable : buildTable, bKept, matched);
+    const groupBiggest = probeMat ? 0 : groups.reduce((mx, g, i) => (perGroup[i] ? Math.max(mx, groupsBytes(probeDataset, probeTable, [g], probeTable.cols.map((_c, ci) => ci))) : mx), 0);
+    progressStep(3, 0.5, "the result is " + num(matched) + " rows of " + num(outCols.length) + " columns, about " + bytesText(outBytes));
+    if (held + outBytes + groupBiggest > budget) {
+      throw new Refusal("Not run: the join would produce " + num(matched) + " rows of " + num(outCols.length) + " columns, about " + bytesText(outBytes) +
+        " once decoded, and with the smaller side (" + bytesText(held) + ")" + (groupBiggest ? " and a row group of the larger (" + bytesText(groupBiggest) + ")" : "") +
+        " that is over this page's " + bytesText(budget) + " memory budget. Join on a more selective key, add a WHERE to either side first, or join fewer columns.");
+    }
+
+    const buildIsA = aIsBuild;
+    const buildCols = buildTable.cols;
+    const emit = (probeCols, n) => {
+      const probeKeyRows = probeCols[probeKeyCi].rows;
+      for (let pr = 0; pr < n; pr++) {
+        const v = probeKeyRows[pr];
+        if (v === null || v === undefined) continue;
+        const list = hash.get(keyPart(v));
+        if (!list) continue;
+        for (const br of list) {
+          let k = 0;
+          const aSide = buildIsA ? buildCols : probeCols, aRow = buildIsA ? br : pr;
+          const bSide = buildIsA ? probeCols : buildCols, bRow = buildIsA ? pr : br;
+          for (let i = 0; i < aCols.length; i++) outCols[k++].rows.push(aSide[i].rows[aRow]);
+          for (const i of bKept) outCols[k++].rows.push(bSide[i].rows[bRow]);
+        }
+      }
+    };
+    if (probeMat) emit(probeTable.cols, probeTable.rowsLoaded);
+    else {
+      for (let i = 0; i < groups.length; i++) {
+        if (stop.asked) break;
+        if (!perGroup[i]) continue;
+        const g = groups[i];
+        progressStep(3, i / groups.length, "row group " + num(i + 1) + " of " + num(groups.length) + " of the larger side: " + num(outCols[0].rows.length) + " of " + num(matched) + " result rows");
+        const batch = newTable(probeDataset);
+        batch.plan = probeTable.plan;
+        batch.nextPart = g.pi;
+        batch.nextGroup = g.gi;
+        await loadMore(probeDataset, batch, 1);
+        if (stop.asked) break;
+        emit(batch.cols, batch.rowsLoaded);
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
     }
     for (const c of outCols) c.filled = c.rows.length;
 
