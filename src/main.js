@@ -4,6 +4,7 @@
 // the internals to the test harness and, when run as a worker, to workers.js.
 
 import { affordableGroups, budgetBytes, bytesText, fitColumns, groupsAhead, groupsBytes, Refusal, setBudgetMB } from "./budget.js";
+import { wholeCard } from "./cards.js";
 import { decompress, gzipDecompress, lz4BlockDecompress, snappyDecompress, zstdDecompress } from "./codecs.js";
 import { $, fillColumns, groupsLeft, loadMore, readColumnRows, rowsAhead, unfilled } from "./columns.js";
 import { fileSource, hivePartition, isParquetPath, newTable, readDataset } from "./dataset.js";
@@ -486,6 +487,8 @@ export function init() {
       pageTopAt(pth, Array.prototype.indexOf.call(pth.parentNode.children, pth) - 1, +pager.dataset.toppage);
       return;
     }
+    const wf = e.target.closest("tr.r-sum button[data-wf]");
+    if (wf) { wholeCard(+wf.dataset.wf); return; }
     const bar = e.target.closest("tr.r-sum .hist.scopes i, tr.r-sum .top .row.scopes, tr.r-sum .bools.scopes i");
     if (bar) {
       const sth = bar.closest("th");
@@ -568,5 +571,5 @@ if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, 
   bloomBytes, groupsLeft, rowsAhead, readOffsetIndex, readColumnIndex, readRowsRanges, clauseRanges,
   intersectRanges, unionRanges, mergeRanges, rangeCount,
   pool, poolStart, workerCan,
-  loadAllBoth, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
+  loadAllBoth, wholeCard, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };

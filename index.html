@@ -187,7 +187,11 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .null{color:var(--faint);font-style:italic}
 
 /* ---------- summary cards ---------- */
-.sum{font-size:10.5px;line-height:1.35;color:var(--dim);display:flex;flex-direction:column;gap:2px;height:106px;overflow:hidden}
+.sum{font-size:10.5px;line-height:1.35;color:var(--dim);display:flex;flex-direction:column;gap:2px;height:134px;overflow:hidden}
+.sum .scope{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sum .scope b{color:var(--ink);font-weight:600}
+.sum .wf{font:inherit;font-size:10px;padding:0 5px;margin-left:3px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--accent);cursor:pointer}
+.sum .wf:hover{background:var(--accent-soft)}
 .sum .kv{display:flex;justify-content:space-between;gap:6px}
 .sum .kv span:last-child{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sum .lab{color:var(--faint)}
@@ -2254,6 +2258,114 @@ function summarize(col, index, count) {
   return s;
 }
 
+/* ---- the same card, over a whole file, one row group at a time ---- */
+/**
+ * Where the memory goes: a numeric column keeps a dozen numbers and a 24-bin histogram, however many rows; a
+ * string column keeps at most WHOLE_KEEP candidates, found by Misra-Gries counting (every value that makes up
+ * more than 1/(WHOLE_KEEP+1) of the rows is guaranteed to be among them), then recounted exactly in a second pass.
+ * A column of fewer distinct values than that is counted exactly in the first pass, and needs no second.
+ */
+const WHOLE_KEEP = 4096;
+function newWhole(spec) {
+  const w = { spec, kind: spec.kind, n: 0, nulls: 0, pass: 1 };
+  if (spec.kind === "number" || spec.kind === "temporal") Object.assign(w, { cnt: 0, nan: 0, min: Infinity, max: -Infinity, lo: null, hi: null, sum: 0, c: 0, hist: null });
+  else if (spec.kind === "bool") Object.assign(w, { t: 0, f: 0 });
+  else Object.assign(w, { cnt: 0, minLen: Infinity, maxLen: -Infinity, sumLen: 0, counts: spec.kind === "string" ? new Map() : null, evicted: false, exact: null, empties: 0 });
+  return w;
+}
+/** One row group of the first pass. */
+function wholeFeed1(w, rows, n) {
+  w.n += n;
+  const kind = w.kind;
+  for (let i = 0; i < n; i++) {
+    const v = rows[i];
+    if (v === null || v === undefined) { w.nulls++; continue; }
+    if (kind === "bool") { if (v === true) w.t++; else if (v === false) w.f++; continue; }
+    if (kind === "number" || kind === "temporal") {
+      const x = numeric(v);
+      if (!isFinite(x)) { w.nan++; continue; }
+      if (w.lo === null || lessThan(v, w.lo)) w.lo = v;
+      if (w.hi === null || lessThan(w.hi, v)) w.hi = v;
+      if (x < w.min) w.min = x;
+      if (x > w.max) w.max = x;
+      const t = w.sum + x;
+      w.c += Math.abs(w.sum) >= Math.abs(x) ? (w.sum - t) + x : (x - t) + w.sum;
+      w.sum = t;
+      w.cnt++;
+      continue;
+    }
+    let len, key = null;
+    if (kind === "string") { key = v; len = v.length; }
+    else if (kind === "binary") len = v instanceof Uint8Array ? v.length : 0;
+    else { len = Array.isArray(v) ? v.length : 0; if (len === 0) w.empties++; }
+    w.cnt++;
+    if (len < w.minLen) w.minLen = len;
+    if (len > w.maxLen) w.maxLen = len;
+    w.sumLen += len;
+    if (key !== null) {
+      const m = w.counts, have = m.get(key);
+      if (have !== undefined) m.set(key, have + 1);
+      else if (m.size < WHOLE_KEEP) m.set(key, 1);
+      else {
+        /* Misra-Gries: a new value with no room takes one from every counter, and those that reach zero go */
+        w.evicted = true;
+        for (const [k, c] of m) { if (c <= 1) m.delete(k); else m.set(k, c - 1); }
+      }
+    }
+  }
+}
+/** After the first pass: does the card need another (a histogram needs the range; string candidates need recounting)? */
+function wholeNeedsPass2(w) {
+  if (w.kind === "number" || w.kind === "temporal") return w.cnt > 0 && w.max > w.min;
+  return w.kind === "string" && w.evicted;
+}
+function wholeStart2(w) {
+  w.pass = 2;
+  if (w.kind === "string") { w.exact = new Map(); for (const k of w.counts.keys()) w.exact.set(k, 0); }
+  else w.hist = new Int32Array(BINS);
+}
+/** One row group of the second pass. */
+function wholeFeed2(w, rows, n) {
+  if (w.kind === "string") {
+    const m = w.exact;
+    for (let i = 0; i < n; i++) { const v = rows[i], c = m.get(v); if (c !== undefined) m.set(v, c + 1); }
+    return;
+  }
+  const span = w.max - w.min;
+  for (let i = 0; i < n; i++) {
+    const v = rows[i];
+    if (v === null || v === undefined) continue;
+    const x = numeric(v);
+    if (isFinite(x)) w.hist[binOf(x, w.min, span)]++;
+  }
+}
+/** The card's figures, in the shape summarize() gives. */
+function wholeFinish(w) {
+  const spec = w.spec, s = { n: w.n, nulls: w.nulls, kind: w.kind };
+  if (w.kind === "bool") { s.trues = w.t; s.falses = w.f; return s; }
+  if (w.kind === "number" || w.kind === "temporal") {
+    s.count = w.cnt; s.nonFinite = w.nan;
+    if (w.cnt) {
+      s.min = w.min; s.max = w.max; s.mean = (w.sum + w.c) / w.cnt;
+      s.hist = w.hist || Object.assign(new Int32Array(BINS), { 0: w.cnt });
+      s.minText = fmtValue(w.lo, spec);
+      s.maxText = fmtValue(w.hi, spec);
+      s.meanText = spec.kind === "temporal" ? fmtTemporal(s.mean, spec) : compactNumber(s.mean);
+    }
+    return s;
+  }
+  s.count = w.cnt;
+  if (w.cnt) { s.minLen = w.minLen; s.maxLen = w.maxLen; s.meanLen = w.sumLen / w.cnt; }
+  if (w.counts && w.counts.size) {
+    const counted = w.exact || w.counts;
+    s.distinct = w.evicted ? WHOLE_KEEP + 1 : counted.size;      /* a value found no room among WHOLE_KEEP, so there are more than that */
+    s.distinctCapped = w.evicted;
+    s.top = [...counted.entries()].sort((a, b) => b[1] - a[1]).slice(0, TOP_KEEP);
+  }
+  if (w.kind === "nested") s.empties = w.empties;
+  return s;
+}
+
 // The progress popup: what the page is doing, which step of it, and why, for
 // anything that takes long enough to notice. It is a native <dialog>, so the page
 // behind it is inert, focus is held inside, and Escape asks to cancel, with no
@@ -3782,7 +3894,24 @@ function pageTopAt(th, viewIdx, delta) {
   const pages = Math.ceil(col.summary.top.length / TOP_PAGE);
   topPage.set(col.name, (topPageOf(col) + delta + pages) % pages);
   const own = state.table ? state.table.cols : [];
-  th.innerHTML = summaryCard(col, !view.agg && own.indexOf(col) >= 0);
+  th.innerHTML = summaryCard(col, !view.agg && own.indexOf(col) >= 0, cardScope(view));
+}
+/** What the cards of this view describe when that is only some of the file: the rows read out of all of them, else null. */
+function cardScope(view) {
+  const t = state.table, d = state.dataset;
+  if (!t || !d || !view || view.agg || view.index || t.scan || !t.truncated) return null;
+  return { read: t.rowsLoaded, total: d.numRows };
+}
+/** What the footer says of a column across the whole file, worked out once: exact min and max where the writer marked them so, and nulls. */
+function footerFacts(col) {
+  const d = state.dataset;
+  if (!d || !col.leaf) return null;
+  if (col.foot && col.footOf === d) return col.foot;
+  let st = null;
+  try { st = columnStats(d, col); } catch (_e) { st = null; }
+  col.foot = st && !st.unreadable ? st : null;
+  col.footOf = d;
+  return col.foot;
 }
 
 /** Where a histogram bin starts, for its tooltip: approximate, a click uses the real values. */
@@ -3794,12 +3923,25 @@ function binEdge(s, spec, at) {
  * `scopes` says whether a click on a bar can narrow the result to it: only
  * for a column of the table itself, not one an aggregate made up.
  */
-function summaryCard(col, scopes) {
-  const s = col.summary, spec = col.spec;
+function summaryCard(col, scopes, scope) {
+  /* a card over the whole file, once asked for, replaces the one over the rows read; its bars cannot scope to
+     rows that are not all loaded, so they do not offer to */
+  const whole = scope && state.dataset && state.dataset.whole && state.dataset.whole.get(col.key);
+  const s = whole || col.summary, spec = col.spec;
   if (!s) return "";
+  if (whole) scopes = false;
   const out = [];
   const kv = (k, v) => '<div class="kv"><span class="lab">' + k + "</span><span>" + v + "</span></div>";
-  out.push(kv("nulls", s.nulls ? num(s.nulls) + " &middot; " + pct(s.nulls, s.n) : "0"));
+  /* which rows a card describes, always said: the rows read, with a way to make it the whole file */
+  if (scope) {
+    const at = state.table ? state.table.cols.indexOf(col) : -1;
+    out.push('<div class="scope">' + (whole
+      ? "<b>whole file</b> &middot; " + num(whole.n) + " rows"
+      : "first " + num(scope.read) + " of " + num(scope.total) + (at >= 0 && col.partKey === undefined
+        ? ' <button type="button" class="wf" data-wf="' + at + '" title="Read this column across the whole file, one row group at a time, and recompute this card">whole file</button>' : "")) + "</div>");
+  }
+  const foot = scope && !whole ? footerFacts(col) : null;
+  out.push(kv("nulls", (s.nulls ? num(s.nulls) + " &middot; " + pct(s.nulls, s.n) : "0") + (foot && foot.nullsKnown ? " &middot; file " + num(foot.nulls) : "")));
   const valid = s.n - s.nulls;
   out.push('<div class="nullbar"><i class="v" style="width:' + (s.n ? valid / s.n * 100 : 0) +
     '%"></i><i class="n" style="width:' + (s.n ? s.nulls / s.n * 100 : 0) + '%"></i></div>');
@@ -3817,6 +3959,7 @@ function summaryCard(col, scopes) {
     else {
       out.push(kv("min", esc(s.minText)));
       out.push(kv("max", esc(s.maxText)));
+      if (foot && foot.min != null && foot.max != null && foot.exact) out.push(kv("in file", esc(foot.min) + " &ndash; " + esc(foot.max)));
       out.push(kv("mean", esc(s.meanText)));
       if (s.max > s.min) {                       /* a constant column has no shape to draw */
         let peak = 1;
@@ -3858,7 +4001,7 @@ function summaryCard(col, scopes) {
           (more ? "+" : "") + "</span>" +
           '<button data-toppage="1" title="Next three">&rsaquo;</button></div>';
       }
-      out.push('<div class="top">' + rows + "</div>");
+      out.push('<div class="top"' + (s.distinctCapped && whole ? ' title="Counted among the values that could be tracked at once: any value in more than about 1 row in 4,097 is certain to be here, rarer ones may be missed"' : "") + ">" + rows + "</div>");
     }
     out.push(kv("length", s.count ? s.minLen + "-" + s.maxLen : "-"));
   } else if (spec.kind === "nested") {
@@ -3903,7 +4046,8 @@ function renderGrid() {
   }
   html += "</tr><tr class='r-sum'><th class='rownum'></th>";
   const own = state.table ? state.table.cols : [];
-  for (const c of cols) html += "<th>" + summaryCard(c, !view.agg && own.indexOf(c) >= 0) + "</th>";
+  const scope = cardScope(view);
+  for (const c of cols) html += "<th>" + summaryCard(c, !view.agg && own.indexOf(c) >= 0, scope) + "</th>";
   html += "</tr></thead><tbody id='tbody'></tbody>";
   grid.innerHTML = html;
 
@@ -7194,6 +7338,68 @@ async function unscan() {
   } catch (e) { showError(e); } finally { busy(false); }
 }
 
+// Whole-file summary cards. A card above a column describes the rows read; this reads the one column across the
+// whole file, a row group at a time (memory: one row group of one column, plus a few numbers, plus at most a few
+// thousand string candidates), and replaces the card with one that says so.
+
+
+const CARD_STEPS = [
+  { label: "Check the memory budget", why: "One row group of this one column is all that is held at a time; this checks it fits before reading." },
+  { label: "Read", why: "Decoding the column one row group at a time and folding it into the card's totals (count, nulls, range, mean, and for text the most frequent values), then letting it go." },
+  { label: "Refine", why: "A histogram needs the range first, and text values that were too many to count exactly are recounted, so the card is exact rather than an estimate." },
+];
+const cardTick = () => new Promise((r) => setTimeout(r, 0));
+
+/** Recomputes one column's card over every row of the file, then redraws the cards. */
+async function wholeCard(ci) {
+  const dataset = state.dataset, table = state.table;
+  if (!dataset || !table || !table.cols[ci]) return;
+  const col = table.cols[ci];
+  const stop = { asked: false };
+  busy(true, "Summarizing \u201c" + col.name + "\u201d over the whole file", CARD_STEPS, () => { stop.asked = true; });
+  await cardTick();
+  try {
+    progressStep(0, 0.5, "estimating one row group of this column");
+    const probe = newTable(dataset);
+    probe.need = new Set([ci]);
+    const groups = groupsAhead(dataset, probe, Infinity);
+    const biggest = groups.reduce((mx, g) => Math.max(mx, groupsBytes(dataset, probe, [g], [ci])), 0);
+    if (biggest > budgetBytes()) {
+      showMemNote("Not computed over the whole file: one row group of \u201c" + col.name + "\u201d would take about " + bytesText(biggest) +
+        " once decoded, over this page's " + bytesText(budgetBytes()) + " memory budget.");
+      return;
+    }
+    const w = newWhole(col.spec);
+    const pass = async (feed, step, label) => {
+      for (let i = 0; i < groups.length; i++) {
+        if (stop.asked || progressCancelled()) return false;
+        const g = groups[i];
+        progressStep(step, i / groups.length, label + ": row group " + num(i + 1) + " of " + num(groups.length));
+        const batch = newTable(dataset);
+        batch.need = new Set([ci]);
+        batch.nextPart = g.pi;
+        batch.nextGroup = g.gi;
+        await loadMore(dataset, batch, 1);
+        if (stop.asked || progressCancelled()) return false;
+        feed(w, batch.cols[ci].rows, batch.rowsLoaded);
+        await cardTick();
+      }
+      return true;
+    };
+    if (!(await pass(wholeFeed1, 1, "counting"))) { showMemNote("Cancelled: the card was not changed."); return; }
+    if (wholeNeedsPass2(w)) {
+      wholeStart2(w);
+      if (!(await pass(wholeFeed2, 2, w.kind === "string" ? "recounting the most frequent values" : "drawing the histogram"))) { showMemNote("Cancelled: the card was not changed."); return; }
+    }
+    if (!dataset.whole) dataset.whole = new Map();
+    dataset.whole.set(col.key, wholeFinish(w));
+    showMemNote(null);
+    refreshView(true);
+  } catch (e) {
+    showMemNote("Could not summarize \u201c" + col.name + "\u201d over the whole file: " + e.message);
+  } finally { busy(false); }
+}
+
 // The Diff panel: compares two datasets (A, the open file, and B, a chosen
 // second one) at three levels — file-level shape, schema drift between their
 // columns, and per-column statistics — and can match rows up by key to show
@@ -9348,6 +9554,8 @@ function init() {
       pageTopAt(pth, Array.prototype.indexOf.call(pth.parentNode.children, pth) - 1, +pager.dataset.toppage);
       return;
     }
+    const wf = e.target.closest("tr.r-sum button[data-wf]");
+    if (wf) { wholeCard(+wf.dataset.wf); return; }
     const bar = e.target.closest("tr.r-sum .hist.scopes i, tr.r-sum .top .row.scopes, tr.r-sum .bools.scopes i");
     if (bar) {
       const sth = bar.closest("th");
@@ -9430,7 +9638,7 @@ if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, 
   bloomBytes, groupsLeft, rowsAhead, readOffsetIndex, readColumnIndex, readRowsRanges, clauseRanges,
   intersectRanges, unionRanges, mergeRanges, rangeCount,
   pool, poolStart, workerCan,
-  loadAllBoth, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
+  loadAllBoth, wholeCard, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
 
 </script>

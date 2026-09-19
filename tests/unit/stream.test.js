@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AGG_MORE, AGGS, aggregate, buildComparator, endValueSlice, feedAggBatch, feedTopK, finishAggStream, matchIndex, newAggStream, newTopK, radixAdvanceStream, radixFeedBatch, radixOpenStream, radixPlanStream, streamable, topKPlan } from "../../src/query.js";
 import { RADIX } from "../../src/radix.js";
+import { newWhole, summarize, WHOLE_KEEP, wholeFeed1, wholeFeed2, wholeFinish, wholeNeedsPass2, wholeStart2 } from "../../src/types.js";
 
 const numSpec = { kind: "number", label: "double", physical: "DOUBLE", convert: (v) => v };
 const strSpec = { kind: "string", label: "string", physical: "BYTE_ARRAY", convert: (v) => v };
@@ -236,4 +237,35 @@ test("the rows a ranking kept are turned into per-row-group ranges to fetch, mer
   assert.deepEqual([...plan.keys()], ["0:1", "0:2", "1:0"]);
   assert.deepEqual(plan.get("0:2"), [[4, 7], [9, 10]]);
   assert.deepEqual(plan.get("0:1"), [[3, 4]]);
+});
+
+/** What the page does to make a card over the whole file: pass 1 over every batch, then pass 2 if the card needs one. */
+function wholeOf(c, sizes) {
+  const parts = bounds(c.rows.length, sizes), w = newWhole(c.spec);
+  for (const [a, b] of parts) wholeFeed1(w, c.rows.slice(a, b), b - a);
+  if (wholeNeedsPass2(w)) { wholeStart2(w); for (const [a, b] of parts) wholeFeed2(w, c.rows.slice(a, b), b - a); }
+  return wholeFinish(w);
+}
+
+test("a card built a row group at a time is the card built from all the rows: numbers, text and booleans", () => {
+  const flags = col("flag", { kind: "bool", label: "bool", physical: "BOOLEAN", convert: (v) => v }, cols[3].rows.map((v, i) => (i % 9 === 0 ? null : v % 3 === 0)));
+  for (const c of [cols[2], cols[3], cols[1], cols[0], flags]) {
+    const want = summarize(c, null, N), got = wholeOf(c, [1, 7, 993, 1, 2998]);
+    for (const k of ["n", "nulls", "kind", "count", "nonFinite", "min", "max", "minText", "maxText", "trues", "falses", "minLen", "maxLen", "distinct"]) assert.equal(got[k], want[k], c.name + "." + k);
+    if (want.mean !== undefined) assert.ok(Math.abs(got.mean - want.mean) <= Math.abs(want.mean) * 1e-12, c.name + " mean " + got.mean + " vs " + want.mean);
+    if (want.hist) assert.deepEqual([...got.hist], [...want.hist], c.name + " histogram");
+    if (want.top) assert.deepEqual(got.top.slice(0, 3).map((p) => p[1]), want.top.slice(0, 3).map((p) => p[1]), c.name + " top counts");
+  }
+});
+
+test("a text column with more distinct values than fit is counted by candidates and recounted exactly", () => {
+  const n = 3 * WHOLE_KEEP + 500, heavy = ["alpha", "beta", "gamma"];
+  const rows = [];
+  for (let i = 0; i < n; i++) rows.push(i % 4 === 0 ? heavy[(i / 4) % 3 | 0] : "u" + i);       /* a quarter of the rows are three heavy values */
+  const c = col("t", strSpec, rows), w = wholeOf(c, [1000, 5000]);
+  assert.equal(w.distinctCapped, true);
+  assert.deepEqual(w.top.slice(0, 3).map((p) => p[0]).sort(), [...heavy].sort());
+  const exact = new Map();
+  for (const v of rows) exact.set(v, (exact.get(v) || 0) + 1);
+  for (const [v, k] of w.top.slice(0, 3)) assert.equal(k, exact.get(v), v + " recounted exactly");
 });

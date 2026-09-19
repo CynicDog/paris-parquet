@@ -186,7 +186,11 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .null{color:var(--faint);font-style:italic}
 
 /* ---------- summary cards ---------- */
-.sum{font-size:10.5px;line-height:1.35;color:var(--dim);display:flex;flex-direction:column;gap:2px;height:106px;overflow:hidden}
+.sum{font-size:10.5px;line-height:1.35;color:var(--dim);display:flex;flex-direction:column;gap:2px;height:134px;overflow:hidden}
+.sum .scope{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sum .scope b{color:var(--ink);font-weight:600}
+.sum .wf{font:inherit;font-size:10px;padding:0 5px;margin-left:3px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--accent);cursor:pointer}
+.sum .wf:hover{background:var(--accent-soft)}
 .sum .kv{display:flex;justify-content:space-between;gap:6px}
 .sum .kv span:last-child{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sum .lab{color:var(--faint)}

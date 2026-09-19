@@ -346,3 +346,111 @@ export function summarize(col, index, count) {
   }
   return s;
 }
+
+/* ---- the same card, over a whole file, one row group at a time ---- */
+/**
+ * Where the memory goes: a numeric column keeps a dozen numbers and a 24-bin histogram, however many rows; a
+ * string column keeps at most WHOLE_KEEP candidates, found by Misra-Gries counting (every value that makes up
+ * more than 1/(WHOLE_KEEP+1) of the rows is guaranteed to be among them), then recounted exactly in a second pass.
+ * A column of fewer distinct values than that is counted exactly in the first pass, and needs no second.
+ */
+export const WHOLE_KEEP = 4096;
+export function newWhole(spec) {
+  const w = { spec, kind: spec.kind, n: 0, nulls: 0, pass: 1 };
+  if (spec.kind === "number" || spec.kind === "temporal") Object.assign(w, { cnt: 0, nan: 0, min: Infinity, max: -Infinity, lo: null, hi: null, sum: 0, c: 0, hist: null });
+  else if (spec.kind === "bool") Object.assign(w, { t: 0, f: 0 });
+  else Object.assign(w, { cnt: 0, minLen: Infinity, maxLen: -Infinity, sumLen: 0, counts: spec.kind === "string" ? new Map() : null, evicted: false, exact: null, empties: 0 });
+  return w;
+}
+/** One row group of the first pass. */
+export function wholeFeed1(w, rows, n) {
+  w.n += n;
+  const kind = w.kind;
+  for (let i = 0; i < n; i++) {
+    const v = rows[i];
+    if (v === null || v === undefined) { w.nulls++; continue; }
+    if (kind === "bool") { if (v === true) w.t++; else if (v === false) w.f++; continue; }
+    if (kind === "number" || kind === "temporal") {
+      const x = numeric(v);
+      if (!isFinite(x)) { w.nan++; continue; }
+      if (w.lo === null || lessThan(v, w.lo)) w.lo = v;
+      if (w.hi === null || lessThan(w.hi, v)) w.hi = v;
+      if (x < w.min) w.min = x;
+      if (x > w.max) w.max = x;
+      const t = w.sum + x;
+      w.c += Math.abs(w.sum) >= Math.abs(x) ? (w.sum - t) + x : (x - t) + w.sum;
+      w.sum = t;
+      w.cnt++;
+      continue;
+    }
+    let len, key = null;
+    if (kind === "string") { key = v; len = v.length; }
+    else if (kind === "binary") len = v instanceof Uint8Array ? v.length : 0;
+    else { len = Array.isArray(v) ? v.length : 0; if (len === 0) w.empties++; }
+    w.cnt++;
+    if (len < w.minLen) w.minLen = len;
+    if (len > w.maxLen) w.maxLen = len;
+    w.sumLen += len;
+    if (key !== null) {
+      const m = w.counts, have = m.get(key);
+      if (have !== undefined) m.set(key, have + 1);
+      else if (m.size < WHOLE_KEEP) m.set(key, 1);
+      else {
+        /* Misra-Gries: a new value with no room takes one from every counter, and those that reach zero go */
+        w.evicted = true;
+        for (const [k, c] of m) { if (c <= 1) m.delete(k); else m.set(k, c - 1); }
+      }
+    }
+  }
+}
+/** After the first pass: does the card need another (a histogram needs the range; string candidates need recounting)? */
+export function wholeNeedsPass2(w) {
+  if (w.kind === "number" || w.kind === "temporal") return w.cnt > 0 && w.max > w.min;
+  return w.kind === "string" && w.evicted;
+}
+export function wholeStart2(w) {
+  w.pass = 2;
+  if (w.kind === "string") { w.exact = new Map(); for (const k of w.counts.keys()) w.exact.set(k, 0); }
+  else w.hist = new Int32Array(BINS);
+}
+/** One row group of the second pass. */
+export function wholeFeed2(w, rows, n) {
+  if (w.kind === "string") {
+    const m = w.exact;
+    for (let i = 0; i < n; i++) { const v = rows[i], c = m.get(v); if (c !== undefined) m.set(v, c + 1); }
+    return;
+  }
+  const span = w.max - w.min;
+  for (let i = 0; i < n; i++) {
+    const v = rows[i];
+    if (v === null || v === undefined) continue;
+    const x = numeric(v);
+    if (isFinite(x)) w.hist[binOf(x, w.min, span)]++;
+  }
+}
+/** The card's figures, in the shape summarize() gives. */
+export function wholeFinish(w) {
+  const spec = w.spec, s = { n: w.n, nulls: w.nulls, kind: w.kind };
+  if (w.kind === "bool") { s.trues = w.t; s.falses = w.f; return s; }
+  if (w.kind === "number" || w.kind === "temporal") {
+    s.count = w.cnt; s.nonFinite = w.nan;
+    if (w.cnt) {
+      s.min = w.min; s.max = w.max; s.mean = (w.sum + w.c) / w.cnt;
+      s.hist = w.hist || Object.assign(new Int32Array(BINS), { 0: w.cnt });
+      s.minText = fmtValue(w.lo, spec);
+      s.maxText = fmtValue(w.hi, spec);
+      s.meanText = spec.kind === "temporal" ? fmtTemporal(s.mean, spec) : compactNumber(s.mean);
+    }
+    return s;
+  }
+  s.count = w.cnt;
+  if (w.cnt) { s.minLen = w.minLen; s.maxLen = w.maxLen; s.meanLen = w.sumLen / w.cnt; }
+  if (w.counts && w.counts.size) {
+    const counted = w.exact || w.counts;
+    s.distinct = w.evicted ? WHOLE_KEEP + 1 : counted.size;      /* a value found no room among WHOLE_KEEP, so there are more than that */
+    s.distinctCapped = w.evicted;
+    s.top = [...counted.entries()].sort((a, b) => b[1] - a[1]).slice(0, TOP_KEEP);
+  }
+  if (w.kind === "nested") s.empties = w.empties;
+  return s;
+}

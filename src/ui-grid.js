@@ -3,7 +3,7 @@
 // view, plus the column picker panel and the cell inspector popup.
 
 import { $ } from "./columns.js";
-import { diff } from "./diff.js";
+import { columnStats, diff } from "./diff.js";
 import { runQuery, sortMark } from "./query.js";
 import { compactNumber, fmtTemporal, fmtValue, HEX, hex } from "./types.js";
 import { typeTag } from "./ui-query-builder.js";
@@ -24,7 +24,24 @@ export function pageTopAt(th, viewIdx, delta) {
   const pages = Math.ceil(col.summary.top.length / TOP_PAGE);
   topPage.set(col.name, (topPageOf(col) + delta + pages) % pages);
   const own = state.table ? state.table.cols : [];
-  th.innerHTML = summaryCard(col, !view.agg && own.indexOf(col) >= 0);
+  th.innerHTML = summaryCard(col, !view.agg && own.indexOf(col) >= 0, cardScope(view));
+}
+/** What the cards of this view describe when that is only some of the file: the rows read out of all of them, else null. */
+export function cardScope(view) {
+  const t = state.table, d = state.dataset;
+  if (!t || !d || !view || view.agg || view.index || t.scan || !t.truncated) return null;
+  return { read: t.rowsLoaded, total: d.numRows };
+}
+/** What the footer says of a column across the whole file, worked out once: exact min and max where the writer marked them so, and nulls. */
+function footerFacts(col) {
+  const d = state.dataset;
+  if (!d || !col.leaf) return null;
+  if (col.foot && col.footOf === d) return col.foot;
+  let st = null;
+  try { st = columnStats(d, col); } catch (_e) { st = null; }
+  col.foot = st && !st.unreadable ? st : null;
+  col.footOf = d;
+  return col.foot;
 }
 
 /** Where a histogram bin starts, for its tooltip: approximate, a click uses the real values. */
@@ -36,12 +53,25 @@ function binEdge(s, spec, at) {
  * `scopes` says whether a click on a bar can narrow the result to it: only
  * for a column of the table itself, not one an aggregate made up.
  */
-export function summaryCard(col, scopes) {
-  const s = col.summary, spec = col.spec;
+export function summaryCard(col, scopes, scope) {
+  /* a card over the whole file, once asked for, replaces the one over the rows read; its bars cannot scope to
+     rows that are not all loaded, so they do not offer to */
+  const whole = scope && state.dataset && state.dataset.whole && state.dataset.whole.get(col.key);
+  const s = whole || col.summary, spec = col.spec;
   if (!s) return "";
+  if (whole) scopes = false;
   const out = [];
   const kv = (k, v) => '<div class="kv"><span class="lab">' + k + "</span><span>" + v + "</span></div>";
-  out.push(kv("nulls", s.nulls ? num(s.nulls) + " &middot; " + pct(s.nulls, s.n) : "0"));
+  /* which rows a card describes, always said: the rows read, with a way to make it the whole file */
+  if (scope) {
+    const at = state.table ? state.table.cols.indexOf(col) : -1;
+    out.push('<div class="scope">' + (whole
+      ? "<b>whole file</b> &middot; " + num(whole.n) + " rows"
+      : "first " + num(scope.read) + " of " + num(scope.total) + (at >= 0 && col.partKey === undefined
+        ? ' <button type="button" class="wf" data-wf="' + at + '" title="Read this column across the whole file, one row group at a time, and recompute this card">whole file</button>' : "")) + "</div>");
+  }
+  const foot = scope && !whole ? footerFacts(col) : null;
+  out.push(kv("nulls", (s.nulls ? num(s.nulls) + " &middot; " + pct(s.nulls, s.n) : "0") + (foot && foot.nullsKnown ? " &middot; file " + num(foot.nulls) : "")));
   const valid = s.n - s.nulls;
   out.push('<div class="nullbar"><i class="v" style="width:' + (s.n ? valid / s.n * 100 : 0) +
     '%"></i><i class="n" style="width:' + (s.n ? s.nulls / s.n * 100 : 0) + '%"></i></div>');
@@ -59,6 +89,7 @@ export function summaryCard(col, scopes) {
     else {
       out.push(kv("min", esc(s.minText)));
       out.push(kv("max", esc(s.maxText)));
+      if (foot && foot.min != null && foot.max != null && foot.exact) out.push(kv("in file", esc(foot.min) + " &ndash; " + esc(foot.max)));
       out.push(kv("mean", esc(s.meanText)));
       if (s.max > s.min) {                       /* a constant column has no shape to draw */
         let peak = 1;
@@ -100,7 +131,7 @@ export function summaryCard(col, scopes) {
           (more ? "+" : "") + "</span>" +
           '<button data-toppage="1" title="Next three">&rsaquo;</button></div>';
       }
-      out.push('<div class="top">' + rows + "</div>");
+      out.push('<div class="top"' + (s.distinctCapped && whole ? ' title="Counted among the values that could be tracked at once: any value in more than about 1 row in 4,097 is certain to be here, rarer ones may be missed"' : "") + ">" + rows + "</div>");
     }
     out.push(kv("length", s.count ? s.minLen + "-" + s.maxLen : "-"));
   } else if (spec.kind === "nested") {
@@ -145,7 +176,8 @@ export function renderGrid() {
   }
   html += "</tr><tr class='r-sum'><th class='rownum'></th>";
   const own = state.table ? state.table.cols : [];
-  for (const c of cols) html += "<th>" + summaryCard(c, !view.agg && own.indexOf(c) >= 0) + "</th>";
+  const scope = cardScope(view);
+  for (const c of cols) html += "<th>" + summaryCard(c, !view.agg && own.indexOf(c) >= 0, scope) + "</th>";
   html += "</tr></thead><tbody id='tbody'></tbody>";
   grid.innerHTML = html;
 

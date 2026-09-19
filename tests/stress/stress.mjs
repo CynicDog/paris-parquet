@@ -262,6 +262,22 @@ const SCENARIOS = {
     });
   },
 
+  /** A card over the whole file for a numeric and a text column: exact, one row group at a time. */
+  async cards(s) {
+    const o = await open(s); if (!alive(o)) return;
+    for (const name of ["metric_f_000", "cat_s_000", "hi_s_000"]) {
+      await step(s, "whole-file card: " + name, async () => {
+        await s.page.evaluate((n) => { const t = window.PARIS.state.table; return window.PARIS.wholeCard(t.cols.findIndex((c) => c.name === n)); }, name);
+        await idle(s);
+        const card = await s.page.evaluate((n) => {
+          const t = window.PARIS.state.table, c = t.cols.find((x) => x.name === n), w = window.PARIS.state.dataset.whole && window.PARIS.state.dataset.whole.get(c.key);
+          return w ? { n: w.n, nulls: w.nulls, min: w.min, max: w.max, mean: w.mean, count: w.count, distinct: w.distinct, capped: w.distinctCapped, top: w.top && w.top.slice(0, 3) } : null;
+        }, name);
+        return { note: JSON.stringify(card).slice(0, 220), card, name };
+      });
+    }
+  },
+
   async "pct-all"(s) {
     const o = await open(s); if (!alive(o)) return;
     await step(s, "Run: P99 of one column (whole file)", async () => {
