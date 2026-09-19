@@ -107,7 +107,7 @@ async function run(sql, expectName) {
     const v = window.PARIS.state.view;
     const num = (x) => (typeof x === "bigint" ? Number(x) : typeof x === "string" && x !== "" && !Number.isNaN(+x) ? +x : x);
     return { rows: v.cols[0].rows.length, names: v.cols.map((c) => c.name), get: v.cols.map((c) => c.rows.map(num)),
-      covered: window.PARIS.state.table.rowsLoaded, busy: !document.getElementById("busy").hidden,
+      covered: window.PARIS.state.agg ? window.PARIS.state.agg.rows : window.PARIS.state.table.rowsLoaded,   /* a streamed aggregate says how many rows it folded */ busy: !document.getElementById("busy").hidden,
       err: (document.getElementById("err") || {}).textContent || "" };
   });
   let got = await read(), waited = 0;

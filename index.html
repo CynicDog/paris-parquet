@@ -3279,7 +3279,7 @@ const COL_W = 178, ROW_H = 22;
    windowing; 100 rows of 40 columns fits comfortably inside it */
 const CELL_BUDGET = 8000;
 const PAGE_SIZES = [10, 100, 200, 500, 1000, 3000, Infinity];
-const state = { src: null, meta: null, table: null, view: null, page: 0, pageSize: 100, first: 0 };
+const state = { src: null, meta: null, table: null, view: null, page: 0, pageSize: 100, first: 0, agg: null };
 
 /**
  * A view is what the grid draws: a list of columns, a row count, and an
@@ -4560,14 +4560,34 @@ function addSum(a, x) {
   a.sum = t;
 }
 
-function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n) {
-  const groups = new Map();
+/**
+ * What feeding rows into groups needs to know about the metrics, worked out once per batch of rows
+ * rather than once per row.
+ */
+function groupScanCtx(metrics, mKeys, mSpecs) {
+  return {
+    metrics, mKeys,
+    needs: metrics.map((m) => accNeeds(m.agg)),
+    /* one comparator per metric, built here rather than per row */
+    less: metrics.map((_m, i) => (mKeys[i]
+      ? (x, y) => lessThan(x, y)
+      : (x, y) => String(textOf(x, mSpecs[i])) < String(textOf(y, mSpecs[i])))),
+  };
+}
+/** What a group, a kept value, a distinct value and a mode entry are estimated to cost, for the running byte count. */
+const STATE_BYTES = { group: 96, perMetric: 168, perKeyChar: 2, value: 16, distinct: 72, freq: 104 };
+
+/**
+ * Feeds rows into `groups`, which may already hold the running totals of earlier rows: the totals
+ * are the only thing kept, so rows can come in batches and be dropped as they are folded. With
+ * `keepKeys` each new group also remembers the values it is grouped on (a batch's rows will not
+ * be there to ask later), and with `track` its estimated bytes are added to `track.bytes` so a
+ * caller can stop a query whose groups, kept values or distinct values are outgrowing memory.
+ */
+function feedGroups(groups, ctx, gRows, mRows, positions, index, n, keepKeys, track) {
+  const { metrics, mKeys, needs, less } = ctx;
   const total = index ? index.length : n;
-  const needs = metrics.map((m) => accNeeds(m.agg));
-  /* one comparator per metric, built here rather than per row */
-  const less = metrics.map((_m, i) => (mKeys[i]
-    ? (x, y) => lessThan(x, y)
-    : (x, y) => String(textOf(x, mSpecs[i])) < String(textOf(y, mSpecs[i]))));
+  let bytes = 0;
   for (let i = 0; i < total; i++) {
     const r = index ? index[i] : i;
     let key = "";
@@ -4575,7 +4595,9 @@ function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n) {
     let acc = groups.get(key);
     if (!acc) {
       acc = { row: r, m: metrics.map(newAcc) };
+      if (keepKeys) acc.gv = positions.map((g) => gRows[g][r]);
       groups.set(key, acc);
+      if (track) bytes += STATE_BYTES.group + metrics.length * STATE_BYTES.perMetric + key.length * STATE_BYTES.perKeyChar;
     }
     for (let m = 0; m < metrics.length; m++) {
       const a = acc.m[m];
@@ -4599,14 +4621,19 @@ function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n) {
             a.m2 += d * (x - a.mean);
           }
           if (f.span) { if (x < a.lo) a.lo = x; if (x > a.hi) a.hi = x; }
-          if (f.vals) { if (!a.vals) a.vals = []; a.vals.push(x); }
+          if (f.vals) { if (!a.vals) a.vals = []; a.vals.push(x); if (track) bytes += STATE_BYTES.value; }
         }
       }
-      else if (f.set) { if (!a.set) a.set = new Set(); a.set.add(keyPart(v)); }
+      else if (f.set) {
+        if (!a.set) a.set = new Set();
+        const before = a.set.size;
+        a.set.add(keyPart(v));
+        if (track && a.set.size !== before) bytes += STATE_BYTES.distinct;
+      }
       else if (f.freq) {
         if (!a.freq) a.freq = new Map();
         const fk = keyPart(v), hit = a.freq.get(fk);
-        if (hit) hit.c++; else a.freq.set(fk, { v, c: 1 });
+        if (hit) hit.c++; else { a.freq.set(fk, { v, c: 1 }); if (track) bytes += STATE_BYTES.freq; }
       }
       else if (f.minmax) {
         if (a.min === null || less[m](v, a.min)) a.min = v;
@@ -4614,6 +4641,11 @@ function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n) {
       }
     }
   }
+  if (track) track.bytes += bytes;
+}
+function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n) {
+  const groups = new Map();
+  feedGroups(groups, groupScanCtx(metrics, mKeys, mSpecs), gRows, mRows, positions, index, n, false, null);
   return groups;
 }
 /**
@@ -4693,19 +4725,91 @@ function aggregate(q, cols, index, n) {
      COUNT(DISTINCT) cannot be derived from an already-aggregated subtotal,
      so each set scans fresh rather than rolling up the previous one */
   for (const positions of groupingSets(gcis.length, q.groupMode)) {
-    const groups = scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n);
-    for (const acc of groups.values()) {
-      let k = 0;
-      /* a column this grouping set dropped shows null, the same as SQL's own
-         ROLLUP/CUBE -- indistinguishable from a real null there, which is
-         the one ambiguity the standard has too */
-      for (let g = 0; g < gcis.length; g++) {
-        outCols[k++].rows.push(positions.indexOf(g) >= 0 ? cols[gcis[g]].rows[acc.row] : null);
-      }
-      for (let m = 0; m < metrics.length; m++) outCols[k++].rows.push(metricValue(acc.m[m], metrics[m].agg));
-    }
+    emitGroups(outCols, scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n), gcis, positions, metrics, cols);
   }
   return outCols;
+}
+/**
+ * Writes finished groups out as rows. A column this grouping set dropped shows null, the same as
+ * SQL's own ROLLUP/CUBE -- indistinguishable from a real null there, which is the one ambiguity
+ * the standard has too. A group that kept its own key values (a streamed one) reads them from
+ * there; otherwise they come from the row it first appeared at.
+ */
+function emitGroups(outCols, groups, gcis, positions, metrics, cols) {
+  for (const acc of groups.values()) {
+    let k = 0;
+    for (let g = 0; g < gcis.length; g++) {
+      const at = positions.indexOf(g);
+      outCols[k++].rows.push(at < 0 ? null : acc.gv ? acc.gv[at] : cols[gcis[g]].rows[acc.row]);
+    }
+    for (let m = 0; m < metrics.length; m++) outCols[k++].rows.push(metricValue(acc.m[m], metrics[m].agg));
+  }
+}
+
+/** Which rows of a batch pass the WHERE clause: null when there is none (every row does), else their indexes. */
+function matchIndex(q, cols, n) {
+  const groups = orGroups(q.filters, cols);
+  if (!groups.length) return null;
+  const buf = new Int32Array(n);
+  let k = 0;
+  for (let r = 0; r < n; r++) {
+    for (let g = 0; g < groups.length; g++) {
+      const grp = groups[g];
+      let ok = true;
+      for (let i = 0; i < grp.length; i++) if (!grp[i](r)) { ok = false; break; }
+      if (ok) { buf[k++] = r; break; }
+    }
+  }
+  return buf.slice(0, k);
+}
+
+/** True when a query can be answered by folding row groups one at a time (everything but a pivot). */
+function streamable(q) {
+  return q.mode === "agg" && (q.groupBy.length > 0 || q.metrics.length > 0) && q.groupMode !== "PIVOT";
+}
+
+/**
+ * A streamed aggregate: running totals per group (one map per grouping set), fed a batch of decoded
+ * rows at a time. `bytes` is the running estimate of what the totals, the values a percentile keeps
+ * and the distinct values a count keeps have cost so far.
+ */
+function newAggStream(q, cols) {
+  const metrics = q.metrics.filter((m) => cols[m.ci]);
+  const sets = groupingSets(q.groupBy.length, q.groupMode);
+  return { q, metrics, sets, maps: sets.map(() => new Map()), track: { bytes: 0 }, rows: 0, matched: 0, batches: 0, last: cols };
+}
+function feedAggBatch(st, cols, n) {
+  const q = st.q, gcis = q.groupBy;
+  const index = matchIndex(q, cols, n);
+  const gRows = gcis.map((ci) => cols[ci].rows);
+  const mRows = st.metrics.map((m) => cols[m.ci].rows);
+  const ctx = groupScanCtx(st.metrics, st.metrics.map((m) => sortKey(cols[m.ci].spec)), st.metrics.map((m) => cols[m.ci].spec));
+  for (let i = 0; i < st.sets.length; i++) feedGroups(st.maps[i], ctx, gRows, mRows, st.sets[i], index, n, true, st.track);
+  st.rows += n;
+  st.matched += index ? index.length : n;
+  st.batches++;
+  st.last = cols;
+}
+/** The output columns of a finished stream, named and typed from the last batch's columns. */
+function finishAggStream(st) {
+  const q = st.q, gcis = q.groupBy, cols = st.last, metrics = st.metrics;
+  const outCols = [];
+  for (const ci of gcis) outCols.push({ name: cols[ci].name, spec: cols[ci].spec, leaf: cols[ci].leaf, rows: [] });
+  for (const m of metrics) outCols.push({ name: metricName(m, cols), spec: metricSpec(m, cols), rows: [] });
+  for (let i = 0; i < st.sets.length; i++) emitGroups(outCols, st.maps[i], gcis, st.sets[i], metrics, cols);
+  return outCols;
+}
+/** What identifies an aggregate's answer, so a stored one can be reused when only the ordering or limit changed. */
+/** The stored streamed aggregate, if it is the answer to the query on screen. */
+function aggKept() {
+  const q = state.query, a = state.agg;
+  if (!q || !a || a.dataset !== state.dataset) return null;
+  if (!(q.mode === "agg" && (q.groupBy.length || q.metrics.length))) return null;
+  return a.sig === aggSignature(q) ? a : null;
+}
+function aggSignature(q) {
+  return JSON.stringify([q.filters.map((f) => [f.ci, f.pred, f.value, f.valueTo, f.linker]), q.groupBy, q.groupMode,
+    q.metrics.map((m) => [m.id, m.ci, m.agg, m.alias])]);
 }
 
 /* Excel-style reshape: the last GROUP BY column's own distinct values
@@ -4829,31 +4933,20 @@ function pivotTable(q, cols, index, n) {
 function runQuery() {
   const q = state.query, table = state.table;
   if (!table) return;
+  /* a whole-file aggregate that was streamed is kept, so ordering or limiting it does not re-aggregate
+     over whatever rows happen to be loaded */
+  const kept = aggKept();
   /* running is what settles it: an aggregate about to replace the grid does
      not need the columns it is replacing */
-  if (needFilled([...neededColumns(table, true)], runQuery)) return;
+  if (!kept && needFilled([...neededColumns(table, true)], runQuery)) return;
   const t0 = performance.now();
-  const cols = table.cols, n = table.rowsLoaded;
+  const cols = table.cols, n = kept ? kept.rows : table.rowsLoaded;
 
-  const groups = orGroups(q.filters, cols);
-  let index = null;
-  if (groups.length) {
-    const buf = new Int32Array(n);
-    let k = 0;
-    for (let r = 0; r < n; r++) {
-      for (let g = 0; g < groups.length; g++) {
-        const grp = groups[g];
-        let ok = true;
-        for (let i = 0; i < grp.length; i++) if (!grp[i](r)) { ok = false; break; }
-        if (ok) { buf[k++] = r; break; }
-      }
-    }
-    index = buf.slice(0, k);
-  }
+  let index = kept ? null : matchIndex(q, cols, n);
 
   let view;
   if (q.mode === "agg" && (q.groupBy.length || q.metrics.length)) {
-    const outCols = aggregate(q, cols, index, n);
+    const outCols = kept ? kept.outCols.map((c) => Object.assign({}, c, { rows: c.rows.slice() })) : aggregate(q, cols, index, n);
     let count = outCols.length ? outCols[0].rows.length : 0;
     const order = aggSort(q, cols, outCols);
     if (order) {
@@ -4876,7 +4969,7 @@ function runQuery() {
       if (index) index = index.subarray(0, count);
     }
     view = { cols: outCols, index, count, agg: false,
-      label: !index ? (count < n ? "limited" : null) : groups.length ? "filtered" : "sorted" };
+      label: !index ? (count < n ? "limited" : null) : orGroups(q.filters, cols).length ? "filtered" : "sorted" };
   }
   q.active = true;
   const ms = Math.round(performance.now() - t0);
@@ -4884,11 +4977,13 @@ function runQuery() {
   const skipped = q.filters.filter((f) => filterIssue(f, cols)).length;
   /* a partial answer says how partial: "from 250,000 read" hides that the file has ten million */
   const ofTotal = table.scan ? table.scan.rows : table.dataset.numRows;
+  const scan = kept ? kept.plan : table.scan;
+  const partial = !kept && table.truncated;
   $("qstat").innerHTML = "<b>" + num(view.count) + "</b> " + (view.agg ? "groups" : "rows") +
-    " from " + (table.truncated ? "the first " + num(n) + " of " + num(ofTotal) + " rows" : num(n)) + " &middot; " + ms + " ms" +
+    " from " + (partial ? "the first " + num(n) + " of " + num(ofTotal) + " rows" : num(n)) + " &middot; " + (kept ? kept.ms : ms) + " ms" +
     (skipped ? " &middot; <em class='qwarn'>" + skipped + " clause" + (skipped === 1 ? "" : "s") +
       " skipped</em>" : "") +
-    (table.scan ? " &middot; over " + num(table.scan.kept) + " of " + num(table.scan.total) +
+    (scan ? " &middot; over " + num(scan.kept) + " of " + num(scan.total) +
       " row groups" : "");
   $("qclear").disabled = false;
   describeScope();
@@ -5057,6 +5152,7 @@ function sortMark(viewIdx) {
 }
 
 function resetQuery() {
+  state.agg = null;
   const mode = state.query ? state.query.mode : "rows";
   const scanned = !!(state.table && state.table.scan);
   state.query = newQuery();
@@ -5866,7 +5962,7 @@ function initQuery() {
        reruns immediately rather than waiting for another press of Run --
        every other zone edit still needs one, since those build up a new
        query rather than just changing how this one is presented */
-    if (b.dataset.act === "groupmode" && q.active) runQuery();
+    if (b.dataset.act === "groupmode" && q.active) runWhole();
   });
   /* typing must not re-render, or the input would lose focus mid-word */
   $("qzones").addEventListener("input", (e) => {
@@ -6352,8 +6448,8 @@ function planReport(plan) {
 const RUN_STEPS = [
   { label: "Plan", why: "Ruling row groups out from what the file's footer says about each one (min and max, bloom filters, page index), without reading any data." },
   { label: "Check the memory budget", why: "Estimating what the row groups that remain will take once decoded, so a query that would not fit is refused now rather than run out of memory halfway." },
-  { label: "Read", why: "Decoding only the columns the query uses, from only the row groups that could match." },
-  { label: "Compute", why: "Running the query over what was read." },
+  { label: "Read", why: "Decoding only the columns the query uses, from only the row groups that could match. An aggregate folds each row group into running totals and lets it go, so memory does not grow with the file." },
+  { label: "Compute", why: "Working out the answer from what was read." },
 ];
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -6415,6 +6511,52 @@ async function runWhole() {
     const cols = [...table.need];
     const budget = budgetBytes();
     const cost = groupsBytes(dataset, table, groups, cols);
+    if (agg && streamable(q)) {
+      /* folded one row group at a time: what has to fit is the largest single group, and the running
+         totals, which cannot be known in advance (how many groups, how many distinct values) and are
+         watched as they grow instead */
+      const biggest = groups.reduce((mx, g) => Math.max(mx, groupsBytes(dataset, table, [g], cols)), 0);
+      if (biggest > budget) {
+        showMemNote("Not run over the whole file: one row group of " + num(cols.length) + " column" + (cols.length === 1 ? "" : "s") +
+          " would take about " + bytesText(biggest) + " once decoded, over this page's " + bytesText(budget) + " memory budget. Aggregate fewer columns.",
+          [{ label: "Run on the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
+        return;
+      }
+      if (heldBytes(dataset, cur) > 0) { releaseRows(cur); state.view = null; needRestore = true; }
+      const st = newAggStream(q, cur.cols);
+      const room = budget - biggest;
+      const t0 = performance.now();
+      for (let i = 0; i < groups.length; i++) {
+        if (stop.asked) break;
+        const g = groups[i], of = groups.length;
+        progressStep(2, i / of, "row group " + num(i + 1) + " of " + num(of) + ": reading");
+        const batch = newTable(dataset);
+        batch.plan = table.plan;
+        batch.need = table.need;
+        batch.nextPart = g.pi;
+        batch.nextGroup = g.gi;
+        await loadMore(dataset, batch, 1);
+        if (stop.asked) break;
+        feedAggBatch(st, batch.cols, batch.rowsLoaded);
+        progressStep(2, (i + 1) / of, "row group " + num(i + 1) + " of " + num(of) + ": folded into " + num(st.maps[0].size) + " group" + (st.maps[0].size === 1 ? "" : "s"));
+        if (st.track.bytes > room) {
+          showMemNote("Not run over the whole file: after " + num(i + 1) + " of " + num(of) + " row groups its running totals (" + num(st.maps[0].size) +
+            " groups, and the values a percentile, distinct count or mode has to keep) were estimated at " + bytesText(st.track.bytes) +
+            ", over what this page can hold beside a decoded row group (" + bytesText(room) + "). Group by a column with fewer distinct values, or use fewer or lighter metrics: " +
+            "a percentile keeps every value and a distinct count every distinct value.",
+            [{ label: "Run on the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
+          return;
+        }
+        await tick();
+      }
+      if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+      progressStep(3, 0.5, num(st.maps[0].size) + " group" + (st.maps[0].size === 1 ? "" : "s") + " from " + num(st.rows) + " rows");
+      await tick();
+      state.agg = { sig: aggSignature(q), dataset, outCols: finishAggStream(st), rows: st.rows, plan, ms: Math.round(performance.now() - t0) };
+      showMemNote(null);
+      runQuery();          /* shows the kept answer; the browsing table is read back narrow, in the finally below */
+      return;
+    }
     if (agg && cost > budget) {
       showMemNote("Not run over the whole file: reading " + num(groups.reduce((n, g) => n + g.rows, 0)) + " rows of " + num(cols.length) +
         " column" + (cols.length === 1 ? "" : "s") + " would take about " + bytesText(cost) + ", over this page's " + bytesText(budget) +
@@ -6464,6 +6606,11 @@ function describeScope() {
   const share = pctRead >= 10 ? Math.round(pctRead) : pctRead >= 1 ? pctRead.toFixed(1) : pctRead.toFixed(2);
   if (!(q && q.active)) {
     showPlan(read < total ? "Showing the first <b>" + num(read) + "</b> of " + num(total) + " rows (" + share + "%). <b>Run</b> searches the whole file." : "");
+    return;
+  }
+  const kept = aggKept();
+  if (kept) {
+    showPlan("<b>Whole file.</b> " + (kept.plan ? "Aggregated over " + planReport(kept.plan) + "." : "Searched all " + num(kept.rows) + " rows."));
     return;
   }
   if (t.scan) {
@@ -8367,6 +8514,7 @@ async function openFile(file) { return openEntries(entriesFromFiles([file])); }
  */
 function adoptDataset(dataset, table, name, showCount, keepDisplay) {
   state.dataset = dataset;
+  state.agg = null;
   state.src = dataset.parts[0].src;
   state.meta = dataset.reference;
   state.table = table;
@@ -8478,7 +8626,8 @@ async function openEntries(entries, label) {
 
 function updateButtons() {
   const t = state.table;
-  const can = !!(t && t.truncated);
+  /* a kept aggregate is not the rows the buttons would read further into */
+  const can = !!(t && t.truncated) && !aggKept();
   $("more").hidden = !can;
   $("all").hidden = !can;
   $("toggleMeta").hidden = !t;

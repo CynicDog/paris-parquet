@@ -26,7 +26,7 @@ export const COL_W = 178, ROW_H = 22;
    windowing; 100 rows of 40 columns fits comfortably inside it */
 export const CELL_BUDGET = 8000;
 export const PAGE_SIZES = [10, 100, 200, 500, 1000, 3000, Infinity];
-export const state = { src: null, meta: null, table: null, view: null, page: 0, pageSize: 100, first: 0 };
+export const state = { src: null, meta: null, table: null, view: null, page: 0, pageSize: 100, first: 0, agg: null };
 
 /**
  * A view is what the grid draws: a list of columns, a row count, and an

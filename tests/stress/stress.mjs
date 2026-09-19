@@ -6,6 +6,7 @@
  *   uv run --with pyarrow,numpy tools/big-fixture.py /tmp/big.parquet --rows 10000000
  *   node tests/stress/stress.mjs /tmp/big.parquet
  *   node tests/stress/stress.mjs /tmp/big.parquet --scenarios open,grow --limit-mb 8000 --json out.json
+ *   node tests/stress/stress.mjs /tmp/big.parquet --app /tmp/older-index.html    # the same run against an older build
  *
  * Scenarios (each starts from a fresh page):
  *   open          open the file; what the first paint costs
@@ -41,7 +42,7 @@ if (!file) { console.error("usage: node tests/stress/stress.mjs FILE.parquet [--
 const LIMIT_MB = +opt("limit-mb", 3500);
 const STEP_MS = +opt("step-timeout", 300) * 1000;
 const WANT = (opt("scenarios", "open,grow,filter,scan-narrow,scan-broad,agg,pct-all")).split(",");
-const appPath = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "..", "index.html");
+const appPath = opt("app", path.join(path.dirname(new URL(import.meta.url).pathname), "..", "..", "index.html"));   /* --app: another build to compare against */
 const results = [];
 const mb = (n) => Math.round(n);
 
@@ -213,6 +214,16 @@ const SCENARIOS = {
       await setSql(s, "SELECT cat_s_000, COUNT(*), QUANTILE_CONT(metric_f_000, 0.99)\nFROM t\nGROUP BY cat_s_000;");
       await s.page.click("#qrun"); await idle(s);
       return { note: ((await text(s, "#qstat")) + " | " + (await text(s, "#qplan")) + " | " + (await text(s, "#memnote"))).replace(/\s+/g, " ").trim().slice(0, 240) };
+    });
+  },
+
+  /** Only metrics that fold into running totals: memory should not depend on how many rows there are. */
+  async "agg-mergeable"(s) {
+    const o = await open(s); if (!alive(o)) return;
+    await step(s, "Run: COUNT/AVG/STD/MIN/MAX by group", async () => {
+      await setSql(s, "SELECT cat_s_000, COUNT(*), AVG(metric_f_000), STDDEV_SAMP(metric_f_001), MIN(metric_f_002), MAX(count_l_003), SUM(count_l_004)\nFROM t\nGROUP BY cat_s_000;");
+      await s.page.click("#qrun"); await idle(s);
+      return { note: ((await text(s, "#qstat")) + " | " + (await text(s, "#qplan"))).replace(/\s+/g, " ").trim().slice(0, 200) };
     });
   },
 

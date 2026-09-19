@@ -124,25 +124,64 @@ else bad("note after show-all: " + await text("#memnote"));
 await page.keyboard.press("Escape");
 await page.click("[data-act='cpclose']").catch(() => {});
 
-/* a whole-file aggregate that cannot fit is refused with numbers, and the fallback is explicit */
+/* a mergeable aggregate is folded one row group at a time, so it does not need the column in memory: under a
+   budget far too small to hold 200,000 rows it still answers about all of them */
 await page.goto("file://" + appPath);
 await page.evaluate(() => window.PARIS.setBudgetMB(1));
 await open("sorted.parquet");
-await page.fill("#qsql", "SELECT COUNT(*), AVG(id) FROM sorted");
-await page.dispatchEvent("#qsql", "input");
-await page.waitForTimeout(400);
-await page.click("#qrun");
-await idle();
-const refused = await text("#memnote");
-if (/^Not run over the whole file: reading 200,000 rows of \d+ columns? would take about/.test(refused)) ok("an aggregate over the whole file that cannot fit is refused: " + refused.slice(0, 120) + "…");
-else bad("aggregate under a 1 MB budget: " + refused);
-if (/Run on the 20,000 rows already read/.test(await text("#memnote button"))) ok("with an explicit, labelled way to run on what is loaded");
-else bad("no fallback action: " + await text("#memnote"));
+const ask = async (sql) => {
+  await page.fill("#qsql", sql);
+  await page.dispatchEvent("#qsql", "input");
+  await page.waitForTimeout(450);
+  await page.click("#qrun");
+  await idle();
+  return page.evaluate(() => ({
+    memnote: document.getElementById("memnote").textContent.replace(/\s+/g, " ").trim(),
+    action: (document.querySelector("#memnote button") || {}).textContent || "",
+    plan: document.getElementById("qplan").textContent.replace(/\s+/g, " ").trim(),
+    first: window.PARIS.state.view && window.PARIS.state.view.cols.map((c) => c.rows[0]),
+    cols: window.PARIS.state.view && window.PARIS.state.view.cols.map((c) => c.rows.slice(0, 50)),
+    sums: window.PARIS.state.view && window.PARIS.state.view.cols.map((c) => (typeof c.rows[0] === "number" ? c.rows.reduce((a, b) => a + b, 0) : null)),
+    err: (document.getElementById("err") || {}).textContent || "",
+  }));
+};
+const folded = await ask("SELECT COUNT(*), AVG(id), MIN(id), MAX(id), STDDEV_SAMP(id) FROM sorted");
+if (folded.first && folded.first[0] === 200000 && folded.first[1] === 99999.5 && folded.first[2] === 0 && folded.first[3] === 199999) ok("under a 1 MB budget a COUNT/AVG/MIN/MAX/STD over 200,000 rows still answers, folded a row group at a time: " + JSON.stringify(folded.first.slice(0, 4)));
+else bad("streamed aggregate under 1 MB: " + JSON.stringify(folded));
+if (/^Whole file\. Searched all 200,000 rows\./.test(folded.plan) && !folded.memnote) ok("with no refusal, and the scope line says it covered every row: " + folded.plan);
+else bad("scope/note after the streamed aggregate: " + JSON.stringify(folded));
+const std = folded.first && folded.first[4];
+if (Math.abs(std - Math.sqrt((200000 * 200001) / 12)) < 1e-6) ok("its sample standard deviation is the exact one for 0..199,999: " + std);
+else bad("STDDEV_SAMP folded across 20 row groups: " + std);
+
+/* sorting the streamed answer re-orders it; it does not re-aggregate over the rows that happen to be loaded */
+const sorted = await ask("SELECT grp, COUNT(*) FROM sorted GROUP BY grp ORDER BY grp DESC LIMIT 3");
+const g = sorted.cols && sorted.cols[0], gc = sorted.cols && sorted.cols[1];
+const total = await ask("SELECT grp, COUNT(*) FROM sorted GROUP BY grp");
+const sum = total.sums && total.sums[1];
+if (g && g.length === 3 && g[0] > g[1] && g[1] > g[2] && gc.every((c) => c > 0)) ok("a grouped answer keeps its ORDER BY and LIMIT over the whole file: " + JSON.stringify(g));
+else bad("grouped, ordered, streamed: " + JSON.stringify(sorted));
+if (sum === 200000) ok("and the group counts add up to every row of the file: " + sum);
+else bad("the groups' counts add up to " + sum + ", not 200,000");
+
+/* what cannot be folded away -- a percentile keeps every value -- is watched as it grows and stopped with the numbers */
+const median = await ask("SELECT MEDIAN(id) FROM sorted");
+if (/^Not run over the whole file: after \d+ of 20 row groups its running totals \(1 groups, and the values a percentile/.test(median.memnote)) ok("a percentile that would keep every value is stopped when it outgrows the budget: " + median.memnote.slice(0, 110) + "…");
+else bad("MEDIAN under a 1 MB budget: " + JSON.stringify(median));
+if (/Run on the 20,000 rows already read/.test(median.action)) ok("with an explicit, labelled way to run on what is loaded");
+else bad("no fallback action: " + median.action);
 await page.click("#memnote button");
 await idle();
 const partial = await text("#qplan");
 if (/^Only the 20,000 rows read so far \(10% of the file\), not the whole file\./.test(partial)) ok("and the answer then says how partial it is: " + partial);
 else bad("scope line after the fallback: " + partial);
+
+/* a row group that cannot be decoded within the budget at all is refused before anything is read */
+await page.evaluate(() => window.PARIS.setBudgetMB(0.0001));
+const tiny = await ask("SELECT COUNT(*) FROM sorted");
+if (/^Not run over the whole file: one row group of 1 column would take about/.test(tiny.memnote)) ok("a single row group that does not fit is refused up front: " + tiny.memnote.slice(0, 100) + "…");
+else bad("aggregate under a 100-byte budget: " + JSON.stringify(tiny));
+await page.evaluate(() => window.PARIS.setBudgetMB(null));
 
 /* what is held follows the current query, not the history of queries: two whole-file aggregates over
    different columns, with a budget that fits either column alone but not both at once, must both run */
@@ -161,10 +200,10 @@ if (two.a && two.b) {
     await page.waitForTimeout(450);
     await page.click("#qrun");
     await idle();
-    return page.evaluate(() => ({ name: window.PARIS.state.view.cols[0].name, note: document.getElementById("memnote").textContent, rows: window.PARIS.state.table.rowsLoaded }));
+    return page.evaluate(() => ({ name: window.PARIS.state.view.cols[0].name, note: document.getElementById("memnote").textContent, plan: document.getElementById("qplan").textContent.replace(/\s+/g, " ").trim() }));
   };
   const first = await ask(two.a), second = await ask(two.b);
-  if (first.name === `COUNT(${two.a})` && second.name === `COUNT(${two.b})` && second.rows === two.rows && !/Not run/.test(second.note)) ok(`the second aggregate (over ${two.b}) runs after the first (over ${two.a}) instead of being refused for the history: ${second.rows.toLocaleString()} rows`);
+  if (first.name === `COUNT(${two.a})` && second.name === `COUNT(${two.b})` && /Searched all 200,000 rows/.test(second.plan) && !/Not run/.test(second.note)) ok(`the second aggregate (over ${two.b}) runs after the first (over ${two.a}) instead of being refused for the history: ${second.plan}`);
   else bad("second aggregate: " + JSON.stringify({ first, second }));
 } else console.log("     (no two numeric columns in sorted.parquet: skipped)");
 await page.evaluate(() => window.PARIS.setBudgetMB(null));

@@ -10,7 +10,7 @@ import { newTable } from "./dataset.js";
 import { intersectRanges, mergeRanges, rangeCount, readColumnIndex, readOffsetIndex, unionRanges } from "./encoding.js";
 import { busy, FIRST_ROWS, showError, showMemNote, updateButtons } from "./main.js";
 import { progressStep } from "./progress.js";
-import { compileFilter, parseOperand, runQuery, sortKey, textOf } from "./query.js";
+import { aggKept, aggSignature, compileFilter, feedAggBatch, finishAggStream, newAggStream, parseOperand, runQuery, sortKey, streamable, textOf } from "./query.js";
 import { thriftStruct } from "./thrift.js";
 import { rawStat, renderMeta } from "./ui-metadata.js";
 import { adoptSql } from "./ui-query-builder.js";
@@ -418,8 +418,8 @@ export function planReport(plan) {
 const RUN_STEPS = [
   { label: "Plan", why: "Ruling row groups out from what the file's footer says about each one (min and max, bloom filters, page index), without reading any data." },
   { label: "Check the memory budget", why: "Estimating what the row groups that remain will take once decoded, so a query that would not fit is refused now rather than run out of memory halfway." },
-  { label: "Read", why: "Decoding only the columns the query uses, from only the row groups that could match." },
-  { label: "Compute", why: "Running the query over what was read." },
+  { label: "Read", why: "Decoding only the columns the query uses, from only the row groups that could match. An aggregate folds each row group into running totals and lets it go, so memory does not grow with the file." },
+  { label: "Compute", why: "Working out the answer from what was read." },
 ];
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -481,6 +481,52 @@ export async function runWhole() {
     const cols = [...table.need];
     const budget = budgetBytes();
     const cost = groupsBytes(dataset, table, groups, cols);
+    if (agg && streamable(q)) {
+      /* folded one row group at a time: what has to fit is the largest single group, and the running
+         totals, which cannot be known in advance (how many groups, how many distinct values) and are
+         watched as they grow instead */
+      const biggest = groups.reduce((mx, g) => Math.max(mx, groupsBytes(dataset, table, [g], cols)), 0);
+      if (biggest > budget) {
+        showMemNote("Not run over the whole file: one row group of " + num(cols.length) + " column" + (cols.length === 1 ? "" : "s") +
+          " would take about " + bytesText(biggest) + " once decoded, over this page's " + bytesText(budget) + " memory budget. Aggregate fewer columns.",
+          [{ label: "Run on the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
+        return;
+      }
+      if (heldBytes(dataset, cur) > 0) { releaseRows(cur); state.view = null; needRestore = true; }
+      const st = newAggStream(q, cur.cols);
+      const room = budget - biggest;
+      const t0 = performance.now();
+      for (let i = 0; i < groups.length; i++) {
+        if (stop.asked) break;
+        const g = groups[i], of = groups.length;
+        progressStep(2, i / of, "row group " + num(i + 1) + " of " + num(of) + ": reading");
+        const batch = newTable(dataset);
+        batch.plan = table.plan;
+        batch.need = table.need;
+        batch.nextPart = g.pi;
+        batch.nextGroup = g.gi;
+        await loadMore(dataset, batch, 1);
+        if (stop.asked) break;
+        feedAggBatch(st, batch.cols, batch.rowsLoaded);
+        progressStep(2, (i + 1) / of, "row group " + num(i + 1) + " of " + num(of) + ": folded into " + num(st.maps[0].size) + " group" + (st.maps[0].size === 1 ? "" : "s"));
+        if (st.track.bytes > room) {
+          showMemNote("Not run over the whole file: after " + num(i + 1) + " of " + num(of) + " row groups its running totals (" + num(st.maps[0].size) +
+            " groups, and the values a percentile, distinct count or mode has to keep) were estimated at " + bytesText(st.track.bytes) +
+            ", over what this page can hold beside a decoded row group (" + bytesText(room) + "). Group by a column with fewer distinct values, or use fewer or lighter metrics: " +
+            "a percentile keeps every value and a distinct count every distinct value.",
+            [{ label: "Run on the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
+          return;
+        }
+        await tick();
+      }
+      if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+      progressStep(3, 0.5, num(st.maps[0].size) + " group" + (st.maps[0].size === 1 ? "" : "s") + " from " + num(st.rows) + " rows");
+      await tick();
+      state.agg = { sig: aggSignature(q), dataset, outCols: finishAggStream(st), rows: st.rows, plan, ms: Math.round(performance.now() - t0) };
+      showMemNote(null);
+      runQuery();          /* shows the kept answer; the browsing table is read back narrow, in the finally below */
+      return;
+    }
     if (agg && cost > budget) {
       showMemNote("Not run over the whole file: reading " + num(groups.reduce((n, g) => n + g.rows, 0)) + " rows of " + num(cols.length) +
         " column" + (cols.length === 1 ? "" : "s") + " would take about " + bytesText(cost) + ", over this page's " + bytesText(budget) +
@@ -530,6 +576,11 @@ export function describeScope() {
   const share = pctRead >= 10 ? Math.round(pctRead) : pctRead >= 1 ? pctRead.toFixed(1) : pctRead.toFixed(2);
   if (!(q && q.active)) {
     showPlan(read < total ? "Showing the first <b>" + num(read) + "</b> of " + num(total) + " rows (" + share + "%). <b>Run</b> searches the whole file." : "");
+    return;
+  }
+  const kept = aggKept();
+  if (kept) {
+    showPlan("<b>Whole file.</b> " + (kept.plan ? "Aggregated over " + planReport(kept.plan) + "." : "Searched all " + num(kept.rows) + " rows."));
     return;
   }
   if (t.scan) {

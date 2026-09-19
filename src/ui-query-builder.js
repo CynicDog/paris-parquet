@@ -6,7 +6,7 @@
 import { $ } from "./columns.js";
 import { drag } from "./main.js";
 import { describeScope, runWhole } from "./pushdown.js";
-import { AGG_GROUPS, AGG_SHORT, AGG_TITLE, AGGS, CUBE_MAX_COLS, filterIssue, NO_OPERAND, newQuery, nextQid, PREDS, parseSql, querySql, resetQuery, runQuery } from "./query.js";
+import { AGG_GROUPS, AGG_SHORT, AGG_TITLE, AGGS, CUBE_MAX_COLS, filterIssue, NO_OPERAND, newQuery, nextQid, PREDS, parseSql, querySql, resetQuery } from "./query.js";
 import { renderRows } from "./ui-grid.js";
 import { esc, state } from "./view.js";
 
@@ -272,7 +272,7 @@ export function initQuery() {
        reruns immediately rather than waiting for another press of Run --
        every other zone edit still needs one, since those build up a new
        query rather than just changing how this one is presented */
-    if (b.dataset.act === "groupmode" && q.active) runQuery();
+    if (b.dataset.act === "groupmode" && q.active) runWhole();
   });
   /* typing must not re-render, or the input would lose focus mid-word */
   $("qzones").addEventListener("input", (e) => {

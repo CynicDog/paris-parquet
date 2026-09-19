@@ -12,7 +12,7 @@ import { assemble, intersectRanges, mergeRanges, rangeCount, readColumnChunk, re
 import { initJoin, join, openJoinCompare } from "./join.js";
 import { initProgress, progressCancelled, progressFinish, progressSay, progressStart, progressStep } from "./progress.js";
 import { bloomBytes, bloomHas, chunkBounds, clauseCanMatch, clauseGroups, clauseRanges, planReport, planScan, readBloom, showPlan, xxh64 } from "./pushdown.js";
-import { AGG_NUMERIC, aggregate, compileFilter, newQuery, parseSql, querySql, reorderColumns, runQuery, scopeToBar, sqlTokenize, toggleSort } from "./query.js";
+import { AGG_NUMERIC, aggKept, aggregate, compileFilter, newQuery, parseSql, querySql, reorderColumns, runQuery, scopeToBar, sqlTokenize, toggleSort } from "./query.js";
 import { readFooter } from "./thrift.js";
 import { fmtValue, summarize, typeSpec } from "./types.js";
 import { closeInspector, initPicker, openInspector, pageTopAt, refreshView, renderRows } from "./ui-grid.js";
@@ -200,6 +200,7 @@ export async function openFile(file) { return openEntries(entriesFromFiles([file
  */
 export function adoptDataset(dataset, table, name, showCount, keepDisplay) {
   state.dataset = dataset;
+  state.agg = null;
   state.src = dataset.parts[0].src;
   state.meta = dataset.reference;
   state.table = table;
@@ -311,7 +312,8 @@ export async function openEntries(entries, label) {
 
 export function updateButtons() {
   const t = state.table;
-  const can = !!(t && t.truncated);
+  /* a kept aggregate is not the rows the buttons would read further into */
+  const can = !!(t && t.truncated) && !aggKept();
   $("more").hidden = !can;
   $("all").hidden = !can;
   $("toggleMeta").hidden = !t;
