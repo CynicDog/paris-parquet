@@ -173,7 +173,6 @@ else bad("filtered top 3 ids: " + JSON.stringify(fids));
 /* no LIMIT: the first screenful of the whole-file order, and a header click sorts the whole file, not what is loaded */
 await page.evaluate(() => window.PARIS.setBudgetMB(null));
 await page.click("[data-act='qclear']").catch(() => {});
-await page.evaluate(() => window.PARIS.state.query && (window.PARIS.state.query.active = false));
 await typeSql("SELECT * FROM shuffled ORDER BY id");
 await page.click("#qrun");
 await idle();

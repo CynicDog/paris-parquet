@@ -241,6 +241,7 @@ export async function openEntries(entries, label) {
     });
     parts = dataset.parts.length;
     const table = newTable(dataset);
+    table.slice = true;                 /* browsing: a screenful is decoded, not the whole first row group */
     /* the display and the query decide which columns are worth decoding, so
        they are settled before the first read rather than after it */
     state.display = newDisplay(table.cols);

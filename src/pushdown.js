@@ -445,6 +445,7 @@ async function restoreBrowse(dataset) {
   busy(true, "Restoring the view");
   try {
     const table = newTable(dataset);
+    table.slice = true;
     table.need = neededColumns(table);
     await loadMore(dataset, table, FIRST_ROWS);
     state.table = table;
@@ -799,6 +800,7 @@ export async function unscan() {
   await new Promise((r) => setTimeout(r, 0));
   try {
     const table = newTable(dataset);
+    table.slice = true;
     await loadMore(dataset, table, FIRST_ROWS);
     state.table = table;
     setView(baseView(table));

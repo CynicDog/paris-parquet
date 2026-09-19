@@ -1706,7 +1706,7 @@ function newSink(leaf, dict, convert) {
 }
 
 /** With a `convert`, the values come back converted; without one, physical. */
-async function readColumnChunk(src, chunk, leaf, convert) {
+async function readColumnChunk(src, chunk, leaf, convert, maxRows) {
   const m = chunk.meta;
   if (!m) throw new Error("column chunk has no metadata (encrypted?)");
   let start = m.dataPageOffset;
@@ -1718,7 +1718,10 @@ async function readColumnChunk(src, chunk, leaf, convert) {
 
   const out = newSink(leaf, undefined, convert);
   let pos = 0, seen = 0;
-  while (pos < buf.length && seen < m.numValues) {
+  /* a flat column has one value per row, so once a page has taken the decode past the rows wanted the rest of
+     the chunk need not be decoded at all */
+  const stopAt = maxRows && leaf.maxRep === 0 ? maxRows : Infinity;
+  while (pos < buf.length && seen < m.numValues && seen < stopAt) {
     const r = await readPage(buf, pos, m, leaf, out);
     pos = r.pos;
     seen += r.n;
@@ -1812,7 +1815,7 @@ async function readRowsRanges(src, chunk, leaf, ranges, numRows, convert) {
     try { return await readPagesRanges(src, chunk, leaf, locs, ranges, numRows, convert); }
     catch (_e) { chunk.offsets = null; }   /* an index we cannot follow: read it all */
   }
-  const raw = await readColumnChunk(src, chunk, leaf, convert);
+  const raw = await readColumnChunk(src, chunk, leaf, convert, ranges.length ? ranges[ranges.length - 1][1] : 0);
   const all = assemble(leaf, raw.values, raw.defs, raw.reps, null);
   const out = [];
   for (const r of ranges) for (let i = r[0]; i < r[1]; i++) out.push(all[i]);
@@ -2701,7 +2704,7 @@ function newTable(dataset) {
   })));
   return {
     dataset, meta: dataset.reference, cols,
-    nextPart: 0, nextGroup: 0, rowsLoaded: 0, groupsLoaded: 0,
+    nextPart: 0, nextGroup: 0, nextRow: 0, rowsLoaded: 0, groupsLoaded: 0, slice: false,
     reads: [], need: null,
     truncated: dataset.numGroups > 0,
   };
@@ -3079,10 +3082,16 @@ async function loadMore(dataset, table, maxRows, onProgress) {
       continue;
     }
     /* null means the whole group; a list of ranges means only those rows */
-    const sel = table.plan ? table.plan.get(planKey) : null;
+    let sel = table.plan ? table.plan.get(planKey) : null;
     const rg = meta.rowGroups[table.nextGroup];
-    const took = sel ? rangeCount(sel) : rg.numRows;
-    const firstGroup = table.nextPart === 0 && table.nextGroup === 0;
+    const from = table.nextRow || 0;              /* how far into this group an earlier, partial read got */
+    let took = sel ? rangeCount(sel) : rg.numRows - from;
+    /* a browsing table decodes only as many rows as were asked for, even from the middle of a huge group, and
+       picks up there next time: a million-row group is not decoded whole to show a screenful of it */
+    if (!sel && table.slice && !table.plan && took > maxRows - added) took = maxRows - added;
+    const finishes = !!sel || from + took >= rg.numRows;
+    if (!sel && (from > 0 || took < rg.numRows)) sel = [[from, from + took]];
+    const firstGroup = table.nextPart === 0 && table.nextGroup === 0 && from === 0;
     table.reads.push({ pi: table.nextPart, gi: table.nextGroup, sel, rows: took, firstGroup });
     /* every column of the group is asked for at once: with a pool they
        decode side by side, and without one they queue up as before */
@@ -3108,8 +3117,8 @@ async function loadMore(dataset, table, maxRows, onProgress) {
     }
     added += took;
     table.rowsLoaded += took;
-    table.nextGroup++;
-    table.groupsLoaded++;
+    if (from === 0) table.groupsLoaded++;
+    if (finishes) { table.nextRow = 0; table.nextGroup++; } else table.nextRow = from + took;
   }
   table.truncated = groupsLeft(dataset, table) > 0;
   return added;
@@ -3181,7 +3190,11 @@ function rowsAhead(dataset, table, limit) {
   for (let pi = table.nextPart; pi < dataset.parts.length && rows < limit; pi++) {
     const groups = dataset.parts[pi].meta.rowGroups;
     for (let gi = pi === table.nextPart ? table.nextGroup : 0; gi < groups.length && rows < limit; gi++) {
-      if (!table.plan) { rows += groups[gi].numRows; continue; }
+      if (!table.plan) {
+        const rest = groups[gi].numRows - (pi === table.nextPart && gi === table.nextGroup ? table.nextRow || 0 : 0);
+        rows += table.slice ? Math.min(rest, limit - rows) : rest;
+        continue;
+      }
       const sel = table.plan.get(pi + ":" + gi);
       if (sel !== undefined) rows += sel ? rangeCount(sel) : groups[gi].numRows;
     }
@@ -3285,7 +3298,8 @@ function groupsAhead(dataset, table, maxRows) {
     const key = pi + ":" + gi;
     if (table.plan && !table.plan.has(key)) { gi++; continue; }
     const sel = table.plan ? table.plan.get(key) : null;
-    const rows = sel ? rangeCount(sel) : groups[gi].numRows;
+    let rows = sel ? rangeCount(sel) : groups[gi].numRows - (pi === table.nextPart && gi === table.nextGroup ? table.nextRow || 0 : 0);
+    if (!sel && table.slice && !table.plan) rows = Math.min(rows, maxRows - added);     /* what loadMore will actually take */
     out.push({ pi, gi, rows });
     added += rows;
     gi++;
@@ -6815,6 +6829,7 @@ async function restoreBrowse(dataset) {
   busy(true, "Restoring the view");
   try {
     const table = newTable(dataset);
+    table.slice = true;
     table.need = neededColumns(table);
     await loadMore(dataset, table, FIRST_ROWS);
     state.table = table;
@@ -7169,6 +7184,7 @@ async function unscan() {
   await new Promise((r) => setTimeout(r, 0));
   try {
     const table = newTable(dataset);
+    table.slice = true;
     await loadMore(dataset, table, FIRST_ROWS);
     state.table = table;
     setView(baseView(table));
@@ -9087,6 +9103,7 @@ async function openEntries(entries, label) {
     });
     parts = dataset.parts.length;
     const table = newTable(dataset);
+    table.slice = true;                 /* browsing: a screenful is decoded, not the whole first row group */
     /* the display and the query decide which columns are worth decoding, so
        they are settled before the first read rather than after it */
     state.display = newDisplay(table.cols);

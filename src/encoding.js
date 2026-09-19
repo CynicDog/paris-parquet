@@ -326,7 +326,7 @@ export function newSink(leaf, dict, convert) {
 }
 
 /** With a `convert`, the values come back converted; without one, physical. */
-export async function readColumnChunk(src, chunk, leaf, convert) {
+export async function readColumnChunk(src, chunk, leaf, convert, maxRows) {
   const m = chunk.meta;
   if (!m) throw new Error("column chunk has no metadata (encrypted?)");
   let start = m.dataPageOffset;
@@ -338,7 +338,10 @@ export async function readColumnChunk(src, chunk, leaf, convert) {
 
   const out = newSink(leaf, undefined, convert);
   let pos = 0, seen = 0;
-  while (pos < buf.length && seen < m.numValues) {
+  /* a flat column has one value per row, so once a page has taken the decode past the rows wanted the rest of
+     the chunk need not be decoded at all */
+  const stopAt = maxRows && leaf.maxRep === 0 ? maxRows : Infinity;
+  while (pos < buf.length && seen < m.numValues && seen < stopAt) {
     const r = await readPage(buf, pos, m, leaf, out);
     pos = r.pos;
     seen += r.n;
@@ -432,7 +435,7 @@ export async function readRowsRanges(src, chunk, leaf, ranges, numRows, convert)
     try { return await readPagesRanges(src, chunk, leaf, locs, ranges, numRows, convert); }
     catch (_e) { chunk.offsets = null; }   /* an index we cannot follow: read it all */
   }
-  const raw = await readColumnChunk(src, chunk, leaf, convert);
+  const raw = await readColumnChunk(src, chunk, leaf, convert, ranges.length ? ranges[ranges.length - 1][1] : 0);
   const all = assemble(leaf, raw.values, raw.defs, raw.reps, null);
   const out = [];
   for (const r of ranges) for (let i = r[0]; i < r[1]; i++) out.push(all[i]);

@@ -94,7 +94,8 @@ export function groupsAhead(dataset, table, maxRows) {
     const key = pi + ":" + gi;
     if (table.plan && !table.plan.has(key)) { gi++; continue; }
     const sel = table.plan ? table.plan.get(key) : null;
-    const rows = sel ? rangeCount(sel) : groups[gi].numRows;
+    let rows = sel ? rangeCount(sel) : groups[gi].numRows - (pi === table.nextPart && gi === table.nextGroup ? table.nextRow || 0 : 0);
+    if (!sel && table.slice && !table.plan) rows = Math.min(rows, maxRows - added);     /* what loadMore will actually take */
     out.push({ pi, gi, rows });
     added += rows;
     gi++;

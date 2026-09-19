@@ -145,7 +145,7 @@ export function newTable(dataset) {
   })));
   return {
     dataset, meta: dataset.reference, cols,
-    nextPart: 0, nextGroup: 0, rowsLoaded: 0, groupsLoaded: 0,
+    nextPart: 0, nextGroup: 0, nextRow: 0, rowsLoaded: 0, groupsLoaded: 0, slice: false,
     reads: [], need: null,
     truncated: dataset.numGroups > 0,
   };

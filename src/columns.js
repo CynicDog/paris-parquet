@@ -86,10 +86,16 @@ export async function loadMore(dataset, table, maxRows, onProgress) {
       continue;
     }
     /* null means the whole group; a list of ranges means only those rows */
-    const sel = table.plan ? table.plan.get(planKey) : null;
+    let sel = table.plan ? table.plan.get(planKey) : null;
     const rg = meta.rowGroups[table.nextGroup];
-    const took = sel ? rangeCount(sel) : rg.numRows;
-    const firstGroup = table.nextPart === 0 && table.nextGroup === 0;
+    const from = table.nextRow || 0;              /* how far into this group an earlier, partial read got */
+    let took = sel ? rangeCount(sel) : rg.numRows - from;
+    /* a browsing table decodes only as many rows as were asked for, even from the middle of a huge group, and
+       picks up there next time: a million-row group is not decoded whole to show a screenful of it */
+    if (!sel && table.slice && !table.plan && took > maxRows - added) took = maxRows - added;
+    const finishes = !!sel || from + took >= rg.numRows;
+    if (!sel && (from > 0 || took < rg.numRows)) sel = [[from, from + took]];
+    const firstGroup = table.nextPart === 0 && table.nextGroup === 0 && from === 0;
     table.reads.push({ pi: table.nextPart, gi: table.nextGroup, sel, rows: took, firstGroup });
     /* every column of the group is asked for at once: with a pool they
        decode side by side, and without one they queue up as before */
@@ -115,8 +121,8 @@ export async function loadMore(dataset, table, maxRows, onProgress) {
     }
     added += took;
     table.rowsLoaded += took;
-    table.nextGroup++;
-    table.groupsLoaded++;
+    if (from === 0) table.groupsLoaded++;
+    if (finishes) { table.nextRow = 0; table.nextGroup++; } else table.nextRow = from + took;
   }
   table.truncated = groupsLeft(dataset, table) > 0;
   return added;
@@ -188,7 +194,11 @@ export function rowsAhead(dataset, table, limit) {
   for (let pi = table.nextPart; pi < dataset.parts.length && rows < limit; pi++) {
     const groups = dataset.parts[pi].meta.rowGroups;
     for (let gi = pi === table.nextPart ? table.nextGroup : 0; gi < groups.length && rows < limit; gi++) {
-      if (!table.plan) { rows += groups[gi].numRows; continue; }
+      if (!table.plan) {
+        const rest = groups[gi].numRows - (pi === table.nextPart && gi === table.nextGroup ? table.nextRow || 0 : 0);
+        rows += table.slice ? Math.min(rest, limit - rows) : rest;
+        continue;
+      }
       const sel = table.plan.get(pi + ":" + gi);
       if (sel !== undefined) rows += sel ? rangeCount(sel) : groups[gi].numRows;
     }
