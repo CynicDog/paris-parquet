@@ -114,6 +114,7 @@ export function showJoin(on) {
   $("drop").hidden = on || !!state.table;
   $("toggleJoin").textContent = on ? "⋈ Close join" : "⋈ Join two files";
   $("toggleJoin").classList.toggle("on", on);
+  $("toggleJoin").setAttribute("aria-pressed", String(on));
   if (joinHooks.onShow) joinHooks.onShow(on);
   if (on) renderJoin();
 }

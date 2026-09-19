@@ -40,8 +40,7 @@ jobs:
       - run: npm ci
       - run: pip install pyarrow numpy pandas duckdb
 
-      # not a dependency of the repo (the tests only need it here); pinned so a browser update cannot move the numbers
-      - run: npm install --no-save playwright@1.63.0
+      # playwright and axe are dev dependencies (pinned in package-lock.json); the browser itself is fetched here
       - run: npx playwright install --with-deps chromium
 
       - name: Build matches the committed page
@@ -62,6 +61,7 @@ jobs:
           node tests/browser/browser-push.mjs /tmp/fx/push
           node tests/browser/browser-partial.mjs /tmp/fx
           node tests/browser/browser-cards.mjs /tmp/fx/push
+          node tests/browser/browser-a11y.mjs /tmp/fx/push
           node tests/browser/browser-join.mjs
           node tests/browser/browser-lazy.mjs /tmp/fx/wide.parquet
           node tests/browser/browser-metrics.mjs /tmp/fx/basic_snappy.parquet

@@ -199,7 +199,7 @@ export function renderPager() {
     "<button id='pfirst' title='First page'" + dis(state.page === 0) + ">&laquo;</button>" +
     "<button id='pprev' title='Previous page'" + dis(state.page === 0) + ">&lsaquo;</button>" +
     "<span class='pinfo'>page <input id='pnum' value='" + (state.page + 1) +
-    "' size='4' inputmode='numeric'> of " + num(pages) + "</span>" +
+    "' size='4' inputmode='numeric' aria-label='Page number'> of " + num(pages) + "</span>" +
     "<button id='pnext' title='Next page'" + dis(state.page >= pages - 1) + ">&rsaquo;</button>" +
     "<button id='plast' title='Last page'" + dis(state.page >= pages - 1) + ">&raquo;</button>" +
     "<span class='psep'></span>" +
@@ -214,7 +214,7 @@ export function renderPager() {
         ? "first " + num(state.table.rowsLoaded) + " matches shown"
         : num(state.table.rowsLoaded) + " of " + num(state.meta.numRows) + " rows read") + "</span>" : "") +
     "<span class='grow'></span>" +
-    "<span class='pinfo'>export <select id='expscope'>" +
+    "<span class='pinfo'>export <select id='expscope' aria-label='What to export'>" +
     "<option value='page'>this page</option><option value='view'>all " + num(v.count) + " rows</option>" +
     "</select>" +
     "<button id='expcsv'>CSV</button><button id='exptsv'>TSV</button>" +

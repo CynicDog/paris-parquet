@@ -146,7 +146,9 @@ export function renderGrid() {
     const title = (c.leaf ? c.leaf.path.join(".") : c.name) + "  -  " + c.spec.label +
       (c.leaf ? " (" + c.spec.physical + ", " + c.leaf.rep.toLowerCase() + ")" : "");
     const hint = " — click to sort, shift-click to add a key" + (ci >= 0 ? ", drag to reorder" : "");
-    html += "<th class='sortable'" + (ci >= 0 ? " draggable='true' data-ci='" + ci + "'" : "") +
+    const at = sortMark(i);
+    html += "<th class='sortable' tabindex='0' role='columnheader' aria-sort='" + (at.indexOf("▲") >= 0 ? "ascending" : at.indexOf("▼") >= 0 ? "descending" : "none") + "'" +
+      (ci >= 0 ? " draggable='true' data-ci='" + ci + "'" : "") +
       " title='" + esc(title + hint) + "'>" +
       sortMark(i) + "<span class='cname'>" + esc(c.name) +
       "</span><span class='ctype t-" + c.spec.kind + "'>" + esc(c.spec.label) +
@@ -158,6 +160,10 @@ export function renderGrid() {
   for (const c of cols) html += "<th>" + summaryCard(c, !view.agg && own.indexOf(c) >= 0) + "</th>";
   html += "</tr></thead><tbody id='tbody'></tbody>";
   grid.innerHTML = html;
+  /* a virtualized table only draws some rows, so its size is said outright for a screen reader */
+  grid.setAttribute("aria-rowcount", String(view.count + 2));
+  grid.setAttribute("aria-colcount", String(cols.length + 1));
+  grid.setAttribute("aria-label", "Data, " + num(view.count) + (view.agg ? " groups" : " rows") + " by " + num(cols.length) + " columns");
   ensureCards();          /* a view that covers more than is loaded has its cards counted in the background */
 
   /* Per-column alignment and colour go in one stylesheet keyed by position,
@@ -230,7 +236,7 @@ export function renderRows(force) {
   for (let r = first; r < last; r++) {
     const abs = pageStart + r;
     const src = index ? index[abs] : abs;
-    parts.push("<tr data-r='", String(abs), "'><td class='rownum'>", String((view.agg ? abs : src) + 1), "</td>");
+    parts.push("<tr data-r='", String(abs), "' aria-rowindex='", String(abs + 3), "'><td class='rownum'>", String((view.agg ? abs : src) + 1), "</td>");
     for (let ci = 0; ci < ncols; ci++) {
       const v = data[ci][src];
       if (v === null || v === undefined) { parts.push("<td class='null'>null</td>"); continue; }
@@ -267,10 +273,10 @@ export function renderPicker() {
     const shown = !d.hidden.has(ci), pinned = d.pinned.has(ci);
     rows += "<div class='cprow" + (pinned ? " pinned" : "") + "' draggable='true' data-ci='" + ci + "'>" +
       "<span class='qgrab'>∷</span>" +
-      "<input type='checkbox' data-act='cpshow' data-ci='" + ci + "'" + (shown ? " checked" : "") + ">" +
+      "<input type='checkbox' data-act='cpshow' data-ci='" + ci + "' aria-label='" + esc("Show column " + c.name) + "'" + (shown ? " checked" : "") + ">" +
       "<span class='cpname" + (shown ? "" : " off") + "' title='" + esc(c.name) + "'>" + esc(c.name) + "</span>" +
       "<span class='qtag t-" + c.spec.kind + "'>" + typeTag(c.spec) + "</span>" +
-      "<button class='cppin" + (pinned ? " on" : "") + "' data-act='cppin' data-ci='" + ci +
+      "<button class='cppin" + (pinned ? " on" : "") + "' aria-pressed='" + pinned + "' aria-label='" + esc("Pin " + c.name + " to the left") + "' data-act='cppin' data-ci='" + ci +
       "' title='" + (pinned ? "Unpin" : "Pin to the left") + "'>pin</button></div>";
   }
   const hidden = d.hidden.size;
@@ -285,6 +291,7 @@ export function togglePicker(show) {
   const el = $("colpick");
   const open = show === undefined ? el.hidden : show;
   el.hidden = !open;
+  $("toggleCols").setAttribute("aria-expanded", String(open));
   if (!open) return;
   renderPicker();
   const box = $("toggleCols").getBoundingClientRect();
@@ -294,6 +301,10 @@ export function togglePicker(show) {
 }
 export function initPicker() {
   $("toggleCols").addEventListener("click", () => togglePicker());
+  $("toggleCols").setAttribute("aria-haspopup", "dialog");
+  $("toggleCols").setAttribute("aria-expanded", "false");
+  /* Escape puts the picker away and hands focus back to the button that opened it */
+  $("colpick").addEventListener("keydown", (e) => { if (e.key === "Escape") { togglePicker(false); $("toggleCols").focus(); } });
   $("cpsearch").addEventListener("input", renderPicker);
   const act = (e) => {
     const el = e.target.closest("[data-act]");
@@ -390,10 +401,15 @@ export function inspectText(v, spec) {
   }
   return fmtValue(v, spec);
 }
+let inspectOpener = null;
 export function closeInspector() {
   const el = $("inspect");
+  const had = !el.hidden;
   el.hidden = true;
   state.inspectAt = null;
+  /* focus goes back to the cell that was inspected, if it is still there */
+  if (had && inspectOpener && inspectOpener.isConnected && el.contains(document.activeElement)) inspectOpener.focus();
+  inspectOpener = null;
 }
 export function openInspector(viewRow, ci, cell) {
   const view = state.view;
@@ -430,7 +446,13 @@ export function openInspector(viewRow, ci, cell) {
   el.style.left = Math.max(8, left) + "px";
   el.style.top = top + "px";
   state.inspectAt = { viewRow, ci };
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", "Value of " + col.name + ", row " + num((view.agg ? viewRow : srcRow) + 1));
+  cell.tabIndex = -1;
+  inspectOpener = cell;
+  $("iclose").setAttribute("aria-label", "Close");
   $("iclose").onclick = closeInspector;
+  $("iclose").focus({ preventScroll: true });
   $("icopy").onclick = () => {
     if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
     $("icopy").textContent = "copied";

@@ -39,14 +39,14 @@ export function groupModeCtl(q) {
   if (q.groupBy.length < 1) return "";
   return "<span class='gmode' title=\"pivot turns the last column's own values into new output columns, Excel-style. rollup and cube add subtotal rows instead: rollup nests by position (a, then a+b, then the grand total), cube adds every combination. Either way the dropped column shows as null, same as SQL's own ROLLUP/CUBE.\">" +
     GROUP_MODES.filter(([v]) => v !== "CUBE" || q.groupBy.length <= CUBE_MAX_COLS).map(([v, l]) =>
-      "<button class='" + (q.groupMode === v ? "on" : "") + "' data-act='groupmode' data-v='" + v + "'>" + l + "</button>"
+      "<button class='" + (q.groupMode === v ? "on" : "") + "' aria-pressed='" + (q.groupMode === v) + "' data-act='groupmode' data-v='" + v + "'>" + l + "</button>"
     ).join("") + "</span>";
 }
 /* Which metric rows have "more" open. UI state, not query state: what
    newQuery() holds is what round-trips through the SQL box, and whether a
    row is expanded has no business being in a query. */
 const metricsOpen = new Set();
-const aggBtn = (a, m) => "<button class='qb" + (m.agg === a ? " on" : "") + "' data-act='agg' data-id='" + m.id +
+const aggBtn = (a, m) => "<button class='qb" + (m.agg === a ? " on" : "") + "' aria-pressed='" + (m.agg === a) + "' data-act='agg' data-id='" + m.id +
   "' data-v='" + a + "' title='" + esc(AGG_TITLE[a] || "") + "'>" + AGG_SHORT[a] + "</button>";
 /**
  * The six common aggregates stay inline, one click each, and the rest live
@@ -61,7 +61,7 @@ export function metricRow(m, name) {
   const pinned = AGGS.indexOf(m.agg) < 0 ? m.agg : null;
   let btns = "";
   for (const a of AGGS) btns += aggBtn(a, m);
-  btns += "<button class='qb qmore-btn" + (pinned || open ? " on" : "") + "' data-act='agg-more' data-id='" + m.id +
+  btns += "<button class='qb qmore-btn" + (pinned || open ? " on" : "") + "' aria-expanded='" + !!open + "' data-act='agg-more' data-id='" + m.id +
     "' title='" + (open ? "fewer aggregates" : "standard deviation, percentiles, nulls and more") + "'>" +
     (pinned ? esc(AGG_SHORT[pinned]) + " " : "") + (open ? "⌄" : "⋯") + "</button>";
   let more = "";
@@ -103,7 +103,7 @@ export function renderZones() {
     q.filters.map((f, i) => {
       let btns = "";
       for (const p of PREDS) {
-        btns += "<button class='qb" + (f.pred === p.id ? " on" : "") + "' data-act='pred' data-id='" + f.id +
+        btns += "<button class='qb" + (f.pred === p.id ? " on" : "") + "' aria-pressed='" + (f.pred === p.id) + "' data-act='pred' data-id='" + f.id +
           "' data-v='" + p.id + "'>" + p.label + "</button>";
       }
       const link = i === 0 ? "" : "<button class='qlink' data-act='link' data-id='" + f.id + "'>" +
@@ -138,7 +138,7 @@ export function renderZones() {
     "' placeholder='none' size='7'></div>");
 
   $("qzones").innerHTML = parts.join("");
-  for (const b of $("qmode").children) b.classList.toggle("on", b.dataset.mode === q.mode);
+  for (const b of $("qmode").children) { b.classList.toggle("on", b.dataset.mode === q.mode); b.setAttribute("aria-pressed", String(b.dataset.mode === q.mode)); }
 }
 /** Anything the zones do overwrites the text; the builder wins its own edits. */
 export function renderQuery() {

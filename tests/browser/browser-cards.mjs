@@ -76,7 +76,7 @@ if (new RegExp("^" + barCount.toLocaleString("en-US") + " rows").test(after)) ok
 else bad("bar click: bar " + barCount + ", stat " + after);
 
 /* a narrow window keeps every control on screen: they shorten, then wrap, and none goes off the edge */
-for (const width of [1100, 800, 480]) {
+for (const width of [1100, 800, 480, 320]) {
   await page.setViewportSize({ width, height: 900 });
   await page.waitForTimeout(150);
   const clipped = await page.evaluate(() => {

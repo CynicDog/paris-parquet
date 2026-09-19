@@ -11,7 +11,9 @@
     "build:min": "node scripts/minify.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@biomejs/biome": "2.5.13",
+    "playwright": "^1.63.0",
     "terser": "^5.51.2"
   }
 }

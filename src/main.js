@@ -532,6 +532,26 @@ export function init() {
     if (ci >= 0 && isFinite(r)) openInspector(r, ci, td);
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeInspector(); });
+  /* a column header sorts on Enter or Space as it does on a click (Shift adds a key), so sorting needs no mouse */
+  $("gridwrap").addEventListener("keydown", (e) => {
+    const th = e.target.matches && e.target.matches("tr.r-name th.sortable") ? e.target : null;
+    if (!th) return;
+    if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && th.dataset.ci !== undefined) {
+      /* Alt with the arrows moves the focused column, the keyboard's way of dragging it */
+      const next = e.key === "ArrowRight" ? th.nextElementSibling : th.previousElementSibling;
+      if (!next || next.dataset.ci === undefined) return;
+      e.preventDefault();
+      const ci = +th.dataset.ci;
+      reorderColumns(ci, +next.dataset.ci, e.key === "ArrowRight", () => working("Reordering columns", runQuery).then(() => {
+        const moved = document.querySelector("tr.r-name th[data-ci='" + ci + "']");
+        if (moved) moved.focus();
+      }));
+      return;
+    }
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    th.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: e.shiftKey }));
+  });
   document.addEventListener("pointerdown", (e) => {
     if (state.inspectAt && !e.target.closest("#inspect") && !e.target.closest("#tbody td")) closeInspector();
   }, true);

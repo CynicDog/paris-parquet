@@ -8,9 +8,9 @@
 <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAERElEQVR4AcSWTWwbRRTH/2/8sXHsBn8FEE1CCV3EgSO9cG8SWm4ckeCAVMEBCTigShXJ5lIJISGEOMABCVBP3FuSCFZI3JEQFf0CmoRCGpJ1ErtxHNvZ4b2x17Flp86Ho652dsdvZ97/N+/N27XCIz6OHWBj5pO0N+tcyM0633gzzvfe7PTXuTnnXLDuYwPQ1z6zvDlnukKFRRb7UgOvgzAB6De0xlUGeZPtOBYAfdN5qpBY+xkakwQdF6H2pt8VW88B7l15bWjl+sJPsYHqmWiCRKNj08BpjgT1FMC75gwpCruVzaK9+vtfsPrLiMY7Q7C1SByengGIuA6RG00N2xSKwq9U4d1cQN/ADkKRTkFQv4i1JwD6jjMU7ieXF8TiYUTTT4MEolzBxt1/EUu1y/haf9cTAMn56vVFN5727Ug/B5a9UqgOEYlhe2MTO2WfrU0n0UJp4MQVsbSjiXWfTcKuKOSW85sm57zxEIntQliZU7AGT2Nrvcmhhg9fvTX80vtbYj00gIhDcp4csklFsLNdNjnvT2mosLiuNVKhWqd+JaKLmYkPZ+o/cSgAyXkoRi6/VGwKRznnIzAQpW3kF5YQS3Z2q0ldSo9PfRyIy73zSHmyR5Oc52784yay2g731QY1IMIWttYK0D5Xee1R46q1upQdm7zcMNQ7BwKQsBPILa3lbe/GXcQ53KxpXAmElXkGVmYUxVwrgBGfaBeXifsGEHFT58lhW5Jc3SrBuzWPeIaRgjST9Js2ACs8TJwf728PmJxHydS5iliIpkYA3lzVYgmFe/f3zrmEfY+Vi7i0rhEwOb+15CaegM3vFpkDZSD4ZcO7f8vL815sDbkM6rZyGSPtoQASdtLaLXnrdu72PBJZIHitGojBUa6AUwfKuYg2tz0BRLxW55xzUqg8KGLtzgISgwT+aXwQdyggMhZgvyuvD++8B/Sv/FWLkKlzFY3Vcs5i5UIRm/dX0PcYBfNb7lLn2S45b5nAP9oiIDnfWFp2TzwJO1hcA0KFUfxvvREBnt84zco71HljwB6dFoD8D5cz5Ps/bi7n7LU/Fk24WdNMFQgrO4pIcgRFTxtbcDHiB1x5MLcBoLWmyk7522jy5HMAoZx/gPU//8aJxxWoHnFSIRC/etF0HEVc3Ci5SMvNTb/K93PKSiCaHOIu8ae0gOLKKvoG6gRsbT6PKi6+GgC8zA/EIE31MURqGOCNV1zmnIfRdvRCXJwaAFNyGi+KIWjKisPKPovQwMme5jzwH9wNABReAHRbnIn/2aiwFYw1916t3DjjiwHwyY9wv+t5mDrv5tQAhH31G0CttYXdg0DbROrtTt/z3VGH6xmA1MvOPOt/1e7CQM2hSmfSY5NftD8/usUAiJv02akLpOgVIvrIBz4lhXf8qn4+M+6Mp89PcoRwLEcDgIU1Q1xNj01dHBx33kufdT4fPO/cPqpqt/n/AwAA//9OUTU1AAAABklEQVQDAHfGhFDhLBUCAAAAAElFTkSuQmCC">
 <style>
 :root{
-  --bg:#fbfbfa; --panel:#fff; --ink:#1c1c1a; --dim:#6b6b66; --faint:#9a9a94;
-  --line:#e2e2dd; --line2:#efefea; --accent:#2f6fdd; --accent-soft:#e8f0fd;
-  --num:#1a6b4a; --str:#8a4b1f; --bool:#0d6e8a; --time:#1d5f8a; --bin:#6b6b66;
+  --bg:#fbfbfa; --panel:#fff; --ink:#1c1c1a; --dim:#55554f; --faint:#66665f;   /* every text colour is 4.5:1 or better on every background it sits on */
+  --line:#e2e2dd; --line2:#efefea; --accent:#2a66d0; --accent-soft:#e8f0fd; --on-accent:#fff;
+  --num:#1a6b4a; --str:#8a4b1f; --bool:#0d6e8a; --time:#1d5f8a; --bin:#55554f;
   --ok:#1a7a4a; --ok-soft:#e9f6ef; --err-soft:#fceded;
   /* the one line that makes scrollbars, form controls and the canvas behind
      the page follow the theme; without it they stay light on a dark page */
@@ -20,17 +20,17 @@
 /* dark follows the browser unless the theme button has picked a side */
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#9b9d9f; --faint:#6e7073;
-    --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a;
-    --num:#6fd0a3; --str:#e0a06a; --bool:#45bcd8; --time:#7cc4ef; --bin:#9b9d9f;
+    --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#b3b6b8; --faint:#9a9d9f;
+    --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a; --on-accent:#0f1114;
+    --num:#6fd0a3; --str:#e0a06a; --bool:#45bcd8; --time:#7cc4ef; --bin:#b3b6b8;
     --warn:#e09a5e; --err:#f08a8a; --ok:#6fd0a3; --ok-soft:#1b2c26; --err-soft:#2e2022;
     color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
-    --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#9b9d9f; --faint:#6e7073;
-    --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a;
-    --num:#6fd0a3; --str:#e0a06a; --bool:#45bcd8; --time:#7cc4ef; --bin:#9b9d9f;
+    --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#b3b6b8; --faint:#9a9d9f;
+    --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a; --on-accent:#0f1114;
+    --num:#6fd0a3; --str:#e0a06a; --bool:#45bcd8; --time:#7cc4ef; --bin:#b3b6b8;
     --warn:#e09a5e; --err:#f08a8a; --ok:#6fd0a3; --ok-soft:#1b2c26; --err-soft:#2e2022;
     color-scheme:dark;
 }
@@ -41,6 +41,12 @@ body{margin:0;background:var(--bg);color:var(--ink);
   font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   display:flex;flex-direction:row;overflow:hidden}
 #main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+/* on a phone-width window the folder panel floats over the page instead of taking half of it */
+@media (max-width:700px){
+  #tree{position:absolute;z-index:20;top:0;bottom:0;left:0;width:min(86vw,320px);box-shadow:0 0 18px rgba(0,0,0,.35)}
+  #treerail{position:absolute;z-index:19;top:0;bottom:0;left:0}
+  #main{margin-left:22px}
+}
 
 /* ---------- file panel ---------- */
 #treerail{flex:none;width:22px;display:flex;flex-direction:column;align-items:center;gap:7px;
@@ -128,7 +134,8 @@ body.dragging #drop{background:var(--accent-soft);outline:2px dashed var(--accen
 
 /* ---------- the progress popup ---------- */
 .sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-button:focus-visible,label.btn:focus-visible,[role=radio]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button:focus-visible,label.btn:focus-visible,[role=radio]:focus-visible,th.sortable:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#grid td:focus-visible{outline-offset:-2px}
 #progress{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;
   padding:16px 18px 14px;width:min(480px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.28)}
 #progress::backdrop{background:rgba(0,0,0,.4)}
@@ -141,7 +148,7 @@ button:focus-visible,label.btn:focus-visible,[role=radio]:focus-visible{outline:
 @keyframes pindet{0%{margin-left:-40%}100%{margin-left:100%}}
 @media (prefers-reduced-motion:reduce){
   #pbar.indet #pfill{animation:none;width:100%;opacity:.45}
-  #pfill{transition:none}
+  *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important;scroll-behavior:auto !important}
 }
 #ppct{text-align:right;font:11px var(--mono);color:var(--dim);margin:3px 0 6px;min-height:14px}
 #psteps{list-style:none;margin:0 0 6px;padding:0;font:12px/1.5 var(--mono)}
@@ -268,7 +275,7 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .cpname.off{color:var(--faint);text-decoration:line-through}
 .cppin{font-size:9.5px;padding:0 5px;border:1px solid var(--line);border-radius:3px;background:var(--panel);
   color:var(--faint);min-width:0;line-height:15px}
-.cppin.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.cppin.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 
 /* ---------- query builder ---------- */
 #qsqlgrip{flex:none;width:7px;cursor:col-resize;position:relative;z-index:6}
@@ -287,7 +294,7 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 #qstat b{color:var(--accent)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:5px;overflow:hidden}
 .seg button{border:0;border-radius:0;padding:2px 9px;font-size:11px;background:var(--panel);color:var(--dim)}
-.seg button.on{background:var(--accent);color:#fff}
+.seg button.on{background:var(--accent);color:var(--on-accent)}
 .qbody{flex:1;display:flex;min-height:0}
 .qcols{flex:0 0 196px;overflow:auto;border-right:1px solid var(--line2);background:var(--bg)}
 .qhead{position:sticky;top:0;background:var(--bg);padding:5px 10px;font:10px var(--mono);font-weight:700;
@@ -308,7 +315,7 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .gmode button{border:0;border-radius:0;padding:5px 14px;font:13px var(--mono);font-weight:600;
   letter-spacing:normal;text-transform:none;background:var(--panel);color:var(--dim)}
 .gmode button+button{border-left:1px solid var(--line)}
-.gmode button.on{background:var(--accent);color:#fff}
+.gmode button.on{background:var(--accent);color:var(--on-accent)}
 .qdrop{min-height:30px;border:1px dashed var(--line);border-radius:5px;padding:4px 7px;display:flex;
   flex-wrap:wrap;gap:4px;align-items:center;background:var(--panel)}
 .qdrop.empty{background:var(--bg)}
@@ -322,7 +329,7 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .qbtns{display:inline-flex;gap:2px}
 .qb{font:10px var(--mono);padding:1px 5px;border:1px solid var(--line);border-radius:3px;background:var(--panel);
   color:var(--dim);font-weight:600;min-width:0}
-.qb.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.qb.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 /* the METRICS row's "more": a wrapping flex child, so it sits to the right of
    the row when there is room and drops onto its own line when there is not */
 .qmore{display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;margin-left:2px;
@@ -544,7 +551,7 @@ details[open]>summary::before{content:"▾ "}
 <section id="query" hidden>
   <div class="qbar">
     <span class="qtitle">QUERY</span>
-    <span class="seg" id="qmode"><button data-mode="rows" class="on">Rows</button><button data-mode="agg">Aggregate</button></span>
+    <span class="seg" id="qmode"><button data-mode="rows" class="on" aria-pressed="true">Rows</button><button data-mode="agg" aria-pressed="false">Aggregate</button></span>
     <button id="qrun" title="Run the query (Enter)">Run</button>
     <button id="qclear" disabled>Reset</button>
     <span id="qstat"></span>
@@ -3770,7 +3777,7 @@ function renderPager() {
     "<button id='pfirst' title='First page'" + dis(state.page === 0) + ">&laquo;</button>" +
     "<button id='pprev' title='Previous page'" + dis(state.page === 0) + ">&lsaquo;</button>" +
     "<span class='pinfo'>page <input id='pnum' value='" + (state.page + 1) +
-    "' size='4' inputmode='numeric'> of " + num(pages) + "</span>" +
+    "' size='4' inputmode='numeric' aria-label='Page number'> of " + num(pages) + "</span>" +
     "<button id='pnext' title='Next page'" + dis(state.page >= pages - 1) + ">&rsaquo;</button>" +
     "<button id='plast' title='Last page'" + dis(state.page >= pages - 1) + ">&raquo;</button>" +
     "<span class='psep'></span>" +
@@ -3785,7 +3792,7 @@ function renderPager() {
         ? "first " + num(state.table.rowsLoaded) + " matches shown"
         : num(state.table.rowsLoaded) + " of " + num(state.meta.numRows) + " rows read") + "</span>" : "") +
     "<span class='grow'></span>" +
-    "<span class='pinfo'>export <select id='expscope'>" +
+    "<span class='pinfo'>export <select id='expscope' aria-label='What to export'>" +
     "<option value='page'>this page</option><option value='view'>all " + num(v.count) + " rows</option>" +
     "</select>" +
     "<button id='expcsv'>CSV</button><button id='exptsv'>TSV</button>" +
@@ -4067,7 +4074,9 @@ function renderGrid() {
     const title = (c.leaf ? c.leaf.path.join(".") : c.name) + "  -  " + c.spec.label +
       (c.leaf ? " (" + c.spec.physical + ", " + c.leaf.rep.toLowerCase() + ")" : "");
     const hint = " — click to sort, shift-click to add a key" + (ci >= 0 ? ", drag to reorder" : "");
-    html += "<th class='sortable'" + (ci >= 0 ? " draggable='true' data-ci='" + ci + "'" : "") +
+    const at = sortMark(i);
+    html += "<th class='sortable' tabindex='0' role='columnheader' aria-sort='" + (at.indexOf("▲") >= 0 ? "ascending" : at.indexOf("▼") >= 0 ? "descending" : "none") + "'" +
+      (ci >= 0 ? " draggable='true' data-ci='" + ci + "'" : "") +
       " title='" + esc(title + hint) + "'>" +
       sortMark(i) + "<span class='cname'>" + esc(c.name) +
       "</span><span class='ctype t-" + c.spec.kind + "'>" + esc(c.spec.label) +
@@ -4079,6 +4088,10 @@ function renderGrid() {
   for (const c of cols) html += "<th>" + summaryCard(c, !view.agg && own.indexOf(c) >= 0) + "</th>";
   html += "</tr></thead><tbody id='tbody'></tbody>";
   grid.innerHTML = html;
+  /* a virtualized table only draws some rows, so its size is said outright for a screen reader */
+  grid.setAttribute("aria-rowcount", String(view.count + 2));
+  grid.setAttribute("aria-colcount", String(cols.length + 1));
+  grid.setAttribute("aria-label", "Data, " + num(view.count) + (view.agg ? " groups" : " rows") + " by " + num(cols.length) + " columns");
   ensureCards();          /* a view that covers more than is loaded has its cards counted in the background */
 
   /* Per-column alignment and colour go in one stylesheet keyed by position,
@@ -4151,7 +4164,7 @@ function renderRows(force) {
   for (let r = first; r < last; r++) {
     const abs = pageStart + r;
     const src = index ? index[abs] : abs;
-    parts.push("<tr data-r='", String(abs), "'><td class='rownum'>", String((view.agg ? abs : src) + 1), "</td>");
+    parts.push("<tr data-r='", String(abs), "' aria-rowindex='", String(abs + 3), "'><td class='rownum'>", String((view.agg ? abs : src) + 1), "</td>");
     for (let ci = 0; ci < ncols; ci++) {
       const v = data[ci][src];
       if (v === null || v === undefined) { parts.push("<td class='null'>null</td>"); continue; }
@@ -4188,10 +4201,10 @@ function renderPicker() {
     const shown = !d.hidden.has(ci), pinned = d.pinned.has(ci);
     rows += "<div class='cprow" + (pinned ? " pinned" : "") + "' draggable='true' data-ci='" + ci + "'>" +
       "<span class='qgrab'>∷</span>" +
-      "<input type='checkbox' data-act='cpshow' data-ci='" + ci + "'" + (shown ? " checked" : "") + ">" +
+      "<input type='checkbox' data-act='cpshow' data-ci='" + ci + "' aria-label='" + esc("Show column " + c.name) + "'" + (shown ? " checked" : "") + ">" +
       "<span class='cpname" + (shown ? "" : " off") + "' title='" + esc(c.name) + "'>" + esc(c.name) + "</span>" +
       "<span class='qtag t-" + c.spec.kind + "'>" + typeTag(c.spec) + "</span>" +
-      "<button class='cppin" + (pinned ? " on" : "") + "' data-act='cppin' data-ci='" + ci +
+      "<button class='cppin" + (pinned ? " on" : "") + "' aria-pressed='" + pinned + "' aria-label='" + esc("Pin " + c.name + " to the left") + "' data-act='cppin' data-ci='" + ci +
       "' title='" + (pinned ? "Unpin" : "Pin to the left") + "'>pin</button></div>";
   }
   const hidden = d.hidden.size;
@@ -4206,6 +4219,7 @@ function togglePicker(show) {
   const el = $("colpick");
   const open = show === undefined ? el.hidden : show;
   el.hidden = !open;
+  $("toggleCols").setAttribute("aria-expanded", String(open));
   if (!open) return;
   renderPicker();
   const box = $("toggleCols").getBoundingClientRect();
@@ -4215,6 +4229,10 @@ function togglePicker(show) {
 }
 function initPicker() {
   $("toggleCols").addEventListener("click", () => togglePicker());
+  $("toggleCols").setAttribute("aria-haspopup", "dialog");
+  $("toggleCols").setAttribute("aria-expanded", "false");
+  /* Escape puts the picker away and hands focus back to the button that opened it */
+  $("colpick").addEventListener("keydown", (e) => { if (e.key === "Escape") { togglePicker(false); $("toggleCols").focus(); } });
   $("cpsearch").addEventListener("input", renderPicker);
   const act = (e) => {
     const el = e.target.closest("[data-act]");
@@ -4311,10 +4329,15 @@ function inspectText(v, spec) {
   }
   return fmtValue(v, spec);
 }
+let inspectOpener = null;
 function closeInspector() {
   const el = $("inspect");
+  const had = !el.hidden;
   el.hidden = true;
   state.inspectAt = null;
+  /* focus goes back to the cell that was inspected, if it is still there */
+  if (had && inspectOpener && inspectOpener.isConnected && el.contains(document.activeElement)) inspectOpener.focus();
+  inspectOpener = null;
 }
 function openInspector(viewRow, ci, cell) {
   const view = state.view;
@@ -4351,7 +4374,13 @@ function openInspector(viewRow, ci, cell) {
   el.style.left = Math.max(8, left) + "px";
   el.style.top = top + "px";
   state.inspectAt = { viewRow, ci };
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", "Value of " + col.name + ", row " + num((view.agg ? viewRow : srcRow) + 1));
+  cell.tabIndex = -1;
+  inspectOpener = cell;
+  $("iclose").setAttribute("aria-label", "Close");
   $("iclose").onclick = closeInspector;
+  $("iclose").focus({ preventScroll: true });
   $("icopy").onclick = () => {
     if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
     $("icopy").textContent = "copied";
@@ -6289,14 +6318,14 @@ function groupModeCtl(q) {
   if (q.groupBy.length < 1) return "";
   return "<span class='gmode' title=\"pivot turns the last column's own values into new output columns, Excel-style. rollup and cube add subtotal rows instead: rollup nests by position (a, then a+b, then the grand total), cube adds every combination. Either way the dropped column shows as null, same as SQL's own ROLLUP/CUBE.\">" +
     GROUP_MODES.filter(([v]) => v !== "CUBE" || q.groupBy.length <= CUBE_MAX_COLS).map(([v, l]) =>
-      "<button class='" + (q.groupMode === v ? "on" : "") + "' data-act='groupmode' data-v='" + v + "'>" + l + "</button>"
+      "<button class='" + (q.groupMode === v ? "on" : "") + "' aria-pressed='" + (q.groupMode === v) + "' data-act='groupmode' data-v='" + v + "'>" + l + "</button>"
     ).join("") + "</span>";
 }
 /* Which metric rows have "more" open. UI state, not query state: what
    newQuery() holds is what round-trips through the SQL box, and whether a
    row is expanded has no business being in a query. */
 const metricsOpen = new Set();
-const aggBtn = (a, m) => "<button class='qb" + (m.agg === a ? " on" : "") + "' data-act='agg' data-id='" + m.id +
+const aggBtn = (a, m) => "<button class='qb" + (m.agg === a ? " on" : "") + "' aria-pressed='" + (m.agg === a) + "' data-act='agg' data-id='" + m.id +
   "' data-v='" + a + "' title='" + esc(AGG_TITLE[a] || "") + "'>" + AGG_SHORT[a] + "</button>";
 /**
  * The six common aggregates stay inline, one click each, and the rest live
@@ -6311,7 +6340,7 @@ function metricRow(m, name) {
   const pinned = AGGS.indexOf(m.agg) < 0 ? m.agg : null;
   let btns = "";
   for (const a of AGGS) btns += aggBtn(a, m);
-  btns += "<button class='qb qmore-btn" + (pinned || open ? " on" : "") + "' data-act='agg-more' data-id='" + m.id +
+  btns += "<button class='qb qmore-btn" + (pinned || open ? " on" : "") + "' aria-expanded='" + !!open + "' data-act='agg-more' data-id='" + m.id +
     "' title='" + (open ? "fewer aggregates" : "standard deviation, percentiles, nulls and more") + "'>" +
     (pinned ? esc(AGG_SHORT[pinned]) + " " : "") + (open ? "⌄" : "⋯") + "</button>";
   let more = "";
@@ -6353,7 +6382,7 @@ function renderZones() {
     q.filters.map((f, i) => {
       let btns = "";
       for (const p of PREDS) {
-        btns += "<button class='qb" + (f.pred === p.id ? " on" : "") + "' data-act='pred' data-id='" + f.id +
+        btns += "<button class='qb" + (f.pred === p.id ? " on" : "") + "' aria-pressed='" + (f.pred === p.id) + "' data-act='pred' data-id='" + f.id +
           "' data-v='" + p.id + "'>" + p.label + "</button>";
       }
       const link = i === 0 ? "" : "<button class='qlink' data-act='link' data-id='" + f.id + "'>" +
@@ -6388,7 +6417,7 @@ function renderZones() {
     "' placeholder='none' size='7'></div>");
 
   $("qzones").innerHTML = parts.join("");
-  for (const b of $("qmode").children) b.classList.toggle("on", b.dataset.mode === q.mode);
+  for (const b of $("qmode").children) { b.classList.toggle("on", b.dataset.mode === q.mode); b.setAttribute("aria-pressed", String(b.dataset.mode === q.mode)); }
 }
 /** Anything the zones do overwrites the text; the builder wins its own edits. */
 function renderQuery() {
@@ -7963,7 +7992,7 @@ function diffKeyBar(A, B) {
     const on = diff.keys.indexOf(a.key) >= 0;
     /* by index: a partition column's key holds a NUL, which an HTML attribute
        would hand back as U+FFFD */
-    chips.push("<button class='chip" + (on ? " on" : "") + "' data-dact='key' data-ci='" +
+    chips.push("<button class='chip" + (on ? " on" : "") + "' aria-pressed='" + !!on + "' data-dact='key' data-ci='" +
       A.table.cols.indexOf(a) + "' title='" + esc(a.spec.label) + "'>" + esc(a.name) + "</button>");
   }
   if (!chips.length) return "<div class='dnote'>The two files share no column that could be a key.</div>";
@@ -8339,6 +8368,7 @@ function showJoin(on) {
   $("drop").hidden = on || !!state.table;
   $("toggleJoin").textContent = on ? "⋈ Close join" : "⋈ Join two files";
   $("toggleJoin").classList.toggle("on", on);
+  $("toggleJoin").setAttribute("aria-pressed", String(on));
   if (joinHooks.onShow) joinHooks.onShow(on);
   if (on) renderJoin();
 }
@@ -9826,6 +9856,26 @@ function init() {
     if (ci >= 0 && isFinite(r)) openInspector(r, ci, td);
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeInspector(); });
+  /* a column header sorts on Enter or Space as it does on a click (Shift adds a key), so sorting needs no mouse */
+  $("gridwrap").addEventListener("keydown", (e) => {
+    const th = e.target.matches && e.target.matches("tr.r-name th.sortable") ? e.target : null;
+    if (!th) return;
+    if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && th.dataset.ci !== undefined) {
+      /* Alt with the arrows moves the focused column, the keyboard's way of dragging it */
+      const next = e.key === "ArrowRight" ? th.nextElementSibling : th.previousElementSibling;
+      if (!next || next.dataset.ci === undefined) return;
+      e.preventDefault();
+      const ci = +th.dataset.ci;
+      reorderColumns(ci, +next.dataset.ci, e.key === "ArrowRight", () => working("Reordering columns", runQuery).then(() => {
+        const moved = document.querySelector("tr.r-name th[data-ci='" + ci + "']");
+        if (moved) moved.focus();
+      }));
+      return;
+    }
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    th.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: e.shiftKey }));
+  });
   document.addEventListener("pointerdown", (e) => {
     if (state.inspectAt && !e.target.closest("#inspect") && !e.target.closest("#tbody td")) closeInspector();
   }, true);

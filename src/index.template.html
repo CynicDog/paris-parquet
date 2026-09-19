@@ -7,9 +7,9 @@
 <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAERElEQVR4AcSWTWwbRRTH/2/8sXHsBn8FEE1CCV3EgSO9cG8SWm4ckeCAVMEBCTigShXJ5lIJISGEOMABCVBP3FuSCFZI3JEQFf0CmoRCGpJ1ErtxHNvZ4b2x17Flp86Ho652dsdvZ97/N+/N27XCIz6OHWBj5pO0N+tcyM0633gzzvfe7PTXuTnnXLDuYwPQ1z6zvDlnukKFRRb7UgOvgzAB6De0xlUGeZPtOBYAfdN5qpBY+xkakwQdF6H2pt8VW88B7l15bWjl+sJPsYHqmWiCRKNj08BpjgT1FMC75gwpCruVzaK9+vtfsPrLiMY7Q7C1SByengGIuA6RG00N2xSKwq9U4d1cQN/ADkKRTkFQv4i1JwD6jjMU7ieXF8TiYUTTT4MEolzBxt1/EUu1y/haf9cTAMn56vVFN5727Ug/B5a9UqgOEYlhe2MTO2WfrU0n0UJp4MQVsbSjiXWfTcKuKOSW85sm57zxEIntQliZU7AGT2Nrvcmhhg9fvTX80vtbYj00gIhDcp4csklFsLNdNjnvT2mosLiuNVKhWqd+JaKLmYkPZ+o/cSgAyXkoRi6/VGwKRznnIzAQpW3kF5YQS3Z2q0ldSo9PfRyIy73zSHmyR5Oc52784yay2g731QY1IMIWttYK0D5Xee1R46q1upQdm7zcMNQ7BwKQsBPILa3lbe/GXcQ53KxpXAmElXkGVmYUxVwrgBGfaBeXifsGEHFT58lhW5Jc3SrBuzWPeIaRgjST9Js2ACs8TJwf728PmJxHydS5iliIpkYA3lzVYgmFe/f3zrmEfY+Vi7i0rhEwOb+15CaegM3vFpkDZSD4ZcO7f8vL815sDbkM6rZyGSPtoQASdtLaLXnrdu72PBJZIHitGojBUa6AUwfKuYg2tz0BRLxW55xzUqg8KGLtzgISgwT+aXwQdyggMhZgvyuvD++8B/Sv/FWLkKlzFY3Vcs5i5UIRm/dX0PcYBfNb7lLn2S45b5nAP9oiIDnfWFp2TzwJO1hcA0KFUfxvvREBnt84zco71HljwB6dFoD8D5cz5Ps/bi7n7LU/Fk24WdNMFQgrO4pIcgRFTxtbcDHiB1x5MLcBoLWmyk7522jy5HMAoZx/gPU//8aJxxWoHnFSIRC/etF0HEVc3Ci5SMvNTb/K93PKSiCaHOIu8ae0gOLKKvoG6gRsbT6PKi6+GgC8zA/EIE31MURqGOCNV1zmnIfRdvRCXJwaAFNyGi+KIWjKisPKPovQwMme5jzwH9wNABReAHRbnIn/2aiwFYw1916t3DjjiwHwyY9wv+t5mDrv5tQAhH31G0CttYXdg0DbROrtTt/z3VGH6xmA1MvOPOt/1e7CQM2hSmfSY5NftD8/usUAiJv02akLpOgVIvrIBz4lhXf8qn4+M+6Mp89PcoRwLEcDgIU1Q1xNj01dHBx33kufdT4fPO/cPqpqt/n/AwAA//9OUTU1AAAABklEQVQDAHfGhFDhLBUCAAAAAElFTkSuQmCC">
 <style>
 :root{
-  --bg:#fbfbfa; --panel:#fff; --ink:#1c1c1a; --dim:#6b6b66; --faint:#9a9a94;
-  --line:#e2e2dd; --line2:#efefea; --accent:#2f6fdd; --accent-soft:#e8f0fd;
-  --num:#1a6b4a; --str:#8a4b1f; --bool:#0d6e8a; --time:#1d5f8a; --bin:#6b6b66;
+  --bg:#fbfbfa; --panel:#fff; --ink:#1c1c1a; --dim:#55554f; --faint:#66665f;   /* every text colour is 4.5:1 or better on every background it sits on */
+  --line:#e2e2dd; --line2:#efefea; --accent:#2a66d0; --accent-soft:#e8f0fd; --on-accent:#fff;
+  --num:#1a6b4a; --str:#8a4b1f; --bool:#0d6e8a; --time:#1d5f8a; --bin:#55554f;
   --ok:#1a7a4a; --ok-soft:#e9f6ef; --err-soft:#fceded;
   /* the one line that makes scrollbars, form controls and the canvas behind
      the page follow the theme; without it they stay light on a dark page */
@@ -19,17 +19,17 @@
 /* dark follows the browser unless the theme button has picked a side */
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#9b9d9f; --faint:#6e7073;
-    --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a;
-    --num:#6fd0a3; --str:#e0a06a; --bool:#45bcd8; --time:#7cc4ef; --bin:#9b9d9f;
+    --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#b3b6b8; --faint:#9a9d9f;
+    --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a; --on-accent:#0f1114;
+    --num:#6fd0a3; --str:#e0a06a; --bool:#45bcd8; --time:#7cc4ef; --bin:#b3b6b8;
     --warn:#e09a5e; --err:#f08a8a; --ok:#6fd0a3; --ok-soft:#1b2c26; --err-soft:#2e2022;
     color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
-    --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#9b9d9f; --faint:#6e7073;
-    --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a;
-    --num:#6fd0a3; --str:#e0a06a; --bool:#45bcd8; --time:#7cc4ef; --bin:#9b9d9f;
+    --bg:#16171a; --panel:#1c1e22; --ink:#e6e6e3; --dim:#b3b6b8; --faint:#9a9d9f;
+    --line:#2c2f34; --line2:#242024; --accent:#6ea3ff; --accent-soft:#22293a; --on-accent:#0f1114;
+    --num:#6fd0a3; --str:#e0a06a; --bool:#45bcd8; --time:#7cc4ef; --bin:#b3b6b8;
     --warn:#e09a5e; --err:#f08a8a; --ok:#6fd0a3; --ok-soft:#1b2c26; --err-soft:#2e2022;
     color-scheme:dark;
 }
@@ -40,6 +40,12 @@ body{margin:0;background:var(--bg);color:var(--ink);
   font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   display:flex;flex-direction:row;overflow:hidden}
 #main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+/* on a phone-width window the folder panel floats over the page instead of taking half of it */
+@media (max-width:700px){
+  #tree{position:absolute;z-index:20;top:0;bottom:0;left:0;width:min(86vw,320px);box-shadow:0 0 18px rgba(0,0,0,.35)}
+  #treerail{position:absolute;z-index:19;top:0;bottom:0;left:0}
+  #main{margin-left:22px}
+}
 
 /* ---------- file panel ---------- */
 #treerail{flex:none;width:22px;display:flex;flex-direction:column;align-items:center;gap:7px;
@@ -127,7 +133,8 @@ body.dragging #drop{background:var(--accent-soft);outline:2px dashed var(--accen
 
 /* ---------- the progress popup ---------- */
 .sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-button:focus-visible,label.btn:focus-visible,[role=radio]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button:focus-visible,label.btn:focus-visible,[role=radio]:focus-visible,th.sortable:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#grid td:focus-visible{outline-offset:-2px}
 #progress{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;
   padding:16px 18px 14px;width:min(480px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.28)}
 #progress::backdrop{background:rgba(0,0,0,.4)}
@@ -140,7 +147,7 @@ button:focus-visible,label.btn:focus-visible,[role=radio]:focus-visible{outline:
 @keyframes pindet{0%{margin-left:-40%}100%{margin-left:100%}}
 @media (prefers-reduced-motion:reduce){
   #pbar.indet #pfill{animation:none;width:100%;opacity:.45}
-  #pfill{transition:none}
+  *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important;scroll-behavior:auto !important}
 }
 #ppct{text-align:right;font:11px var(--mono);color:var(--dim);margin:3px 0 6px;min-height:14px}
 #psteps{list-style:none;margin:0 0 6px;padding:0;font:12px/1.5 var(--mono)}
@@ -267,7 +274,7 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .cpname.off{color:var(--faint);text-decoration:line-through}
 .cppin{font-size:9.5px;padding:0 5px;border:1px solid var(--line);border-radius:3px;background:var(--panel);
   color:var(--faint);min-width:0;line-height:15px}
-.cppin.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.cppin.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 
 /* ---------- query builder ---------- */
 #qsqlgrip{flex:none;width:7px;cursor:col-resize;position:relative;z-index:6}
@@ -286,7 +293,7 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 #qstat b{color:var(--accent)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:5px;overflow:hidden}
 .seg button{border:0;border-radius:0;padding:2px 9px;font-size:11px;background:var(--panel);color:var(--dim)}
-.seg button.on{background:var(--accent);color:#fff}
+.seg button.on{background:var(--accent);color:var(--on-accent)}
 .qbody{flex:1;display:flex;min-height:0}
 .qcols{flex:0 0 196px;overflow:auto;border-right:1px solid var(--line2);background:var(--bg)}
 .qhead{position:sticky;top:0;background:var(--bg);padding:5px 10px;font:10px var(--mono);font-weight:700;
@@ -307,7 +314,7 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .gmode button{border:0;border-radius:0;padding:5px 14px;font:13px var(--mono);font-weight:600;
   letter-spacing:normal;text-transform:none;background:var(--panel);color:var(--dim)}
 .gmode button+button{border-left:1px solid var(--line)}
-.gmode button.on{background:var(--accent);color:#fff}
+.gmode button.on{background:var(--accent);color:var(--on-accent)}
 .qdrop{min-height:30px;border:1px dashed var(--line);border-radius:5px;padding:4px 7px;display:flex;
   flex-wrap:wrap;gap:4px;align-items:center;background:var(--panel)}
 .qdrop.empty{background:var(--bg)}
@@ -321,7 +328,7 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .qbtns{display:inline-flex;gap:2px}
 .qb{font:10px var(--mono);padding:1px 5px;border:1px solid var(--line);border-radius:3px;background:var(--panel);
   color:var(--dim);font-weight:600;min-width:0}
-.qb.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.qb.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 /* the METRICS row's "more": a wrapping flex child, so it sits to the right of
    the row when there is room and drops onto its own line when there is not */
 .qmore{display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;margin-left:2px;
@@ -543,7 +550,7 @@ details[open]>summary::before{content:"▾ "}
 <section id="query" hidden>
   <div class="qbar">
     <span class="qtitle">QUERY</span>
-    <span class="seg" id="qmode"><button data-mode="rows" class="on">Rows</button><button data-mode="agg">Aggregate</button></span>
+    <span class="seg" id="qmode"><button data-mode="rows" class="on" aria-pressed="true">Rows</button><button data-mode="agg" aria-pressed="false">Aggregate</button></span>
     <button id="qrun" title="Run the query (Enter)">Run</button>
     <button id="qclear" disabled>Reset</button>
     <span id="qstat"></span>

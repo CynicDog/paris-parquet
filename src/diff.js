@@ -412,7 +412,7 @@ export function diffKeyBar(A, B) {
     const on = diff.keys.indexOf(a.key) >= 0;
     /* by index: a partition column's key holds a NUL, which an HTML attribute
        would hand back as U+FFFD */
-    chips.push("<button class='chip" + (on ? " on" : "") + "' data-dact='key' data-ci='" +
+    chips.push("<button class='chip" + (on ? " on" : "") + "' aria-pressed='" + !!on + "' data-dact='key' data-ci='" +
       A.table.cols.indexOf(a) + "' title='" + esc(a.spec.label) + "'>" + esc(a.name) + "</button>");
   }
   if (!chips.length) return "<div class='dnote'>The two files share no column that could be a key.</div>";
