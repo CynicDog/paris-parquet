@@ -8,7 +8,7 @@ import { Cursor } from "./bytes.js";
 import { $, loadMore, unfilled } from "./columns.js";
 import { newTable } from "./dataset.js";
 import { intersectRanges, mergeRanges, rangeCount, readColumnIndex, readOffsetIndex, unionRanges } from "./encoding.js";
-import { busy, FIRST_ROWS, showError, showMemNote, updateButtons } from "./main.js";
+import { busy, FIRST_ROWS, grow, showError, showMemNote, updateButtons } from "./main.js";
 import { progressStep } from "./progress.js";
 import { aggKept, aggSignature, compileFilter, endValueSlice, feedAggBatch, feedTopK, finishAggStream, hasSetMetrics, isQuantile, newAggStream, newTopK, parseOperand, radixAdvanceStream, radixColumns, radixFeedBatch, radixOpenStream, radixPendingBytes, radixPlanStream, runQuery, sortKey, streamable, textOf, topKBytes, topKPlan } from "./query.js";
 import { thriftStruct } from "./thrift.js";
@@ -438,7 +438,16 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 
 /** Frees the decoded rows a table holds, so its replacement can be read without both in memory at once. */
 function releaseRows(table) {
+  /* what was loaded is remembered: when the query goes away the person gets back the rows they had, not a screenful */
+  if (!table.scan && !table.topk) state.wantRows = Math.max(state.wantRows || 0, table.rowsLoaded);
   for (const c of table.cols) { c.rows = []; c.filled = 0; }
+}
+/** After a query is cleared: reads the browsing table back up to the rows that were loaded before it (as far as the budget allows). */
+export async function regrow() {
+  const want = state.wantRows || 0, t = state.table;
+  if (!want || !t || t.scan || t.topk || t.rowsLoaded >= want) { if (t && t.rowsLoaded >= want) state.wantRows = 0; return; }
+  state.wantRows = 0;
+  await grow(want - t.rowsLoaded);
 }
 /** Reads the first rows back after a run that released them was cancelled or failed. */
 async function restoreBrowse(dataset) {
@@ -808,4 +817,5 @@ export async function unscan() {
     updateButtons();
     describeScope();               /* it described the scanned table until this read finished */
   } catch (e) { showError(e); } finally { busy(false); }
+  await regrow();
 }

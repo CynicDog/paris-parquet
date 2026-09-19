@@ -26,7 +26,7 @@ export const COL_W = 178, ROW_H = 22;
    windowing; 100 rows of 40 columns fits comfortably inside it */
 export const CELL_BUDGET = 8000;
 export const PAGE_SIZES = [10, 100, 200, 500, 1000, 3000, Infinity];
-export const state = { src: null, meta: null, table: null, view: null, page: 0, pageSize: 100, first: 0, agg: null };
+export const state = { src: null, meta: null, table: null, view: null, page: 0, pageSize: 100, first: 0, agg: null, wantRows: 0 };
 
 /**
  * A view is what the grid draws: a list of columns, a row count, and an
@@ -207,9 +207,12 @@ export function renderPager() {
     "<span class='psep'></span>" +
     "<span class='pinfo'>" + (v.count ? num(from + 1) + "&ndash;" + num(to) : "0") + " of " + num(v.count) +
     (v.label ? " <b>" + esc(v.label) + "</b>" : "") + "</span>" +
-    (state.table && state.table.truncated
-      ? "<span class='pinfo muted'>&middot; " + num(state.table.rowsLoaded) + " of " +
-        num(state.meta.numRows) + " rows read</span>" : "") +
+    /* what has been read is said only where it is the story: browsing, or the first matches of a search. A whole-file
+       answer (an aggregate, a sorted top) does not depend on how much is loaded, and says so in the scope line instead */
+    (state.table && state.table.truncated && !v.agg && !state.table.topk
+      ? "<span class='pinfo muted'>&middot; " + (state.table.scan
+        ? "first " + num(state.table.rowsLoaded) + " matches shown"
+        : num(state.table.rowsLoaded) + " of " + num(state.meta.numRows) + " rows read") + "</span>" : "") +
     "<span class='grow'></span>" +
     "<span class='pinfo'>export <select id='expscope'>" +
     "<option value='page'>this page</option><option value='view'>all " + num(v.count) + " rows</option>" +

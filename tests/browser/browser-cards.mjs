@@ -75,6 +75,23 @@ const after = await page.$eval("#qstat", (el) => el.textContent.replace(/\s+/g, 
 if (new RegExp("^" + barCount.toLocaleString("en-US") + " rows").test(after)) ok("a click on a bar runs over the whole file and finds exactly the bar's " + barCount.toLocaleString("en-US") + " rows: " + after.slice(0, 60));
 else bad("bar click: bar " + barCount + ", stat " + after);
 
+/* a narrow window keeps every control on screen: they shorten, then wrap, and none goes off the edge */
+for (const width of [1100, 800, 480]) {
+  await page.setViewportSize({ width, height: 900 });
+  await page.waitForTimeout(150);
+  const clipped = await page.evaluate(() => {
+    const w = window.innerWidth, out = [];
+    for (const el of document.querySelectorAll("header button, header label.btn, #theme")) {
+      const r = el.getBoundingClientRect();
+      if (r.width && (r.right > w + 1 || r.left < -1)) out.push((el.id || el.textContent.trim()).slice(0, 20) + "@" + Math.round(r.right));
+    }
+    return { out, scroll: document.documentElement.scrollWidth > w + 1 };
+  });
+  if (!clipped.out.length && !clipped.scroll) ok("at " + width + " px wide every header control is on screen and the page does not scroll sideways");
+  else bad("at " + width + " px: " + JSON.stringify(clipped));
+}
+await page.setViewportSize({ width: 1500, height: 950 });
+
 /* under a small budget the count still happens, a row group of the visible columns at a time */
 await page.goto("file://" + appPath);
 await page.setInputFiles("#picker", path.join(dir, "sorted.parquet"));

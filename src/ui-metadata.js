@@ -102,8 +102,8 @@ export function renderMeta() {
     dataset && dataset.parts.length > 1
       ? "<span class='tag'>files <b>" + num(dataset.parts.length) + "</b></span>" : "",
     "<span class='tag'>rows <b>" + num(dataset ? dataset.numRows : meta.numRows) + "</b></span>",
-    table.truncated && table.rowsLoaded ? "<span class='tag'>read so far <b>" + num(table.rowsLoaded) +
-      "</b> rows &mdash; summaries cover these</span>" : "",
+    table.truncated && table.rowsLoaded && !table.scan && !table.topk
+      ? "<span class='tag'>loaded <b>" + num(table.rowsLoaded) + "</b> rows &mdash; summaries and queries cover the whole file</span>" : "",
     table.scan ? "<span class='tag'>scanned <b>" + num(table.scan.kept) + "</b> of " +
       num(table.scan.total) + " row groups &mdash; only rows that could match this query</span>" : "",
     "<span class='tag'>columns <b>" + num(table.cols.length) + "</b></span>",

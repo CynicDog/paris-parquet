@@ -89,8 +89,18 @@ body{margin:0;background:var(--bg);color:var(--ink);
 #treegrip:hover::after,body.colsizing #treegrip::after{background:var(--accent)}
 
 /* ---------- header ---------- */
-header{display:flex;align-items:center;gap:14px;padding:8px 14px;border-bottom:1px solid var(--line);
-  background:var(--panel);flex:none;overflow:hidden}
+header{display:flex;align-items:center;gap:8px 14px;padding:8px 14px;border-bottom:1px solid var(--line);
+  background:var(--panel);flex:none;flex-wrap:wrap}
+/* a narrow window shortens the controls before it wraps them, and wraps them before it hides any: nothing goes off the edge */
+label.btn .sm{display:none}
+@media (max-width:1100px){h1 span{display:none}}
+@media (max-width:900px){
+  header{gap:6px 8px;padding:6px 10px}
+  button,label.btn{padding:3px 7px}
+  label.btn .lg{display:none}
+  label.btn .sm{display:inline}
+  #fileline{max-width:none;flex:1 1 100%;order:9}
+}
 h1{font:600 13px/1 var(--mono);margin:0;letter-spacing:.02em;white-space:nowrap;flex:none}
 h1 span{color:var(--faint);font-weight:400}
 .grow{flex:1}
@@ -110,6 +120,10 @@ input[type=file]{display:none}
 body.dragging #drop{background:var(--accent-soft);outline:2px dashed var(--accent);outline-offset:-14px}
 #err{margin:14px;padding:10px 12px;border:1px solid var(--err);border-radius:6px;color:var(--err);
   font:12px/1.5 var(--mono);white-space:pre-wrap;background:var(--panel)}
+#err{display:flex;align-items:flex-start;gap:10px}
+#err>span{flex:1}
+.dismiss{margin-left:auto;padding:0 8px;font-size:15px;line-height:1.3;border-color:transparent;background:transparent;color:var(--dim)}
+.dismiss:hover{color:var(--ink);border-color:var(--line)}
 #busy{display:none}   /* a flag only: hidden means idle; the popup below is what people see */
 
 /* ---------- the progress popup ---------- */
@@ -479,9 +493,9 @@ details[open]>summary::before{content:"▾ "}
 <header>
   <h1>paris-parquet <span>· single-file parquet viewer</span></h1>
   <input type="file" id="treepicker" webkitdirectory directory>
-  <label class="btn" for="picker">Open .parquet</label>
+  <label class="btn" for="picker" title="Open a .parquet file"><span class="lg">Open .parquet</span><span class="sm">Open</span></label>
   <input type="file" id="picker" accept=".parquet,.pq,application/octet-stream" multiple>
-  <label class="btn" for="dirpicker" title="Read every parquet file in a folder as one table (partitions become columns)">Open folder as one table</label>
+  <label class="btn" for="dirpicker" title="Read every parquet file in a folder as one table (partitions become columns)"><span class="lg">Open folder as one table</span><span class="sm">Folder</span></label>
   <input type="file" id="dirpicker" webkitdirectory directory>
   <input type="file" id="bpicker" accept=".parquet,.pq,application/octet-stream" multiple>
   <input type="file" id="bdirpicker" webkitdirectory directory>
@@ -2462,7 +2476,7 @@ function pgHide() {
 }
 
 /** Marks the page busy; the popup itself only appears if the work outlasts SHOW_AFTER. */
-function progressStart(title, steps, onCancel) {
+function progressStart(title, steps, onCancel, immediate) {
   clearTimeout(pg.closeTimer);
   pg.depth++;
   if (pg.depth === 1) {
@@ -2478,7 +2492,7 @@ function progressStart(title, steps, onCancel) {
   if (title) pg.title = title;
   const flag = pgEl("busy");
   if (flag) flag.hidden = false;
-  if (!pg.open && !pg.showTimer) pg.showTimer = setTimeout(pgReveal, SHOW_AFTER);
+  if (!pg.open && !pg.showTimer) pg.showTimer = setTimeout(pgReveal, immediate ? 0 : SHOW_AFTER);
   if (pg.open) pgPaint();
 }
 
@@ -3583,7 +3597,7 @@ const COL_W = 178, ROW_H = 22;
    windowing; 100 rows of 40 columns fits comfortably inside it */
 const CELL_BUDGET = 8000;
 const PAGE_SIZES = [10, 100, 200, 500, 1000, 3000, Infinity];
-const state = { src: null, meta: null, table: null, view: null, page: 0, pageSize: 100, first: 0, agg: null };
+const state = { src: null, meta: null, table: null, view: null, page: 0, pageSize: 100, first: 0, agg: null, wantRows: 0 };
 
 /**
  * A view is what the grid draws: a list of columns, a row count, and an
@@ -3764,9 +3778,12 @@ function renderPager() {
     "<span class='psep'></span>" +
     "<span class='pinfo'>" + (v.count ? num(from + 1) + "&ndash;" + num(to) : "0") + " of " + num(v.count) +
     (v.label ? " <b>" + esc(v.label) + "</b>" : "") + "</span>" +
-    (state.table && state.table.truncated
-      ? "<span class='pinfo muted'>&middot; " + num(state.table.rowsLoaded) + " of " +
-        num(state.meta.numRows) + " rows read</span>" : "") +
+    /* what has been read is said only where it is the story: browsing, or the first matches of a search. A whole-file
+       answer (an aggregate, a sorted top) does not depend on how much is loaded, and says so in the scope line instead */
+    (state.table && state.table.truncated && !v.agg && !state.table.topk
+      ? "<span class='pinfo muted'>&middot; " + (state.table.scan
+        ? "first " + num(state.table.rowsLoaded) + " matches shown"
+        : num(state.table.rowsLoaded) + " of " + num(state.meta.numRows) + " rows read") + "</span>" : "") +
     "<span class='grow'></span>" +
     "<span class='pinfo'>export <select id='expscope'>" +
     "<option value='page'>this page</option><option value='view'>all " + num(v.count) + " rows</option>" +
@@ -4443,8 +4460,8 @@ function renderMeta() {
     dataset && dataset.parts.length > 1
       ? "<span class='tag'>files <b>" + num(dataset.parts.length) + "</b></span>" : "",
     "<span class='tag'>rows <b>" + num(dataset ? dataset.numRows : meta.numRows) + "</b></span>",
-    table.truncated && table.rowsLoaded ? "<span class='tag'>read so far <b>" + num(table.rowsLoaded) +
-      "</b> rows &mdash; summaries cover these</span>" : "",
+    table.truncated && table.rowsLoaded && !table.scan && !table.topk
+      ? "<span class='tag'>loaded <b>" + num(table.rowsLoaded) + "</b> rows &mdash; summaries and queries cover the whole file</span>" : "",
     table.scan ? "<span class='tag'>scanned <b>" + num(table.scan.kept) + "</b> of " +
       num(table.scan.total) + " row groups &mdash; only rows that could match this query</span>" : "",
     "<span class='tag'>columns <b>" + num(table.cols.length) + "</b></span>",
@@ -5417,11 +5434,17 @@ function runQuery() {
   setView(view);
   const skipped = q.filters.filter((f) => filterIssue(f, cols)).length;
   /* a partial answer says how partial: "from 250,000 read" hides that the file has ten million */
-  const ofTotal = table.scan ? table.scan.rows : table.dataset.numRows;
+  const ofTotal = table.dataset.numRows;
   const scan = kept ? kept.plan : table.scan;
   const partial = !kept && table.truncated;
+  /* one way of saying what the answer covers, the same as the scope line under it: a whole-file answer says so and never
+     mentions how many rows happen to be loaded; only a plain browse says how much of the file it has read */
+  const covers = kept ? "from " + num(kept.rows) + " rows"
+    : table.topk ? "from the top of " + num(table.topk.seen) + " matching rows"
+    : table.scan ? (partial ? "first matches" : "matching") + " &middot; whole file of " + num(ofTotal) + " rows"
+    : partial ? "from the first " + num(n) + " of " + num(ofTotal) + " rows" : "from " + num(n);
   $("qstat").innerHTML = "<b>" + num(view.count) + "</b> " + (view.agg ? "groups" : "rows") +
-    " from " + (table.topk ? "the top of " + num(table.topk.seen) + " matching rows" : partial ? "the first " + num(n) + " of " + num(ofTotal) + " rows" : num(n)) + " &middot; " + (kept ? kept.ms : ms) + " ms" +
+    " " + covers + " &middot; " + (kept ? kept.ms : ms) + " ms" +
     (skipped ? " &middot; <em class='qwarn'>" + skipped + " clause" + (skipped === 1 ? "" : "s") +
       " skipped</em>" : "") +
     (scan ? " &middot; over " + num(scan.kept) + " of " + num(scan.total) +
@@ -5565,7 +5588,7 @@ function toggleSort(viewIdx, additive, rerun) {
  * from then on the picker's hide/pin no longer applies, the same as typing
  * a column list into the SQL box would.
  */
-function reorderColumns(fromCi, toCi, after) {
+function reorderColumns(fromCi, toCi, after, rerun) {
   const view = state.view, q = state.query, table = state.table;
   if (!view || !table || view.agg || fromCi === toCi) return;
   if (state.sqlDirty && !adoptSql(false)) return;
@@ -5577,7 +5600,7 @@ function reorderColumns(fromCi, toCi, after) {
   order.splice(at < 0 ? order.length : at + (after ? 1 : 0), 0, fromCi);
   q.select = order;
   renderQuery();
-  runQuery();
+  (rerun || runQuery)();
 }
 /* the clauses a scope may replace: each one admits a single unbroken range
    of this column's values, so a range drawn from inside the current result
@@ -5684,7 +5707,7 @@ function resetQuery() {
   $("qclear").disabled = true;
   showPlan("");
   if (scanned) unscan();
-  else if (state.table) setView(baseView(state.table));
+  else if (state.table) { setView(baseView(state.table)); regrow(); }
   renderQuery();
 }
 
@@ -5743,7 +5766,21 @@ function querySql() {
   } else if (q.select.length) {
     lines.push("SELECT " + q.select.map((ci) => sqlIdent(cols[ci].name)).join(",\n       "));
   } else {
-    lines.push("SELECT *");
+    /* `*` would say every column while some are out of the grid (hidden by the person, or kept out of memory by the
+       budget), so the ones that are in it are named, wrapped to a readable width */
+    const shown = displayCols(cols);
+    if (shown.length && shown.length < cols.length) {
+      const names = shown.map((c) => sqlIdent(c.name));
+      let line = "SELECT ", indent = "       ";
+      const out = [];
+      names.forEach((n, i) => {
+        const piece = n + (i < names.length - 1 ? "," : "");
+        if (line.length + piece.length > 92 && line.trim() !== "SELECT") { out.push(line.replace(/\s+$/, "")); line = indent; }
+        line += piece + " ";
+      });
+      out.push(line.replace(/\s+$/, ""));
+      lines.push(...out);
+    } else lines.push("SELECT *");
   }
   for (const line of sqlFromLines(table)) lines.push(line);
   let pending = false;
@@ -6991,7 +7028,16 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 
 /** Frees the decoded rows a table holds, so its replacement can be read without both in memory at once. */
 function releaseRows(table) {
+  /* what was loaded is remembered: when the query goes away the person gets back the rows they had, not a screenful */
+  if (!table.scan && !table.topk) state.wantRows = Math.max(state.wantRows || 0, table.rowsLoaded);
   for (const c of table.cols) { c.rows = []; c.filled = 0; }
+}
+/** After a query is cleared: reads the browsing table back up to the rows that were loaded before it (as far as the budget allows). */
+async function regrow() {
+  const want = state.wantRows || 0, t = state.table;
+  if (!want || !t || t.scan || t.topk || t.rowsLoaded >= want) { if (t && t.rowsLoaded >= want) state.wantRows = 0; return; }
+  state.wantRows = 0;
+  await grow(want - t.rowsLoaded);
 }
 /** Reads the first rows back after a run that released them was cancelled or failed. */
 async function restoreBrowse(dataset) {
@@ -7361,6 +7407,7 @@ async function unscan() {
     updateButtons();
     describeScope();               /* it described the scanned table until this read finished */
   } catch (e) { showError(e); } finally { busy(false); }
+  await regrow();
 }
 
 // Summary cards over every row, not the rows read. A card above a column describes the rows the view
@@ -9320,7 +9367,10 @@ function showError(e) {
   if (old) old.remove();
   const box = document.createElement("div");
   box.id = "err";
-  box.textContent = (e && e.message) ? e.message : String(e);
+  box.setAttribute("role", "alert");
+  const text = document.createElement("span");
+  text.textContent = (e && e.message) ? e.message : String(e);
+  box.append(text, dismissButton(() => box.remove()));
   $("stage").prepend(box);
   if (e && e.stack && !(e instanceof Refusal)) console.error(e);
 }
@@ -9334,9 +9384,9 @@ function showError(e) {
 let busyOn = false;
 /** Whether foreground work (a Run, a load, a join) has the popup up: background counting waits for it. */
 function isBusy() { return busyOn; }
-function busy(on, text, steps, onCancel) {
+function busy(on, text, steps, onCancel, immediate) {
   if (on) {
-    if (!busyOn) { busyOn = true; progressStart(text || "Working…", steps || null, onCancel || null); }
+    if (!busyOn) { busyOn = true; progressStart(text || "Working…", steps || null, onCancel || null, immediate); }
     else if (text && !steps) progressSay(text);
   } else if (busyOn) {
     busyOn = false;
@@ -9348,6 +9398,27 @@ function busy(on, text, steps, onCancel) {
  * columns were left out to stay inside the budget, or that a load stopped at it. `actions` are
  * buttons ({ label, run }). Cleared with no text.
  */
+/**
+ * Runs a step that has to happen on this thread (sorting or laying out what is already loaded) so the page shows it is
+ * working rather than freezing: the popup goes up first, for work big enough to be felt, and a frame is given to paint it.
+ */
+async function working(label, run) {
+  const rows = state.view ? state.view.count : 0;
+  const heavy = rows > 100000;
+  if (heavy) { busy(true, label, null, null, true); await new Promise((r) => setTimeout(r, 30)); }
+  try { run(); } finally { if (heavy) busy(false); }
+}
+/** A small close button for a message: every message on the page can be put away. */
+function dismissButton(run) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "dismiss";
+  b.textContent = "\u00d7";
+  b.title = "Dismiss";
+  b.setAttribute("aria-label", "Dismiss this message");
+  b.addEventListener("click", run);
+  return b;
+}
 function showMemNote(text, actions) {
   const el = $("memnote");
   if (!el) return;
@@ -9363,6 +9434,7 @@ function showMemNote(text, actions) {
     b.addEventListener("click", a.run);
     el.append(b);
   }
+  el.append(dismissButton(() => { el.hidden = true; }));
   el.hidden = false;
 }
 const FIRST_ROWS = 20000;
@@ -9451,6 +9523,7 @@ async function openFile(file) { return openEntries(entriesFromFiles([file])); }
 function adoptDataset(dataset, table, name, showCount, keepDisplay) {
   state.dataset = dataset;
   state.agg = null;
+  state.wantRows = 0;
   state.src = dataset.parts[0].src;
   state.meta = dataset.reference;
   state.table = table;
@@ -9615,6 +9688,7 @@ async function grow(n) {
     if (state.query && state.query.active) runQuery(); else setView(baseView(t));
     renderMeta();
     updateButtons();
+    if (t.rowsLoaded >= (state.wantRows || 0)) state.wantRows = 0;
     const added = t.rowsLoaded - before;
     if (!fit.all) {
       const nextCost = groupsBytes(d, t, [groups[fit.groups]], [...t.need]);
@@ -9712,7 +9786,7 @@ function init() {
     if (!th) return;
     e.preventDefault();
     const after = e.clientX > th.getBoundingClientRect().left + th.offsetWidth / 2;
-    reorderColumns(colDrag, +th.dataset.ci, after);
+    reorderColumns(colDrag, +th.dataset.ci, after, () => working("Reordering columns", runQuery));
     colDrag = null;
     for (const el of th.parentNode.children) el.classList.remove("dropbefore", "dropafter");
   });
@@ -9728,7 +9802,7 @@ function init() {
     if (th) {
       if (th.classList.contains("rownum")) return;
       const idx = Array.prototype.indexOf.call(th.parentNode.children, th) - 1;
-      if (idx >= 0) toggleSort(idx, e.shiftKey, () => (state.view && !state.view.agg ? runWhole() : runQuery()));
+      if (idx >= 0) toggleSort(idx, e.shiftKey, () => (state.view && !state.view.agg ? runWhole() : working("Sorting", runQuery)));
       return;
     }
     const pager = e.target.closest("tr.r-sum .top .pager button");
@@ -9819,7 +9893,7 @@ if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, 
   bloomBytes, groupsLeft, rowsAhead, readOffsetIndex, readColumnIndex, readRowsRanges, clauseRanges,
   intersectRanges, unionRanges, mergeRanges, rangeCount,
   pool, poolStart, workerCan,
-  loadAllBoth, cardsIdle, cardsPending, groupsAhead, groupsBytes, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
+  loadAllBoth, cardsIdle, cardsPending, working, groupsAhead, groupsBytes, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };
 
 </script>

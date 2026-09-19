@@ -93,7 +93,7 @@ function pgHide() {
 }
 
 /** Marks the page busy; the popup itself only appears if the work outlasts SHOW_AFTER. */
-export function progressStart(title, steps, onCancel) {
+export function progressStart(title, steps, onCancel, immediate) {
   clearTimeout(pg.closeTimer);
   pg.depth++;
   if (pg.depth === 1) {
@@ -109,7 +109,7 @@ export function progressStart(title, steps, onCancel) {
   if (title) pg.title = title;
   const flag = pgEl("busy");
   if (flag) flag.hidden = false;
-  if (!pg.open && !pg.showTimer) pg.showTimer = setTimeout(pgReveal, SHOW_AFTER);
+  if (!pg.open && !pg.showTimer) pg.showTimer = setTimeout(pgReveal, immediate ? 0 : SHOW_AFTER);
   if (pg.open) pgPaint();
 }
 

@@ -73,7 +73,10 @@ export function showError(e) {
   if (old) old.remove();
   const box = document.createElement("div");
   box.id = "err";
-  box.textContent = (e && e.message) ? e.message : String(e);
+  box.setAttribute("role", "alert");
+  const text = document.createElement("span");
+  text.textContent = (e && e.message) ? e.message : String(e);
+  box.append(text, dismissButton(() => box.remove()));
   $("stage").prepend(box);
   if (e && e.stack && !(e instanceof Refusal)) console.error(e);
 }
@@ -87,9 +90,9 @@ export function showError(e) {
 let busyOn = false;
 /** Whether foreground work (a Run, a load, a join) has the popup up: background counting waits for it. */
 export function isBusy() { return busyOn; }
-export function busy(on, text, steps, onCancel) {
+export function busy(on, text, steps, onCancel, immediate) {
   if (on) {
-    if (!busyOn) { busyOn = true; progressStart(text || "Working…", steps || null, onCancel || null); }
+    if (!busyOn) { busyOn = true; progressStart(text || "Working…", steps || null, onCancel || null, immediate); }
     else if (text && !steps) progressSay(text);
   } else if (busyOn) {
     busyOn = false;
@@ -101,6 +104,27 @@ export function busy(on, text, steps, onCancel) {
  * columns were left out to stay inside the budget, or that a load stopped at it. `actions` are
  * buttons ({ label, run }). Cleared with no text.
  */
+/**
+ * Runs a step that has to happen on this thread (sorting or laying out what is already loaded) so the page shows it is
+ * working rather than freezing: the popup goes up first, for work big enough to be felt, and a frame is given to paint it.
+ */
+export async function working(label, run) {
+  const rows = state.view ? state.view.count : 0;
+  const heavy = rows > 100000;
+  if (heavy) { busy(true, label, null, null, true); await new Promise((r) => setTimeout(r, 30)); }
+  try { run(); } finally { if (heavy) busy(false); }
+}
+/** A small close button for a message: every message on the page can be put away. */
+function dismissButton(run) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "dismiss";
+  b.textContent = "\u00d7";
+  b.title = "Dismiss";
+  b.setAttribute("aria-label", "Dismiss this message");
+  b.addEventListener("click", run);
+  return b;
+}
 export function showMemNote(text, actions) {
   const el = $("memnote");
   if (!el) return;
@@ -116,6 +140,7 @@ export function showMemNote(text, actions) {
     b.addEventListener("click", a.run);
     el.append(b);
   }
+  el.append(dismissButton(() => { el.hidden = true; }));
   el.hidden = false;
 }
 export const FIRST_ROWS = 20000;
@@ -204,6 +229,7 @@ export async function openFile(file) { return openEntries(entriesFromFiles([file
 export function adoptDataset(dataset, table, name, showCount, keepDisplay) {
   state.dataset = dataset;
   state.agg = null;
+  state.wantRows = 0;
   state.src = dataset.parts[0].src;
   state.meta = dataset.reference;
   state.table = table;
@@ -368,6 +394,7 @@ export async function grow(n) {
     if (state.query && state.query.active) runQuery(); else setView(baseView(t));
     renderMeta();
     updateButtons();
+    if (t.rowsLoaded >= (state.wantRows || 0)) state.wantRows = 0;
     const added = t.rowsLoaded - before;
     if (!fit.all) {
       const nextCost = groupsBytes(d, t, [groups[fit.groups]], [...t.need]);
@@ -465,7 +492,7 @@ export function init() {
     if (!th) return;
     e.preventDefault();
     const after = e.clientX > th.getBoundingClientRect().left + th.offsetWidth / 2;
-    reorderColumns(colDrag, +th.dataset.ci, after);
+    reorderColumns(colDrag, +th.dataset.ci, after, () => working("Reordering columns", runQuery));
     colDrag = null;
     for (const el of th.parentNode.children) el.classList.remove("dropbefore", "dropafter");
   });
@@ -481,7 +508,7 @@ export function init() {
     if (th) {
       if (th.classList.contains("rownum")) return;
       const idx = Array.prototype.indexOf.call(th.parentNode.children, th) - 1;
-      if (idx >= 0) toggleSort(idx, e.shiftKey, () => (state.view && !state.view.agg ? runWhole() : runQuery()));
+      if (idx >= 0) toggleSort(idx, e.shiftKey, () => (state.view && !state.view.agg ? runWhole() : working("Sorting", runQuery)));
       return;
     }
     const pager = e.target.closest("tr.r-sum .top .pager button");
@@ -572,5 +599,5 @@ if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, 
   bloomBytes, groupsLeft, rowsAhead, readOffsetIndex, readColumnIndex, readRowsRanges, clauseRanges,
   intersectRanges, unionRanges, mergeRanges, rangeCount,
   pool, poolStart, workerCan,
-  loadAllBoth, cardsIdle, cardsPending, groupsAhead, groupsBytes, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
+  loadAllBoth, cardsIdle, cardsPending, working, groupsAhead, groupsBytes, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };

@@ -1,14 +1,14 @@
 {
  "file": "/private/tmp/claude-501/-Users-eunsang-Documents-Sources-paris-parquet/64a35111-9357-4c6e-817e-0953fde9a5d1/scratchpad/big/big_10000000.parquet",
  "limitMB": 9000,
- "when": "2026-09-19T15:26:02.757Z",
+ "when": "2026-09-19T16:01:20.960Z",
  "results": [
   {
    "label": "open file",
-   "ms": 1031,
-   "peakRssMB": 493,
-   "rssMB": 490,
-   "heapMB": 33,
+   "ms": 1540,
+   "peakRssMB": 922,
+   "rssMB": 778,
+   "heapMB": 62,
    "outcome": "ok",
    "note": "20,000 of 10,000,000 rows, 200 of 200 cols shown, 40 row groups",
    "rows": 20000,
@@ -18,84 +18,66 @@
    "groups": 40
   },
   {
-   "label": "whole-file card: metric_f_000",
-   "ms": 1792,
-   "peakRssMB": 685,
-   "rssMB": 612,
-   "heapMB": 33,
+   "label": "count every column's card over the whole file (background)",
+   "ms": 146616,
+   "peakRssMB": 2309,
+   "rssMB": 1742,
+   "heapMB": 167,
    "outcome": "ok",
-   "note": "{\"n\":10000000,\"nulls\":0,\"min\":0,\"max\":1000,\"mean\":500.048915325,\"count\":10000000}",
-   "card": {
-    "n": 10000000,
-    "nulls": 0,
-    "min": 0,
-    "max": 1000,
-    "mean": 500.048915325,
-    "count": 10000000
-   },
-   "name": "metric_f_000"
-  },
-  {
-   "label": "whole-file card: cat_s_000",
-   "ms": 716,
-   "peakRssMB": 688,
-   "rssMB": 688,
-   "heapMB": 115,
-   "outcome": "ok",
-   "note": "{\"n\":10000000,\"nulls\":0,\"count\":10000000,\"distinct\":4,\"capped\":false,\"top\":[[\"country-02\",2502686],[\"country-01\",2501451],[\"country-03\",2498585]]}",
-   "card": {
-    "n": 10000000,
-    "nulls": 0,
-    "count": 10000000,
-    "distinct": 4,
-    "capped": false,
-    "top": [
-     [
-      "country-02",
-      2502686
-     ],
-     [
-      "country-01",
-      2501451
-     ],
-     [
-      "country-03",
-      2498585
+   "note": "200 columns counted; {\"metric_f_000\":{\"n\":10000000,\"nulls\":0,\"min\":0,\"max\":1000,\"mean\":500.048915325,\"count\":10000000},\"cat_s_000\":{\"n\":10000000,\"nulls\":0,\"count\":10000000,\"distinct\":4,\"capped\":false,\"top\":[[\"country-02\",",
+   "cards": {
+    "metric_f_000": {
+     "n": 10000000,
+     "nulls": 0,
+     "min": 0,
+     "max": 1000,
+     "mean": 500.048915325,
+     "count": 10000000
+    },
+    "cat_s_000": {
+     "n": 10000000,
+     "nulls": 0,
+     "count": 10000000,
+     "distinct": 4,
+     "capped": false,
+     "top": [
+      [
+       "country-02",
+       2502686
+      ],
+      [
+       "country-01",
+       2501451
+      ],
+      [
+       "country-03",
+       2498585
+      ]
      ]
-    ]
-   },
-   "name": "cat_s_000"
-  },
-  {
-   "label": "whole-file card: hi_s_000",
-   "ms": 14300,
-   "peakRssMB": 1896,
-   "rssMB": 1141,
-   "heapMB": 88,
-   "outcome": "ok",
-   "note": "{\"n\":10000000,\"nulls\":0,\"count\":10000000,\"distinct\":4097,\"capped\":true,\"top\":[[\"67642045\",2],[\"43a4e4f1\",2],[\"b1938264\",2]]}",
-   "card": {
-    "n": 10000000,
-    "nulls": 0,
-    "count": 10000000,
-    "distinct": 4097,
-    "capped": true,
-    "top": [
-     [
-      "67642045",
-      2
-     ],
-     [
-      "43a4e4f1",
-      2
-     ],
-     [
-      "b1938264",
-      2
+    },
+    "hi_s_000": {
+     "n": 10000000,
+     "nulls": 0,
+     "count": 10000000,
+     "distinct": 4097,
+     "capped": true,
+     "top": [
+      [
+       "67642045",
+       2
+      ],
+      [
+       "43a4e4f1",
+       2
+      ],
+      [
+       "b1938264",
+       2
+      ]
      ]
-    ]
+    }
    },
-   "name": "hi_s_000"
+   "counted": 200
   }
  ]
 }

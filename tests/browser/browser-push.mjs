@@ -86,7 +86,7 @@ if (/skipped 19 \(19 by statistics\)/.test(plan)) ok("and says why it skipped th
 else bad("plan does not explain itself: " + plan);
 
 const stat = await page.$eval("#qstat", (el) => el.textContent.replace(/\s+/g, " ").trim());
-if (/^5,000 rows from 10,000/.test(stat)) ok("every matching row is there: " + stat);
+if (/^5,000 rows matching · whole file of 200,000 rows/.test(stat)) ok("every matching row is there: " + stat);
 else bad("qstat after a scan: " + stat);
 console.log(`     scan ${scanMs} ms, against ${plainMs} ms to read all 200,000 rows and query those`);
 if (scanMs < plainMs) ok("the scan is the faster way to the same answer");
@@ -204,7 +204,7 @@ console.log("     " + narrow);
 if (/narrowed by page to/.test(narrow)) ok("the page index narrows inside the row group it kept");
 else bad("plan: " + narrow);
 const nstat = await page.$eval("#qstat", (el) => el.textContent.replace(/\s+/g, " ").trim());
-if (/^1 rows from ([1-9],\d{3}|\d{1,4})\b/.test(nstat)) ok("one row found, out of a few thousand read: " + nstat);
+if (/^1 rows matching · whole file of 200,000 rows/.test(nstat)) ok("one row found in the whole file: " + nstat);
 else bad("qstat: " + nstat);
 
 /* an aggregate with no WHERE is a question about the whole file: Run reads every row of the columns it needs */

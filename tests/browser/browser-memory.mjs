@@ -105,6 +105,13 @@ if (/^Showing \d+ of \d+ columns\. Decoding all of them would take about/.test(n
 else bad("note: " + note);
 if (await page.$("#memnote button")) ok("with a button to choose columns");
 else bad("no way to choose columns from the note");
+const sqlNow = await page.inputValue("#qsql");
+if (!/^SELECT \*/.test(sqlNow) && /^SELECT \S+\nFROM /.test(sqlNow)) ok("the SQL names the one column shown instead of saying * for all of them: " + sqlNow.split("\n")[0]);
+else bad("SQL with columns kept out of memory: " + JSON.stringify(sqlNow.slice(0, 120)));
+/* a message can be put away */
+await page.click("#memnote .dismiss");
+if (await page.$eval("#memnote", (el) => el.hidden)) ok("and the note can be dismissed");
+else bad("the note stayed after its close button");
 
 /* asking for more than fits is stopped with a reason */
 if (await page.isVisible("#all")) {
@@ -269,6 +276,38 @@ const diffErr = await page.evaluate(async () => {
 });
 if (/^Not run: reading every row of both files would take about .* over this page's 1 MB memory budget/.test(diffErr)) ok("a row diff over the memory budget is refused: " + diffErr.slice(0, 100) + "…");
 else bad("row diff under a 1 MB budget: " + JSON.stringify(diffErr.slice(0, 160)));
+
+/* work that has to run on this thread over a big view shows the popup first, so the page does not just freeze */
+await page.goto("file://" + appPath);
+await open("sorted.parquet");
+await page.evaluate(() => window.PARIS.grow(Infinity));
+await idle();
+const sawPopup = await page.evaluate(async () => {
+  let open = null;
+  await window.PARIS.working("Reordering columns", () => { open = document.getElementById("progress").open; });
+  return { open, count: window.PARIS.state.view.count };
+});
+if (sawPopup.count > 100000 && sawPopup.open === true) ok("a step over " + sawPopup.count + " loaded rows puts the popup up before it starts, not after");
+else bad("working() over a big view: " + JSON.stringify(sawPopup));
+await page.waitForFunction(() => !document.getElementById("progress").open, null, { timeout: 5000 });
+
+/* rows the person loaded are given back when a whole-file query goes away, not reset to a screenful */
+await page.goto("file://" + appPath);
+await open("sorted.parquet");
+await page.click("#more"); await idle();
+await page.click("#more"); await idle();
+const loaded = await page.evaluate(() => window.PARIS.state.table.rowsLoaded);
+await page.fill("#qsql", "SELECT grp, COUNT(*) FROM sorted GROUP BY grp");
+await page.dispatchEvent("#qsql", "input");
+await page.waitForTimeout(450);
+await page.click("#qrun");
+await idle();
+const during = await page.evaluate(() => ({ rows: window.PARIS.state.table.rowsLoaded, agg: window.PARIS.state.view.agg }));
+await page.click("#qclear");
+await page.waitForFunction((n) => window.PARIS.state.table.rowsLoaded >= n && document.getElementById("busy").hidden, loaded, { timeout: 60000 }).catch(() => {});
+const back = await page.evaluate(() => ({ rows: window.PARIS.state.table.rowsLoaded, agg: window.PARIS.state.view.agg }));
+if (loaded === 60000 && during.agg && back.rows === loaded && !back.agg) ok("after Load more (" + loaded + " rows) and a whole-file aggregate, clearing the query brings back the " + back.rows + " rows that were loaded, not " + during.rows);
+else bad("loaded " + loaded + ", during " + JSON.stringify(during) + ", after clear " + JSON.stringify(back));
 
 const other = requests.filter((u) => u !== "file://" + appPath);
 if (!other.length) ok("the page requested nothing but itself");

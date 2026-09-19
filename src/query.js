@@ -6,7 +6,7 @@
 
 import { cardFor } from "./cards.js";
 import { $ } from "./columns.js";
-import { describeScope, runWhole, showPlan, unscan } from "./pushdown.js";
+import { describeScope, regrow, runWhole, showPlan, unscan } from "./pushdown.js";
 import { newRadix, planRadix, RADIX, RADIX_BYTES, radixAdd, radixAdvance, radixOpen, radixPending, radixQuantile, radixVisit } from "./radix.js";
 import { binBounds, fmtValue, lessThan, numeric } from "./types.js";
 import { adoptSql, renderQuery } from "./ui-query-builder.js";
@@ -835,11 +835,17 @@ export function runQuery() {
   setView(view);
   const skipped = q.filters.filter((f) => filterIssue(f, cols)).length;
   /* a partial answer says how partial: "from 250,000 read" hides that the file has ten million */
-  const ofTotal = table.scan ? table.scan.rows : table.dataset.numRows;
+  const ofTotal = table.dataset.numRows;
   const scan = kept ? kept.plan : table.scan;
   const partial = !kept && table.truncated;
+  /* one way of saying what the answer covers, the same as the scope line under it: a whole-file answer says so and never
+     mentions how many rows happen to be loaded; only a plain browse says how much of the file it has read */
+  const covers = kept ? "from " + num(kept.rows) + " rows"
+    : table.topk ? "from the top of " + num(table.topk.seen) + " matching rows"
+    : table.scan ? (partial ? "first matches" : "matching") + " &middot; whole file of " + num(ofTotal) + " rows"
+    : partial ? "from the first " + num(n) + " of " + num(ofTotal) + " rows" : "from " + num(n);
   $("qstat").innerHTML = "<b>" + num(view.count) + "</b> " + (view.agg ? "groups" : "rows") +
-    " from " + (table.topk ? "the top of " + num(table.topk.seen) + " matching rows" : partial ? "the first " + num(n) + " of " + num(ofTotal) + " rows" : num(n)) + " &middot; " + (kept ? kept.ms : ms) + " ms" +
+    " " + covers + " &middot; " + (kept ? kept.ms : ms) + " ms" +
     (skipped ? " &middot; <em class='qwarn'>" + skipped + " clause" + (skipped === 1 ? "" : "s") +
       " skipped</em>" : "") +
     (scan ? " &middot; over " + num(scan.kept) + " of " + num(scan.total) +
@@ -983,7 +989,7 @@ export function toggleSort(viewIdx, additive, rerun) {
  * from then on the picker's hide/pin no longer applies, the same as typing
  * a column list into the SQL box would.
  */
-export function reorderColumns(fromCi, toCi, after) {
+export function reorderColumns(fromCi, toCi, after, rerun) {
   const view = state.view, q = state.query, table = state.table;
   if (!view || !table || view.agg || fromCi === toCi) return;
   if (state.sqlDirty && !adoptSql(false)) return;
@@ -995,7 +1001,7 @@ export function reorderColumns(fromCi, toCi, after) {
   order.splice(at < 0 ? order.length : at + (after ? 1 : 0), 0, fromCi);
   q.select = order;
   renderQuery();
-  runQuery();
+  (rerun || runQuery)();
 }
 /* the clauses a scope may replace: each one admits a single unbroken range
    of this column's values, so a range drawn from inside the current result
@@ -1102,7 +1108,7 @@ export function resetQuery() {
   $("qclear").disabled = true;
   showPlan("");
   if (scanned) unscan();
-  else if (state.table) setView(baseView(state.table));
+  else if (state.table) { setView(baseView(state.table)); regrow(); }
   renderQuery();
 }
 
@@ -1161,7 +1167,21 @@ export function querySql() {
   } else if (q.select.length) {
     lines.push("SELECT " + q.select.map((ci) => sqlIdent(cols[ci].name)).join(",\n       "));
   } else {
-    lines.push("SELECT *");
+    /* `*` would say every column while some are out of the grid (hidden by the person, or kept out of memory by the
+       budget), so the ones that are in it are named, wrapped to a readable width */
+    const shown = displayCols(cols);
+    if (shown.length && shown.length < cols.length) {
+      const names = shown.map((c) => sqlIdent(c.name));
+      let line = "SELECT ", indent = "       ";
+      const out = [];
+      names.forEach((n, i) => {
+        const piece = n + (i < names.length - 1 ? "," : "");
+        if (line.length + piece.length > 92 && line.trim() !== "SELECT") { out.push(line.replace(/\s+$/, "")); line = indent; }
+        line += piece + " ";
+      });
+      out.push(line.replace(/\s+$/, ""));
+      lines.push(...out);
+    } else lines.push("SELECT *");
   }
   for (const line of sqlFromLines(table)) lines.push(line);
   let pending = false;
