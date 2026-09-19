@@ -210,7 +210,13 @@ await withPage(async (page) => {
   await page.click("#toggleJoin");
   await page.setInputFiles("#jpicker", path.join(tmp, "small.parquet"));
   await page.waitForTimeout(300);
-  await page.selectOption("#jkeyA", { label: "id" });
+  await page.selectOption("#jkeyA", { label: "id" }, { timeout: 8000 }).catch(async (e) => {
+    /* say what the page was showing, so a failure somewhere else than this machine can be understood */
+    console.log("     the join panel never offered a key: " + JSON.stringify(await page.evaluate(() => ({
+      err: (document.getElementById("err") || {}).textContent || "", note: (document.getElementById("memnote") || {}).textContent || "",
+      body: (document.getElementById("joinbody") || {}).textContent.slice(0, 300), busy: !document.getElementById("busy").hidden }))));
+    throw e;
+  });
   await page.selectOption("#jkeyB", { label: "ref_id" });
   await page.click("#jrun");
   await idle(page);

@@ -67,4 +67,5 @@ jobs:
           node tests/browser/browser-metrics.mjs /tmp/fx/basic_snappy.parquet
 
       - name: Reduced stress smoke (memory must not follow the row count)
+        if: always()
         run: node tests/stress/smoke.mjs
