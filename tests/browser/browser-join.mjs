@@ -70,6 +70,18 @@ try {
   process.exit(0);
 }
 
+
+/** Picks the key of A, and if the panel never offers one says what it was showing (a failure on another machine can then be understood). */
+async function selectA(page, label) {
+  try { await page.selectOption("#jkeyA", { label }, { timeout: 10000 }); } catch (e) {
+    console.log("     the join panel never offered a key: " + JSON.stringify(await page.evaluate(() => ({
+      err: (document.getElementById("err") || {}).textContent || "", note: (document.getElementById("memnote") || {}).textContent || "",
+      body: (document.getElementById("joinbody") || {}).textContent.slice(0, 300), busy: !document.getElementById("busy").hidden,
+      joinHidden: document.getElementById("joinwrap").hidden, hasTable: !!window.PARIS.state.table }))));
+    throw e;
+  }
+}
+
 async function withPage(fn) {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
@@ -97,7 +109,7 @@ await withPage(async (page) => {
   await page.click("#toggleJoin");
   await page.setInputFiles("#jpicker", path.join(tmp, "regions.parquet"));
   await page.waitForTimeout(300);
-  await page.selectOption("#jkeyA", { label: "region" });
+  await selectA(page, "region");
   await page.selectOption("#jkeyB", { label: "name" });
   const runEnabled = await page.evaluate(() => !document.getElementById("jrun").disabled);
   if (runEnabled) ok("Run join enables once both keys are picked"); else bad("Run join stayed disabled");
@@ -166,7 +178,7 @@ await withPage(async (page) => {
   await page.click("#toggleJoin");
   await page.setInputFiles("#jpicker", path.join(tmp, "small.parquet"));
   await page.waitForTimeout(300);
-  await page.selectOption("#jkeyA", { label: "id" });
+  await selectA(page, "id");
   await page.selectOption("#jkeyB", { label: "ref_id" });
   await page.click("#jrun");
   await idle(page);
@@ -210,13 +222,7 @@ await withPage(async (page) => {
   await page.click("#toggleJoin");
   await page.setInputFiles("#jpicker", path.join(tmp, "small.parquet"));
   await page.waitForTimeout(300);
-  await page.selectOption("#jkeyA", { label: "id" }, { timeout: 8000 }).catch(async (e) => {
-    /* say what the page was showing, so a failure somewhere else than this machine can be understood */
-    console.log("     the join panel never offered a key: " + JSON.stringify(await page.evaluate(() => ({
-      err: (document.getElementById("err") || {}).textContent || "", note: (document.getElementById("memnote") || {}).textContent || "",
-      body: (document.getElementById("joinbody") || {}).textContent.slice(0, 300), busy: !document.getElementById("busy").hidden }))));
-    throw e;
-  });
+  await selectA(page, "id");
   await page.selectOption("#jkeyB", { label: "ref_id" });
   await page.click("#jrun");
   await idle(page);
@@ -283,7 +289,7 @@ await withPage(async (page) => {
   await page.click("#treebody .tnode[data-path='regions.parquet']");
   await idle(page);
   await page.waitForTimeout(300);
-  await page.selectOption("#jkeyA", { label: "region" });
+  await selectA(page, "region");
   await page.selectOption("#jkeyB", { label: "name" });
   await page.click("#jrun");
   await idle(page);
@@ -324,7 +330,7 @@ await withPage(async (page) => {
   await page.click("#toggleJoin");
   await page.setInputFiles("#jpicker", path.join(tmp, "regions.parquet"));
   await idle(page);
-  await page.selectOption("#jkeyA", { label: "region" });
+  await selectA(page, "region");
   await page.selectOption("#jkeyB", { label: "name" });
   await page.click("#jrun");
   await idle(page);
@@ -342,7 +348,7 @@ await withPage(async (page) => {
   if (aOpts.includes("manager")) ok("a second join picks keys off the joined table, not the file it came from");
   else bad("A key options after a join: " + JSON.stringify(aOpts));
 
-  await page.selectOption("#jkeyA", { label: "id" });
+  await selectA(page, "id");
   await page.selectOption("#jkeyB", { label: "ref_id" });
   await page.click("#jrun");
   await idle(page);
@@ -432,7 +438,7 @@ await withPage(async (page) => {
     ok("a file dragged from the panel fills the side it is dropped on");
   } else bad("sides after dragging: " + JSON.stringify(filled));
 
-  await page.selectOption("#jkeyA", { label: "region" });
+  await selectA(page, "region");
   await page.selectOption("#jkeyB", { label: "name" });
   await page.click("#jrun");
   await idle(page);
@@ -453,7 +459,7 @@ await withPage(async (page) => {
   await page.waitForTimeout(200);
   await page.setInputFiles("#jpicker", path.join(tmp, "regions.parquet"));
   await idle(page);
-  await page.selectOption("#jkeyA", { label: "region" });
+  await selectA(page, "region");
   await page.selectOption("#jkeyB", { label: "name" });
   await page.click("#jrun");
   await idle(page);
@@ -519,7 +525,7 @@ await withPage(async (page) => {
   await page.click("#toggleJoin");
   await page.setInputFiles("#jpicker", path.join(tmp, "regions.parquet"));
   await idle(page);
-  await page.selectOption("#jkeyA", { label: "region" });
+  await selectA(page, "region");
   await page.selectOption("#jkeyB", { label: "name" });
   await page.click("#jrun");
   await idle(page);
