@@ -296,9 +296,27 @@ function addSum(a, x) {
  * What feeding rows into groups needs to know about the metrics, worked out once per batch of rows
  * rather than once per row.
  */
-export function groupScanCtx(metrics, mKeys, mSpecs, radix) {
+/** A fast 32-bit hash (FNV-1a) of a key's text, for dividing groups or values into slices. */
+export function hashKey(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+/**
+ * How a streamed aggregate is sliced when its running state would not fit whole. Mode "G" keeps only the
+ * groups whose key hashes into slice k of P (each pass then holds about 1/P of the groups); mode "V" keeps
+ * only the distinct values (and mode candidates) that hash into slice k, and the passes after the first
+ * feed nothing else. Either way the source is read again for every slice, so nothing is written anywhere.
+ */
+export function sliceFns(slice) {
+  if (!slice) return { gslice: null, vslice: null, only: false };
+  const P = slice.P, k = slice.k;
+  if (slice.mode === "G") return { gslice: (key) => hashKey(key) % P === k, vslice: null, only: false };
+  return { gslice: null, vslice: (key) => hashKey(key) % P === k, only: k > 0 };
+}
+export function groupScanCtx(metrics, mKeys, mSpecs, radix, slice) {
   return {
-    metrics, mKeys, radix: !!radix,
+    metrics, mKeys, radix: !!radix, ...sliceFns(slice),
     needs: metrics.map((m) => accNeeds(m.agg)),
     /* one comparator per metric, built here rather than per row */
     less: metrics.map((_m, i) => (mKeys[i]
@@ -317,27 +335,30 @@ export const STATE_BYTES = { group: 96, perMetric: 168, perKeyChar: 2, value: 16
  * caller can stop a query whose groups, kept values or distinct values are outgrowing memory.
  */
 export function feedGroups(groups, ctx, gRows, mRows, positions, index, n, keepKeys, track) {
-  const { metrics, mKeys, needs, less } = ctx;
+  const { metrics, mKeys, needs, less, gslice, vslice, only } = ctx, base = ctx.base || 0;
   const total = index ? index.length : n;
-  let bytes = 0;
+  let bytes = 0, groupBytes = 0, setBytes = 0;
   for (let i = 0; i < total; i++) {
     const r = index ? index[i] : i;
     let key = "";
     for (const g of positions) key += keyPart(gRows[g][r]) + "\u0001";
+    if (gslice && !gslice(key)) continue;          /* another slice's group */
     let acc = groups.get(key);
     if (!acc) {
+      if (only) continue;                          /* later passes of a value-sliced run add nothing new */
       acc = { row: r, m: metrics.map(newAcc) };
       if (keepKeys) acc.gv = positions.map((g) => gRows[g][r]);
       groups.set(key, acc);
-      if (track) bytes += STATE_BYTES.group + metrics.length * STATE_BYTES.perMetric + key.length * STATE_BYTES.perKeyChar;
+      if (track) { const b = STATE_BYTES.group + metrics.length * STATE_BYTES.perMetric + key.length * STATE_BYTES.perKeyChar; bytes += b; groupBytes += b; }
     }
     for (let m = 0; m < metrics.length; m++) {
+      const f = needs[m];
+      if (only && !(f.set || f.freq)) continue;
       const a = acc.m[m];
       a.t++;                          /* rows in the group; NULLS is t minus n */
       const v = mRows[m][r];
       if (v === null || v === undefined) continue;
       a.n++;
-      const f = needs[m];
       if (f.num) {
         const x = mKeys[m] ? mKeys[m](v) : NaN;
         if (x === x) {
@@ -373,15 +394,19 @@ export function feedGroups(groups, ctx, gRows, mRows, positions, index, n, keepK
         }
       }
       else if (f.set) {
+        const dk = keyPart(v);
+        if (vslice && !vslice(dk)) continue;
         if (!a.set) a.set = new Set();
         const before = a.set.size;
-        a.set.add(keyPart(v));
-        if (track && a.set.size !== before) bytes += STATE_BYTES.distinct;
+        a.set.add(dk);
+        if (track && a.set.size !== before) { bytes += STATE_BYTES.distinct; setBytes += STATE_BYTES.distinct; }
       }
       else if (f.freq) {
+        const fk = keyPart(v);
+        if (vslice && !vslice(fk)) continue;
         if (!a.freq) a.freq = new Map();
-        const fk = keyPart(v), hit = a.freq.get(fk);
-        if (hit) hit.c++; else { a.freq.set(fk, { v, c: 1 }); if (track) bytes += STATE_BYTES.freq; }
+        const hit = a.freq.get(fk);
+        if (hit) hit.c++; else { a.freq.set(fk, { v, c: 1, at: base + r }); if (track) { bytes += STATE_BYTES.freq; setBytes += STATE_BYTES.freq; } }
       }
       else if (f.minmax) {
         if (a.min === null || less[m](v, a.min)) a.min = v;
@@ -389,7 +414,7 @@ export function feedGroups(groups, ctx, gRows, mRows, positions, index, n, keepK
       }
     }
   }
-  if (track) track.bytes += bytes;
+  if (track) { track.bytes += bytes; track.group += groupBytes; track.set += setBytes; }
 }
 export function scanGroups(gRows, mRows, mKeys, mSpecs, metrics, positions, index, n) {
   const groups = new Map();
@@ -413,7 +438,7 @@ export function quantileOf(a, p) {
 export function metricValue(m, kind) {
   switch (kind) {
     case "COUNT": return m.n;
-    case "COUNT_DISTINCT": return m.set ? m.set.size : 0;
+    case "COUNT_DISTINCT": return (m.dc || 0) + (m.set ? m.set.size : 0);
     case "NULLS": return m.t - m.n;
     case "SUM": return m.n ? m.sum + m.c : null;
     case "AVG": return m.n ? (m.sum + m.c) / m.n : null;
@@ -435,9 +460,8 @@ export function metricValue(m, kind) {
     case "P99": return quantileOf(m, 0.99);
     case "IQR": { const a = quantileOf(m, 0.25); return a === null ? null : quantileOf(m, 0.75) - a; }
     case "MODE": {
-      if (!m.freq) return null;
-      let best = null;                          /* ties go to the first seen */
-      for (const e of m.freq.values()) if (!best || e.c > best.c) best = e;
+      let best = m.best || null;                /* the best candidate of the slices already finished */
+      if (m.freq) for (const e of m.freq.values()) if (!best || e.c > best.c || (e.c === best.c && e.at < best.at)) best = e;   /* ties go to the first seen */
       return best ? best.v : null;
     }
     default: return null;
@@ -522,17 +546,42 @@ export function streamable(q) {
  * rows at a time. `bytes` is the running estimate of what the totals, the values a percentile keeps
  * and the distinct values a count keeps have cost so far.
  */
-export function newAggStream(q, cols) {
+export function newAggStream(q, cols, slice) {
   const metrics = q.metrics.filter((m) => cols[m.ci]);
   const sets = groupingSets(q.groupBy.length, q.groupMode);
-  return { q, metrics, sets, maps: sets.map(() => new Map()), track: { bytes: 0 }, rows: 0, matched: 0, batches: 0, last: cols };
+  return { q, metrics, sets, slice: slice || null, maps: sets.map(() => new Map()), track: { bytes: 0, group: 0, set: 0 }, rows: 0, matched: 0, batches: 0, last: cols };
+}
+/** True when the query has a metric that keeps distinct values or mode candidates, the only kind a value slice can shrink. */
+export function hasSetMetrics(q) {
+  return q.metrics.some((m) => { const f = accNeeds(m.agg); return f.set || f.freq; });
+}
+/**
+ * After a pass of a value-sliced run: what this slice's distinct values and mode candidates came to is folded
+ * into totals and the sets are let go, so the next slice starts empty. Distinct values in different slices are
+ * different values, so their counts simply add; the mode is the best candidate seen in any slice.
+ */
+export function endValueSlice(st) {
+  for (const map of st.maps) {
+    for (const acc of map.values()) {
+      for (const a of acc.m) {
+        if (a.set) { a.dc = (a.dc || 0) + a.set.size; a.set = null; }
+        if (a.freq) {
+          for (const e of a.freq.values()) if (!a.best || e.c > a.best.c || (e.c === a.best.c && e.at < a.best.at)) a.best = e;
+          a.freq = null;
+        }
+      }
+    }
+  }
+  st.track.bytes -= st.track.set;
+  st.track.set = 0;
 }
 export function feedAggBatch(st, cols, n) {
   const q = st.q, gcis = q.groupBy;
   const index = matchIndex(q, cols, n);
   const gRows = gcis.map((ci) => cols[ci].rows);
   const mRows = st.metrics.map((m) => cols[m.ci].rows);
-  const ctx = groupScanCtx(st.metrics, st.metrics.map((m) => sortKey(cols[m.ci].spec)), st.metrics.map((m) => cols[m.ci].spec), true);
+  const ctx = groupScanCtx(st.metrics, st.metrics.map((m) => sortKey(cols[m.ci].spec)), st.metrics.map((m) => cols[m.ci].spec), true, st.slice);
+  ctx.base = st.rows;                    /* rows before this batch: where a value was first seen decides a tied mode */
   for (let i = 0; i < st.sets.length; i++) feedGroups(st.maps[i], ctx, gRows, mRows, st.sets[i], index, n, true, st.track);
   st.rows += n;
   st.matched += index ? index.length : n;
@@ -581,7 +630,7 @@ export function radixFeedBatch(st, cols, n) {
       const r = index ? index[i] : i;
       let key = "";
       for (const g of positions) key += keyPart(gRows[g][r]) + "\u0001";
-      const acc = map.get(key);
+      const acc = map.get(key);                  /* a group in another slice was never kept, so it is not here */
       if (!acc) continue;
       for (let m = 0; m < st.metrics.length; m++) {
         const rh = acc.m[m].rh;
@@ -655,7 +704,7 @@ export function mergeAcc(target, acc, metrics, mKeys, mSpecs) {
       if (!o.freq) o.freq = new Map();
       for (const [fk, e] of a.freq) {
         const hit = o.freq.get(fk);
-        if (hit) hit.c += e.c; else o.freq.set(fk, { v: e.v, c: e.c });
+        if (hit) hit.c += e.c; else o.freq.set(fk, { v: e.v, c: e.c, at: e.at });
       }
     }
     if (f.minmax) {

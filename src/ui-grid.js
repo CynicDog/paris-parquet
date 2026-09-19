@@ -115,7 +115,8 @@ export function summaryCard(col, scopes) {
 }
 
 export function renderGrid() {
-  if (state.table && needFilled(wantedColumns(state.table), () => refreshView(true))) return;
+  /* an aggregate's answer holds its own columns; the table's columns are not on screen, so none is owed a decode */
+  if (state.table && !(state.view && state.view.agg) && needFilled(wantedColumns(state.table), () => refreshView(true))) return;
   const view = state.view;
   if (!view) return;
   const table = state.table;

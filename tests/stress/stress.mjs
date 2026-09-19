@@ -227,6 +227,27 @@ const SCENARIOS = {
     });
   },
 
+  /** High-cardinality: a distinct count and a GROUP BY whose running totals outgrow the budget, answered in hash slices. */
+  async "agg-highcard"(s) {
+    const o = await open(s); if (!alive(o)) return;
+    const shape = async () => s.page.evaluate(() => {
+      const v = window.PARIS.state.view;
+      return v ? { groups: v.cols[0].rows.length, sums: v.cols.map((c) => (typeof c.rows[0] === "number" ? c.rows.reduce((a, b) => a + b, 0) : null)), first: v.cols.map((c) => c.rows[0]) } : null;
+    });
+    await step(s, "Run: COUNT(DISTINCT hi_s_000) over the whole file", async () => {
+      await setSql(s, "SELECT COUNT(DISTINCT hi_s_000), COUNT(*)\nFROM t;");
+      await s.page.click("#qrun"); await idle(s);
+      const r = await shape();
+      return { note: JSON.stringify(r && r.first) + " | " + (await text(s, "#memnote")).slice(0, 160) + (await text(s, "#qplan")).slice(0, 120), distinct: r && r.first[0], count: r && r.first[1] };
+    });
+    await step(s, "Run: SELECT id, COUNT(*), SUM(metric_f_000) GROUP BY id (one group per row)", async () => {
+      await setSql(s, "SELECT id, COUNT(*), SUM(metric_f_000)\nFROM t\nGROUP BY id;");
+      await s.page.click("#qrun"); await idle(s);
+      const r = await shape();
+      return { note: (r ? r.groups.toLocaleString() + " groups, counts add to " + r.sums[1].toLocaleString() + " | " : "") + (await text(s, "#memnote")).slice(0, 200), groups: r && r.groups, countSum: r && r.sums[1], sum: r && r.sums[2] };
+    });
+  },
+
   async "pct-all"(s) {
     const o = await open(s); if (!alive(o)) return;
     await step(s, "Run: P99 of one column (whole file)", async () => {

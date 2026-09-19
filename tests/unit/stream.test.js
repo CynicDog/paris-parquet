@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AGG_MORE, AGGS, aggregate, feedAggBatch, finishAggStream, matchIndex, newAggStream, radixAdvanceStream, radixFeedBatch, radixOpenStream, radixPlanStream, streamable } from "../../src/query.js";
+import { AGG_MORE, AGGS, aggregate, endValueSlice, feedAggBatch, finishAggStream, matchIndex, newAggStream, radixAdvanceStream, radixFeedBatch, radixOpenStream, radixPlanStream, streamable } from "../../src/query.js";
 import { RADIX } from "../../src/radix.js";
 
 const numSpec = { kind: "number", label: "double", physical: "DOUBLE", convert: (v) => v };
@@ -138,4 +138,77 @@ test("a percentile stops keeping values and counts them past the threshold, so i
     const more = streamed(q, bigger, N * 4, [N * 4]).st;
     assert.ok(more.track.bytes < counted.track.bytes + 1024, `four times the rows cost no more: ${more.track.bytes} vs ${counted.track.bytes}`);
   } finally { RADIX.promote = saved; }
+});
+
+/**
+ * What the page does when the running totals do not fit: read the file again in P hash slices. Mode "G"
+ * finishes each slice's groups before the next; mode "V" keeps every group and only one slice of the
+ * distinct values and mode candidates at a time. Returns the answer rows and the biggest running estimate.
+ */
+function sliced(q, cols, n, sizes, P, mode) {
+  const parts = bounds(n, sizes);
+  let peak = 0;
+  const finishOne = (st) => {
+    radixPlanStream(st);
+    while (radixOpenStream(st)) { for (const [a, b] of parts) radixFeedBatch(st, slice(cols, a, b), b - a); radixAdvanceStream(st); }
+    return finishAggStream(st);
+  };
+  if (mode === "G") {
+    let out = null;
+    for (let k = 0; k < P; k++) {
+      const st = newAggStream(q, cols, { P, k, mode });
+      for (const [a, b] of parts) feedAggBatch(st, slice(cols, a, b), b - a);
+      peak = Math.max(peak, st.track.bytes);
+      const part = finishOne(st);
+      if (!out) out = part; else for (let i = 0; i < part.length; i++) out[i].rows.push(...part[i].rows);
+    }
+    return { out, peak };
+  }
+  const st = newAggStream(q, cols, { P, k: 0, mode });
+  for (const [a, b] of parts) feedAggBatch(st, slice(cols, a, b), b - a);
+  peak = st.track.bytes;
+  endValueSlice(st);
+  for (let k = 1; k < P; k++) {
+    st.slice = { P, k, mode };
+    st.rows = 0;
+    for (const [a, b] of parts) feedAggBatch(st, slice(cols, a, b), b - a);
+    peak = Math.max(peak, st.track.bytes);
+    endValueSlice(st);
+  }
+  return { out: finishOne(st), peak };
+}
+/** Rows as sorted strings, since slicing changes the order groups come out in but not which ones there are. */
+const asSet = (out) => {
+  const n = out[0].rows.length;
+  return Array.from({ length: n }, (_, i) => JSON.stringify(out.map((c) => c.rows[i]))).sort();
+};
+
+test("hash-sliced passes give the same answer as one pass, group slices and value slices alike", () => {
+  const metrics = [{ id: "a", ci: 2, agg: "AVG", alias: "" }, { id: "b", ci: 3, agg: "COUNT_DISTINCT", alias: "" }, { id: "c", ci: 3, agg: "MODE", alias: "" },
+    { id: "d", ci: 2, agg: "P99", alias: "" }, { id: "e", ci: 0, agg: "COUNT_DISTINCT", alias: "" }];
+  const saved = { ...RADIX };
+  RADIX.promote = 8; RADIX.gather = 4;          /* force the counting groups and narrowing passes too */
+  try {
+    for (const groupMode of ["", "ROLLUP"]) {
+      const q = query({ groupBy: [0, 1], groupMode, metrics });
+      const want = asSet(whole(q, cols, N));
+      for (const mode of ["G", "V"]) for (const P of [2, 3, 8]) {
+        assert.deepEqual(asSet(sliced(q, cols, N, [700, 1, 3299], P, mode).out), want, `${groupMode || "flat"}, ${mode} x ${P}`);
+      }
+    }
+    /* no GROUP BY: one group, so only value slices apply */
+    const q = query({ metrics: metrics.slice(0, 3) });
+    for (const P of [2, 5]) assert.deepEqual(asSet(sliced(q, cols, N, [N], P, "V").out), asSet(whole(q, cols, N)), `single group, V x ${P}`);
+  } finally { Object.assign(RADIX, saved); }
+});
+
+test("slicing is what makes the running estimate small: each slice keeps about 1/P of the groups or of the values", () => {
+  const n = 6000, big = col("id", numSpec, Array.from({ length: n }, (_, i) => i)), v = col("v", numSpec, Array.from({ length: n }, (_, i) => (i * 7919) % n));
+  const qg = query({ groupBy: [0], metrics: [{ id: "m", ci: 1, agg: "SUM", alias: "" }] });
+  const one = sliced(qg, [big, v], n, [n], 1, "G").peak, eight = sliced(qg, [big, v], n, [n], 8, "G").peak;
+  assert.ok(eight < one / 5, `groups: ${eight} vs ${one}`);
+  const qv = query({ metrics: [{ id: "m", ci: 1, agg: "COUNT_DISTINCT", alias: "" }] });
+  const v1 = sliced(qv, [big, v], n, [n], 1, "V").peak, v8 = sliced(qv, [big, v], n, [n], 8, "V").peak;
+  assert.ok(v8 < v1 / 5, `values: ${v8} vs ${v1}`);
+  assert.equal(sliced(qv, [big, v], n, [n], 8, "V").out[0].rows[0], n);
 });

@@ -193,11 +193,29 @@ await page.evaluate(() => window.PARIS.setBudgetMB(1));
 /* what still has to be kept is watched as it grows and stopped with the numbers: several percentiles at once need
    a set of buckets each, and a distinct count keeps every distinct value */
 const several = await ask("SELECT MEDIAN(id), QUANTILE_CONT(id, 0.9), QUANTILE_CONT(id, 0.95), QUANTILE_CONT(id, 0.99) FROM sorted");
-if (/^Not run over the whole file: after \d+ of 20 row groups its running totals \(1 groups, and the values a percentile/.test(several.memnote)) ok("four percentiles at once outgrow that budget and are stopped, with the numbers: " + several.memnote.slice(0, 110) + "…");
+if (/^Not run over the whole file: its running totals were estimated at .* with no GROUP BY there are no groups to split them by/.test(several.memnote)) ok("four percentiles at once outgrow that budget, and with one group there is nothing to slice by, so it is stopped with the numbers: " + several.memnote.slice(0, 110) + "…");
 else bad("four percentiles under a 1 MB budget: " + JSON.stringify(several));
-const distinct = await ask("SELECT COUNT(DISTINCT id) FROM sorted");
-if (/^Not run over the whole file: after \d+ of 20 row groups its running totals/.test(distinct.memnote) && /Run on the 20,000 rows already read/.test(distinct.action)) ok("a distinct count, which keeps every distinct value, is stopped too, with a labelled way to run on what is loaded");
+/* a distinct count keeps every distinct value, which no longer fits: the file is read again in hash slices, each
+   holding the values that hash into it, and the counts of the slices add up to the exact answer */
+const distinct = await ask("SELECT COUNT(DISTINCT id), COUNT(DISTINCT grp), COUNT(*) FROM sorted");
+if (distinct.first && distinct.first[0] === 200000 && distinct.first[2] === 200000 && !distinct.memnote) ok("under a 1 MB budget COUNT(DISTINCT id) over 200,000 distinct values is exact, by hash slices: " + JSON.stringify(distinct.first));
 else bad("COUNT(DISTINCT) under 1 MB: " + JSON.stringify(distinct));
+const dgrp = await ask("SELECT grp, COUNT(DISTINCT id), COUNT(*) FROM sorted GROUP BY grp");
+if (dgrp.cols && dgrp.cols[0].length > 20 && !dgrp.memnote && dgrp.sums[1] === 200000 && dgrp.sums[2] === 200000) ok("and per group, the distinct ids add up to 200,000 across " + dgrp.cols[0].length + "+ groups");
+else bad("grouped COUNT(DISTINCT) under 1 MB: " + JSON.stringify(dgrp).slice(0, 300));
+/* the groups themselves outgrow the budget: 200,000 of them, split by key hash into slices finished one at a time */
+await page.evaluate(() => window.PARIS.setBudgetMB(32));    /* 200,000 groups of about 430 bytes is 86 MB of running totals: a few slices at 32 */
+const byId = await ask("SELECT id, COUNT(*), SUM(id) FROM sorted GROUP BY id");
+if (byId.sums && byId.sums[1] === 200000 && byId.sums[2] === (199999 * 200000) / 2 && !byId.memnote) ok("under 32 MB, 200,000 groups (one per id, 86 MB of running totals) complete in slices: their counts add to " + byId.sums[1] + " and their sums to " + byId.sums[2]);
+else bad("GROUP BY id under 1 MB: " + JSON.stringify(byId).slice(0, 300));
+const rows = await page.evaluate(() => window.PARIS.state.view.cols[0].rows.length);
+if (rows === 200000) ok("with every one of the 200,000 groups in the answer");
+else bad("group count in the answer: " + rows);
+const last = await ask("SELECT id, COUNT(*) FROM sorted GROUP BY id ORDER BY id DESC LIMIT 3");
+if (last.cols && JSON.stringify(last.cols[0]) === "[199999,199998,199997]") ok("ordering and limiting the sliced answer reads it from the kept groups: " + JSON.stringify(last.cols[0]));
+else bad("ORDER BY over a sliced answer: " + JSON.stringify(last).slice(0, 200));
+await page.evaluate(() => window.PARIS.setBudgetMB(1));
+await ask("SELECT MEDIAN(id), QUANTILE_CONT(id, 0.9), QUANTILE_CONT(id, 0.95), QUANTILE_CONT(id, 0.99) FROM sorted");
 await page.click("#memnote button");
 await idle();
 const partial = await text("#qplan");

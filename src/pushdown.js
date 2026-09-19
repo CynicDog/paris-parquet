@@ -10,7 +10,7 @@ import { newTable } from "./dataset.js";
 import { intersectRanges, mergeRanges, rangeCount, readColumnIndex, readOffsetIndex, unionRanges } from "./encoding.js";
 import { busy, FIRST_ROWS, showError, showMemNote, updateButtons } from "./main.js";
 import { progressStep } from "./progress.js";
-import { aggKept, aggSignature, compileFilter, feedAggBatch, finishAggStream, isQuantile, newAggStream, parseOperand, radixAdvanceStream, radixColumns, radixFeedBatch, radixOpenStream, radixPendingBytes, radixPlanStream, runQuery, sortKey, streamable, textOf } from "./query.js";
+import { aggKept, aggSignature, compileFilter, endValueSlice, feedAggBatch, finishAggStream, hasSetMetrics, isQuantile, newAggStream, parseOperand, radixAdvanceStream, radixColumns, radixFeedBatch, radixOpenStream, radixPendingBytes, radixPlanStream, runQuery, sortKey, streamable, textOf } from "./query.js";
 import { thriftStruct } from "./thrift.js";
 import { rawStat, renderMeta } from "./ui-metadata.js";
 import { adoptSql } from "./ui-query-builder.js";
@@ -425,6 +425,8 @@ const RUN_STEPS = [
 const RUN_STEPS_PCT = RUN_STEPS.slice(0, 3).concat([
   { label: "Refine percentiles", why: "Percentiles are exact and found without sorting: the first pass counted values into buckets, and each further pass collects only the bucket a percentile falls in (or narrows it by another 16 bits), so a sorted copy of the column is never held." },
 ], RUN_STEPS.slice(3));
+/** The most hash slices a streamed aggregate is split into: each costs one more read of the file. */
+const MAX_SLICES = 64;
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 /** Frees the decoded rows a table holds, so its replacement can be read without both in memory at once. */
@@ -500,53 +502,44 @@ export async function runWhole() {
         return;
       }
       if (heldBytes(dataset, cur) > 0) { releaseRows(cur); state.view = null; needRestore = true; }
-      const st = newAggStream(q, cur.cols);
       const room = budget - biggest;
       const t0 = performance.now();
-      for (let i = 0; i < groups.length; i++) {
-        if (stop.asked) break;
-        const g = groups[i], of = groups.length;
-        progressStep(2, i / of, "row group " + num(i + 1) + " of " + num(of) + ": reading");
-        const batch = newTable(dataset);
-        batch.plan = table.plan;
-        batch.need = table.need;
-        batch.nextPart = g.pi;
-        batch.nextGroup = g.gi;
-        await loadMore(dataset, batch, 1);
-        if (stop.asked) break;
-        feedAggBatch(st, batch.cols, batch.rowsLoaded);
-        progressStep(2, (i + 1) / of, "row group " + num(i + 1) + " of " + num(of) + ": folded into " + num(st.maps[0].size) + " group" + (st.maps[0].size === 1 ? "" : "s"));
-        if (st.track.bytes > room) {
-          showMemNote("Not run over the whole file: after " + num(i + 1) + " of " + num(of) + " row groups its running totals (" + num(st.maps[0].size) +
-            " groups, and the values a percentile, distinct count or mode has to keep) were estimated at " + bytesText(st.track.bytes) +
-            ", over what this page can hold beside a decoded row group (" + bytesText(room) + "). Group by a column with fewer distinct values, or use fewer or lighter metrics: " +
-            "a percentile keeps every value and a distinct count every distinct value.",
-            [{ label: "Run on the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
-          return;
+      const refuseAgg = (why) => showMemNote("Not run over the whole file: " + why,
+        [{ label: "Run on the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
+      /* one pass over every row group, folding each into the totals; false if cancelled or over `limit` */
+      const foldPass = async (st, label, limit) => {
+        for (let i = 0; i < groups.length; i++) {
+          if (stop.asked) return "cancel";
+          const g = groups[i], of = groups.length;
+          progressStep(2, i / of, label + "row group " + num(i + 1) + " of " + num(of) + ": reading");
+          const batch = newTable(dataset);
+          batch.plan = table.plan;
+          batch.need = table.need;
+          batch.nextPart = g.pi;
+          batch.nextGroup = g.gi;
+          await loadMore(dataset, batch, 1);
+          if (stop.asked) return "cancel";
+          feedAggBatch(st, batch.cols, batch.rowsLoaded);
+          progressStep(2, (i + 1) / of, label + "row group " + num(i + 1) + " of " + num(of) + ": folded into " + num(st.maps[0].size) + " group" + (st.maps[0].size === 1 ? "" : "s"));
+          if (st.track.bytes > limit) return "over";
+          await tick();
         }
-        await tick();
-      }
-      if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+        return "ok";
+      };
       /* the groups that kept counts instead of values now find their percentiles by narrowing passes: each
          re-reads only the columns it still needs, and collects only the bucket a percentile falls in */
-      if (pct) {
+      const refinePass = async (st, label, limit) => {
         radixPlanStream(st);
         let pass = 1;
         while (radixOpenStream(st) && !stop.asked) {
           pass++;
           const pending = radixPendingBytes(st);
-          if (st.track.bytes + pending > room) {
-            showMemNote("Not run over the whole file: finding exact percentiles for " + num(st.maps[0].size) + " groups needs about " + bytesText(pending) +
-              " more than the running totals already hold, over what this page can hold beside a decoded row group (" + bytesText(room) +
-              "). Group by a column with fewer distinct values, or ask for fewer percentiles.",
-              [{ label: "Run on the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
-            return;
-          }
+          if (st.track.bytes + pending > limit) return { over: pending };
           const need = radixColumns(st);
           for (let i = 0; i < groups.length; i++) {
             if (stop.asked) break;
             const g = groups[i], of = groups.length;
-            progressStep(3, i / of, "pass " + num(pass) + ", row group " + num(i + 1) + " of " + num(of) + ": collecting the buckets the percentiles fall in");
+            progressStep(3, i / of, label + "pass " + num(pass) + ", row group " + num(i + 1) + " of " + num(of) + ": collecting the buckets the percentiles fall in");
             const batch = newTable(dataset);
             batch.plan = table.plan;
             batch.need = need;
@@ -560,11 +553,85 @@ export async function runWhole() {
           if (stop.asked) break;
           radixAdvanceStream(st);
         }
-        if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+        return {};
+      };
+      /* First try the whole thing in one pass. If the running totals outgrow the room, re-read the file in P
+         hash slices instead: with mode "G" each slice holds only the groups whose key hashes into it and is
+         finished (its answer rows kept, its totals let go) before the next; with mode "V" every group is kept
+         but only the distinct values and mode candidates that hash into the slice are, one slice at a time.
+         The file is a read-only store, so re-reading replaces spilling. P doubles until it fits, up to MAX_SLICES. */
+      let P = 1, mode = null, outCols = null, rowsSeen = 0, groupsOut = 0, sliceNote = "";
+      solve: for (;;) {
+        const sliceLimit = (rows) => room - rows * (q.groupBy.length + q.metrics.length) * 16;
+        outCols = null;
+        groupsOut = 0;
+        let st = newAggStream(q, cur.cols, P > 1 ? { P, k: 0, mode } : null);
+        for (let k = 0; k < (mode === "G" ? P : 1); k++) {
+          if (k > 0) st = newAggStream(q, cur.cols, { P, k, mode });
+          const label = mode === "G" ? "slice " + num(k + 1) + " of " + num(P) + ", " : "";
+          const limit = mode === "G" ? sliceLimit(groupsOut) : room;
+          const r = await foldPass(st, label, limit);
+          if (r === "cancel") { showMemNote("Cancelled: nothing was changed."); return; }
+          if (r === "over") {
+            if (P * 2 > MAX_SLICES) {
+              refuseAgg("even split " + num(P) + " ways (each re-reading the file) its running totals (" + num(st.maps[0].size) + " groups so far, and the distinct values or " +
+                "percentile values kept per group) were estimated at " + bytesText(st.track.bytes) + ", over what this page can hold beside a decoded row group (" + bytesText(room) +
+                "). Group by a column with fewer distinct values, or use fewer or lighter metrics.");
+              return;
+            }
+            if (P === 1) {
+              /* the totals of the first pass tell what to slice: groups, or the values kept inside a few groups */
+              mode = hasSetMetrics(q) && st.track.set >= st.track.group && st.track.group * 2 < room ? "V" : "G";
+              if (mode === "G" && !q.groupBy.length) {      /* one group cannot be split by its key */
+                refuseAgg("its running totals were estimated at " + bytesText(st.track.bytes) + ", over what this page can hold beside a decoded row group (" + bytesText(room) +
+                  "), and with no GROUP BY there are no groups to split them by. Use fewer or lighter metrics.");
+                return;
+              }
+              P = Math.max(2, Math.min(MAX_SLICES, 2 ** Math.ceil(Math.log2(Math.max(2, 1.5 * st.track.bytes / room)))));
+            } else P *= 2;
+            sliceNote = mode === "G" ? "groups split " + num(P) + " ways" : "distinct values split " + num(P) + " ways";
+            progressStep(2, 0, sliceNote + "; reading the file again for each");
+            continue solve;
+          }
+          if (mode === "V") {
+            /* the first pass built every group; the rest add only the values of their slice */
+            const rows0 = st.rows, matched0 = st.matched;
+            endValueSlice(st);
+            for (let v = 1; v < P; v++) {
+              st.slice = { P, k: v, mode };
+              st.rows = 0; st.matched = 0;
+              const rv = await foldPass(st, "slice " + num(v + 1) + " of " + num(P) + ", ", room);
+              if (rv === "cancel") { showMemNote("Cancelled: nothing was changed."); return; }
+              st.rows = rows0; st.matched = matched0;
+              if (rv === "over") { if (P * 2 > MAX_SLICES) { refuseAgg("even split " + num(P) + " ways its distinct values did not fit in " + bytesText(room) + ". Use fewer distinct-count metrics."); return; } P *= 2; continue solve; }
+              endValueSlice(st);
+            }
+          }
+          if (pct) {
+            const rr = await refinePass(st, label, mode === "G" ? sliceLimit(groupsOut) : room);
+            if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+            if (rr.over !== undefined) {
+              if (P * 2 > MAX_SLICES || !q.groupBy.length) {
+                refuseAgg("finding exact percentiles for " + num(st.maps[0].size) + " groups needs about " + bytesText(rr.over) +
+                  " more than the running totals already hold, over what this page can hold beside a decoded row group (" + bytesText(room) +
+                  "). Group by a column with fewer distinct values, or ask for fewer percentiles.");
+                return;
+              }
+              mode = "G"; P = Math.max(2, P * 2); sliceNote = "groups split " + num(P) + " ways"; continue solve;
+            }
+          }
+          rowsSeen = st.rows;
+          const part = finishAggStream(st);
+          if (!outCols) outCols = part;
+          else for (let c = 0; c < outCols.length; c++) { const dst = outCols[c].rows, src = part[c].rows; for (let i = 0; i < src.length; i++) dst.push(src[i]); }
+          groupsOut = outCols[0] ? outCols[0].rows.length : 0;
+          for (const m of st.maps) m.clear();
+        }
+        break;
       }
-      progressStep(computeStep, 0.5, num(st.maps[0].size) + " group" + (st.maps[0].size === 1 ? "" : "s") + " from " + num(st.rows) + " rows");
+      progressStep(computeStep, 0.5, num(groupsOut) + " group" + (groupsOut === 1 ? "" : "s") + " from " + num(rowsSeen) + " rows" + (P > 1 ? " (" + sliceNote + ")" : ""));
       await tick();
-      state.agg = { sig: aggSignature(q), dataset, outCols: finishAggStream(st), rows: st.rows, plan, ms: Math.round(performance.now() - t0) };
+      state.agg = { sig: aggSignature(q), dataset, outCols, rows: rowsSeen, plan, ms: Math.round(performance.now() - t0) };
       showMemNote(null);
       runQuery();          /* shows the kept answer; the browsing table is read back narrow, in the finally below */
       return;
