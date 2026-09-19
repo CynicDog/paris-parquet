@@ -363,11 +363,11 @@ export function newWhole(spec) {
   return w;
 }
 /** One row group of the first pass. */
-export function wholeFeed1(w, rows, n) {
-  w.n += n;
-  const kind = w.kind;
-  for (let i = 0; i < n; i++) {
-    const v = rows[i];
+export function wholeFeed1(w, rows, n, index) {
+  const kind = w.kind, total = index ? index.length : n;
+  w.n += total;
+  for (let i = 0; i < total; i++) {
+    const v = rows[index ? index[i] : i];
     if (v === null || v === undefined) { w.nulls++; continue; }
     if (kind === "bool") { if (v === true) w.t++; else if (v === false) w.f++; continue; }
     if (kind === "number" || kind === "temporal") {
@@ -414,15 +414,16 @@ export function wholeStart2(w) {
   else w.hist = new Int32Array(BINS);
 }
 /** One row group of the second pass. */
-export function wholeFeed2(w, rows, n) {
+export function wholeFeed2(w, rows, n, index) {
+  const total = index ? index.length : n;
   if (w.kind === "string") {
     const m = w.exact;
-    for (let i = 0; i < n; i++) { const v = rows[i], c = m.get(v); if (c !== undefined) m.set(v, c + 1); }
+    for (let i = 0; i < total; i++) { const v = rows[index ? index[i] : i], c = m.get(v); if (c !== undefined) m.set(v, c + 1); }
     return;
   }
   const span = w.max - w.min;
-  for (let i = 0; i < n; i++) {
-    const v = rows[i];
+  for (let i = 0; i < total; i++) {
+    const v = rows[index ? index[i] : i];
     if (v === null || v === undefined) continue;
     const x = numeric(v);
     if (isFinite(x)) w.hist[binOf(x, w.min, span)]++;

@@ -4,13 +4,13 @@
 // the internals to the test harness and, when run as a worker, to workers.js.
 
 import { affordableGroups, budgetBytes, bytesText, fitColumns, groupsAhead, groupsBytes, Refusal, setBudgetMB } from "./budget.js";
-import { wholeCard } from "./cards.js";
+import { cardsIdle, cardsPending } from "./cards.js";
 import { decompress, gzipDecompress, lz4BlockDecompress, snappyDecompress, zstdDecompress } from "./codecs.js";
 import { $, fillColumns, groupsLeft, loadMore, readColumnRows, rowsAhead, unfilled } from "./columns.js";
 import { fileSource, hivePartition, isParquetPath, newTable, readDataset } from "./dataset.js";
 import { cellEq, cellKey, colShape, columnStats, datasetShape, diff, initDiff, loadAllBoth, openCompare, renderDiff, rowDiff, schemaDiff, suggestKey } from "./diff.js";
 import { assemble, intersectRanges, mergeRanges, rangeCount, readColumnChunk, readColumnIndex, readOffsetIndex, readPage, readRowsRanges, unionRanges } from "./encoding.js";
-import { initJoin, join, openJoinCompare } from "./join.js";
+import { initJoin, join, openJoinCompare, renderJoin } from "./join.js";
 import { initProgress, progressCancelled, progressFinish, progressSay, progressStart, progressStep } from "./progress.js";
 import { bloomBytes, bloomHas, chunkBounds, clauseCanMatch, clauseGroups, clauseRanges, planReport, planScan, readBloom, runWhole, showPlan, xxh64 } from "./pushdown.js";
 import { AGG_NUMERIC, aggKept, aggregate, compileFilter, newQuery, parseSql, querySql, reorderColumns, runQuery, scopeToBar, sqlTokenize, toggleSort } from "./query.js";
@@ -85,6 +85,8 @@ export function showError(e) {
  * `onCancel` makes the popup's Cancel button (and Escape) available.
  */
 let busyOn = false;
+/** Whether foreground work (a Run, a load, a join) has the popup up: background counting waits for it. */
+export function isBusy() { return busyOn; }
 export function busy(on, text, steps, onCancel) {
   if (on) {
     if (!busyOn) { busyOn = true; progressStart(text || "Working…", steps || null, onCancel || null); }
@@ -219,6 +221,7 @@ export function adoptDataset(dataset, table, name, showCount, keepDisplay) {
     num(dataset.numRows) + " rows x " + num(table.cols.length) + " cols &middot; " +
     num(dataset.numGroups) + " row group" + (dataset.numGroups === 1 ? "" : "s");
   if (diff.on) renderDiff();
+  if (join.on) renderJoin();          /* a panel left open shows the file that is now A, not the one that was */
 }
 
 export async function openEntries(entries, label) {
@@ -487,8 +490,6 @@ export function init() {
       pageTopAt(pth, Array.prototype.indexOf.call(pth.parentNode.children, pth) - 1, +pager.dataset.toppage);
       return;
     }
-    const wf = e.target.closest("tr.r-sum button[data-wf]");
-    if (wf) { wholeCard(+wf.dataset.wf); return; }
     const bar = e.target.closest("tr.r-sum .hist.scopes i, tr.r-sum .top .row.scopes, tr.r-sum .bools.scopes i");
     if (bar) {
       const sth = bar.closest("th");
@@ -571,5 +572,5 @@ if (HOST) HOST.PARIS = { readFooter, readDataset, loadMore, newTable, typeSpec, 
   bloomBytes, groupsLeft, rowsAhead, readOffsetIndex, readColumnIndex, readRowsRanges, clauseRanges,
   intersectRanges, unionRanges, mergeRanges, rangeCount,
   pool, poolStart, workerCan,
-  loadAllBoth, wholeCard, groupsAhead, groupsBytes, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
+  loadAllBoth, cardsIdle, cardsPending, groupsAhead, groupsBytes, setBudgetMB, budgetBytes, progressStart, progressStep, progressFinish, progressCancelled, grow,
   zstdDecompress, snappyDecompress, lz4BlockDecompress, gzipDecompress, fileSource, state };

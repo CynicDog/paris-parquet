@@ -4,8 +4,9 @@
 // through — `querySql()` writes it from the query object, `parseSql()`
 // reads it back. `runQuery()` ties it together against the loaded rows.
 
+import { cardFor } from "./cards.js";
 import { $ } from "./columns.js";
-import { describeScope, showPlan, unscan } from "./pushdown.js";
+import { describeScope, runWhole, showPlan, unscan } from "./pushdown.js";
 import { newRadix, planRadix, RADIX, RADIX_BYTES, radixAdd, radixAdvance, radixOpen, radixPending, radixQuantile, radixVisit } from "./radix.js";
 import { binBounds, fmtValue, lessThan, numeric } from "./types.js";
 import { adoptSql, renderQuery } from "./ui-query-builder.js";
@@ -1041,16 +1042,28 @@ export function scopeToBar(viewIdx, pick) {
   const ci = table.cols.indexOf(col);
   if (!col || ci < 0) return;
   let clause = null;
+  const whole = cardFor(col);
   if (pick.bin != null) {
-    const b = binBounds(col, view.index, view.count, +pick.bin);
-    if (!b) return;
-    const lo = fmtValue(b.lo, col.spec), hi = fmtValue(b.hi, col.spec);
-    clause = lo === hi ? { ci, pred: "eq", value: lo, valueTo: "" } : { ci, pred: "between", value: lo, valueTo: hi };
+    const bin = +pick.bin;
+    if (whole && whole.hist && col.spec.kind === "number" && !col.spec.decimal) {
+      /* a bar of a card over every row: the rows are not all loaded, so the bar's range is what is filtered on
+         (its top edge nudged down, since a value on an edge belongs to the bar above) */
+      const span = whole.max - whole.min, n = whole.hist.length;
+      const lo = whole.min + (span * bin) / n, hi = bin === n - 1 ? whole.max : whole.min + (span * (bin + 1)) / n - span * 1e-9;
+      const t = (x) => String(Number(x.toPrecision(15)));
+      clause = { ci, pred: "between", value: t(lo), valueTo: t(hi) };
+    } else {
+      const b = binBounds(col, view.index, view.count, bin);
+      if (!b) return;
+      const lo = fmtValue(b.lo, col.spec), hi = fmtValue(b.hi, col.spec);
+      clause = lo === hi ? { ci, pred: "eq", value: lo, valueTo: "" } : { ci, pred: "between", value: lo, valueTo: hi };
+    }
   } else if (pick.bool != null) {
     clause = pick.bool === "null" ? { ci, pred: "null", value: "", valueTo: "" }
       : { ci, pred: "eq", value: pick.bool, valueTo: "" };
   } else if (pick.top != null) {
-    const top = col.summary && col.summary.top && col.summary.top[+pick.top];
+    const sum = whole || col.summary;
+    const top = sum && sum.top && sum.top[+pick.top];
     /* an empty string is how a clause says "no value yet", so '' cannot be one */
     if (!top || top[0] === "") return;
     clause = { ci, pred: "eq", value: top[0], valueTo: "" };
@@ -1060,7 +1073,7 @@ export function scopeToBar(viewIdx, pick) {
   if (state.sqlDirty && !adoptSql(false)) return;
   q.filters = scopeFilters(q.filters, clause, table.cols);
   renderQuery();
-  runQuery();
+  runWhole();          /* a query means the whole file, so a click on a bar is run like Run is */
 }
 /** The arrow a header shows: direction, plus its place when there are several. */
 export function sortMark(viewIdx) {

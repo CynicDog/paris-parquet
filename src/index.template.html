@@ -186,11 +186,10 @@ td.v-bool{color:var(--bool)} td.v-binary{color:var(--dim)} td.v-nested{color:var
 .null{color:var(--faint);font-style:italic}
 
 /* ---------- summary cards ---------- */
-.sum{font-size:10.5px;line-height:1.35;color:var(--dim);display:flex;flex-direction:column;gap:2px;height:134px;overflow:hidden}
-.sum .scope{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sum .scope b{color:var(--ink);font-weight:600}
-.sum .wf{font:inherit;font-size:10px;padding:0 5px;margin-left:3px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--accent);cursor:pointer}
-.sum .wf:hover{background:var(--accent-soft)}
+.sum{font-size:10.5px;line-height:1.35;color:var(--dim);display:flex;flex-direction:column;gap:2px;height:120px;overflow:hidden}
+.sum .scope{color:var(--faint);font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#cardprog{flex:none;display:flex;align-items:center;gap:10px;padding:3px 12px;font-size:11px;color:var(--dim);border-bottom:1px solid var(--line)}
+#cardprog progress{flex:0 0 140px;height:6px}
 .sum .kv{display:flex;justify-content:space-between;gap:6px}
 .sum .kv span:last-child{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sum .lab{color:var(--faint)}
@@ -500,6 +499,7 @@ details[open]>summary::before{content:"▾ "}
 
 <div id="stage">
   <div id="memnote" role="status" aria-live="polite" hidden></div>
+  <div id="cardprog" role="status" aria-live="polite" hidden></div>
   <div id="drop">
     <div class="big">Drop a .parquet file here</div>
     <div class="hint">A file, several files, or a whole partitioned folder.

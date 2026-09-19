@@ -230,36 +230,20 @@ const SCENARIOS = {
     });
   },
 
-  /** A card over the whole file for a numeric and a text column: exact, one row group at a time. */
+  /** The summary cards are counted over the whole file in the background, once the file is open, in batches that fit the budget. */
   async cards(s) {
     const o = await open(s); if (!alive(o)) return;
-    for (const name of ["metric_f_000", "cat_s_000", "hi_s_000"]) {
-      await step(s, "whole-file card: " + name, async () => {
-        await s.page.evaluate((n) => { const t = window.PARIS.state.table; return window.PARIS.wholeCard(t.cols.findIndex((c) => c.name === n)); }, name);
-        await idle(s);
-        const card = await s.page.evaluate((n) => {
-          const t = window.PARIS.state.table, c = t.cols.find((x) => x.name === n), w = window.PARIS.state.dataset.whole && window.PARIS.state.dataset.whole.get(c.key);
-          return w ? { n: w.n, nulls: w.nulls, min: w.min, max: w.max, mean: w.mean, count: w.count, distinct: w.distinct, capped: w.distinctCapped, top: w.top && w.top.slice(0, 3) } : null;
-        }, name);
-        return { note: JSON.stringify(card).slice(0, 220), card, name };
+    await step(s, "count every column's card over the whole file (background)", async () => {
+      await s.page.evaluate(() => window.PARIS.cardsIdle());
+      const cards = await s.page.evaluate(() => {
+        const d = window.PARIS.state.dataset, t = window.PARIS.state.table, out = {};
+        for (const n of ["metric_f_000", "cat_s_000", "hi_s_000"]) {
+          const c = t.cols.find((x) => x.name === n), w = d.whole && d.whole.get("\u0001" + c.key);
+          out[n] = w ? { n: w.n, nulls: w.nulls, min: w.min, max: w.max, mean: w.mean, count: w.count, distinct: w.distinct, capped: w.distinctCapped, top: w.top && w.top.slice(0, 3) } : null;
+        }
+        return { out, counted: d.whole ? d.whole.size : 0 };
       });
-    }
-  },
-
-  /** A large-by-small join: the larger side is streamed, so the peak should not follow its row count. Needs --dim SMALL.parquet with an `id` column. */
-  async join(s) {
-    const dim = opt("dim", null);
-    if (!dim) { console.log("  join: pass --dim SMALL.parquet (a file with an id column)"); return; }
-    const o = await open(s); if (!alive(o)) return;
-    await step(s, "Join the file to " + path.basename(dim) + " on id", async () => {
-      await s.page.click("#toggleJoin");
-      await s.page.setInputFiles("#jpicker", dim);
-      await s.page.waitForTimeout(500);
-      await s.page.selectOption("#jkeyA", { label: "id" });
-      await s.page.selectOption("#jkeyB", { label: "id" });
-      await s.page.click("#jrun"); await idle(s);
-      const r = await s.page.evaluate(() => ({ rows: window.PARIS.state.table.rowsLoaded, err: (document.getElementById("err") || {}).textContent || "" }));
-      return { note: `${r.rows.toLocaleString()} result rows ${r.err.slice(0, 200)}`, rows: r.rows };
+      return { note: `${cards.counted} columns counted; ` + JSON.stringify(cards.out).slice(0, 200), cards: cards.out, counted: cards.counted };
     });
   },
 

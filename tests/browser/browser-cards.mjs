@@ -1,6 +1,7 @@
 /**
- * The summary cards above the grid say which rows they describe, and one click makes a card describe the
- * whole file, computed a row group at a time inside the memory budget.
+ * The summary cards above the grid describe every row the view covers, not the rows loaded: they are counted in
+ * the background as soon as a file (or a WHERE with more matches than were read) is on screen, with no button,
+ * one row group at a time inside the memory budget, and a slim status line says so while it happens.
  *
  *   node tests/browser/browser-cards.mjs /tmp/fx/push      (needs sorted.parquet)
  */
@@ -25,52 +26,67 @@ let failed = 0;
 const ok = (s) => console.log("ok   " + s);
 const bad = (s) => { failed++; console.log("FAIL " + s); };
 const idle = () => page.waitForFunction(() => document.getElementById("busy").hidden, null, { timeout: 120000 });
+const counted = () => page.evaluate(() => window.PARIS.cardsIdle());
 const card = (n) => page.$eval("tr.r-sum th:nth-child(" + (n + 1) + ")", (el) => el.textContent.replace(/\s+/g, " ").trim());
 
 await page.goto("file://" + appPath);
 await page.setInputFiles("#picker", path.join(dir, "sorted.parquet"));
 await idle();
-await page.evaluate(() => window.PARIS.setBudgetMB(1));                 /* the whole column of 200,000 rows does not fit; a row group of it does */
 
 /* columns: id, grp, sku, amt */
-const before = await card(1);
-if (/^first 20,000 of 200,000/.test(before) && /file 0/.test(before) && /in file0 – 199999/.test(before)) ok("a card says which rows it describes, and shows what the footer knows of the whole file: " + before.slice(0, 120));
-else bad("id card before: " + before);
+const early = await card(1);
+if (!(await page.$("button[data-wf]")) && !/in file|file 0/.test(early)) ok("there is no button and no separate file-range row on a card: whole-file figures are simply what a card shows");
+else bad("id card early: " + early);
+await page.waitForSelector("#cardprog:not([hidden])", { timeout: 5000 }).then(() => ok("while the rest is counted a status line says so: " + "counting"), () => ok("(the count finished before the status line could be seen)"));
+await counted();
+if (await page.$eval("#cardprog", (el) => el.hidden)) ok("and the status line goes away when it is done");
+else bad("the status line is still showing");
 
-await page.click("tr.r-sum th:nth-child(2) button[data-wf]");
-await idle();
-await page.waitForTimeout(600);
-const after = await card(1);
-if (/^whole file · 200,000 rows/.test(after) && /min0max199999/.test(after) && /mean99999\.5/.test(after)) ok("one click recomputes it over all 200,000 rows under a 1 MB budget: " + after.slice(0, 120));
-else bad("id card after: " + after);
-if (!(await page.$("tr.r-sum th:nth-child(2) button[data-wf]"))) ok("and the button is gone from it");
-else bad("the button is still there");
-
-/* a text column of few distinct values is exact in one pass; one of many is recounted */
-await page.click("tr.r-sum th:nth-child(3) button[data-wf]");
-await idle();
-await page.waitForTimeout(600);
+const id = await card(1);
+if (/min0max199999/.test(id) && /mean99999\.5/.test(id) && !/counting/.test(id)) ok("the id card covers all 200,000 rows, not the 20,000 loaded: " + id.slice(0, 80));
+else bad("id card: " + id);
 const grp = await card(2);
-if (/^whole file · 200,000 rows/.test(grp)) ok("the group column's card: " + grp.slice(0, 100));
+if (/min0max96/.test(grp) && /mean47\.997095/.test(grp)) ok("the group column too: " + grp.slice(0, 60));
 else bad("grp card: " + grp);
-await page.click("tr.r-sum th:nth-child(4) button[data-wf]");
-await idle();
-await page.waitForTimeout(600);
 const sku = await card(3);
-if (/^whole file · 200,000 rows/.test(sku) && /distinct≥4,097/.test(sku)) ok("a text column with 200,000 distinct values keeps a bounded set and says so: " + sku.slice(0, 100));
+if (/distinct≥4,097/.test(sku)) ok("a text column with 200,000 distinct values keeps a bounded set and says so: " + sku.slice(0, 60));
 else bad("sku card: " + sku);
+const amt = await card(4);
+if (/max249\.75mean124\.875/.test(amt)) ok("and the last: " + amt.slice(0, 60));
+else bad("amt card: " + amt);
 
-/* cancelling leaves the card as it was */
-await page.click("tr.r-sum th:nth-child(5) button[data-wf]");
-await page.waitForFunction(() => document.getElementById("progress").open, null, { timeout: 5000 }).catch(() => {});
-await page.keyboard.press("Escape");
+/* a WHERE with more matches than were loaded: the cards count the matches */
+await page.fill("#qsql", 'SELECT * FROM sorted WHERE "id" >= 100000');
+await page.dispatchEvent("#qsql", "input");
+await page.waitForTimeout(400);
+await page.click("#qrun");
+await idle();
+await counted();
+const filtered = await card(1);
+if (/min100000max199999mean149999\.5/.test(filtered)) ok("over a WHERE, the cards count every match, not the first 20,000: " + filtered.slice(0, 70));
+else bad("id card under WHERE: " + filtered);
+
+/* clicking a bar of a whole-file card scopes to that bar and runs over the whole file */
+const barCount = await page.$eval("tr.r-sum th:nth-child(2) .hist i:nth-child(3)", (el) => +el.getAttribute("title").split(" ")[0].replace(/,/g, ""));
+await page.click("tr.r-sum th:nth-child(2) .hist i:nth-child(3)");
 await idle();
 await page.waitForTimeout(600);
-const amt = await card(4);
-if (/whole file/.test(amt) || /^first 20,000/.test(amt)) ok("cancel or finish leaves a consistent card: " + amt.slice(0, 60));
-else bad("amt card: " + amt);
+const after = await page.$eval("#qstat", (el) => el.textContent.replace(/\s+/g, " ").trim());
+if (new RegExp("^" + barCount.toLocaleString("en-US") + " rows").test(after)) ok("a click on a bar runs over the whole file and finds exactly the bar's " + barCount.toLocaleString("en-US") + " rows: " + after.slice(0, 60));
+else bad("bar click: bar " + barCount + ", stat " + after);
+
+/* under a small budget the count still happens, a row group of the visible columns at a time */
+await page.goto("file://" + appPath);
+await page.setInputFiles("#picker", path.join(dir, "sorted.parquet"));
+await idle();
+await page.evaluate(() => window.PARIS.setBudgetMB(1));
+await page.click("#qrun").catch(() => {});
+await counted();
+const small = await card(1);
+if (/min0max199999/.test(small)) ok("under a 1 MB budget the card is still exact: " + small.slice(0, 60));
+else bad("id card under a 1 MB budget: " + small);
 
 if (logs.length) { console.log("\nconsole output:"); for (const l of logs) console.log("  " + l); }
 await browser.close();
-console.log(failed || logs.length ? `\n${failed} check(s) failed` : "\nsummary cards can describe the whole file in a real browser");
+console.log(failed || logs.length ? `\n${failed} check(s) failed` : "\nsummary cards cover every row, with no button, in a real browser");
 process.exit(failed || logs.length ? 1 : 0);

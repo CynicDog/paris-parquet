@@ -105,7 +105,7 @@ async function withPage(fn) {
 await withPage(async (page) => {
   await page.goto("file://" + appPath);
   await page.setInputFiles("#picker", path.join(tmp, "orders.parquet"));
-  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  await page.waitForFunction(() => window.PARIS.state.table && document.getElementById("busy").hidden, null, { timeout: 30000 });    /* the file is open (the button is there before it is) */
   await page.click("#toggleJoin");
   await page.setInputFiles("#jpicker", path.join(tmp, "regions.parquet"));
   await page.waitForTimeout(300);
@@ -174,7 +174,7 @@ await withPage(async (page) => {
 await withPage(async (page) => {
   await page.goto("file://" + appPath);
   await page.setInputFiles("#picker", path.join(tmp, "big.parquet"));
-  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  await page.waitForFunction(() => window.PARIS.state.table && document.getElementById("busy").hidden, null, { timeout: 30000 });    /* the file is open (the button is there before it is) */
   await page.click("#toggleJoin");
   await page.setInputFiles("#jpicker", path.join(tmp, "small.parquet"));
   await page.waitForTimeout(300);
@@ -218,7 +218,7 @@ await withPage(async (page) => {
   await page.goto("file://" + appPath);
   await page.evaluate(() => window.PARIS.setBudgetMB(0.0005));      /* half a kilobyte: these files are tiny */
   await page.setInputFiles("#picker", path.join(tmp, "big.parquet"));
-  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  await page.waitForFunction(() => window.PARIS.state.table && document.getElementById("busy").hidden, null, { timeout: 30000 });    /* the file is open (the button is there before it is) */
   await page.click("#toggleJoin");
   await page.setInputFiles("#jpicker", path.join(tmp, "small.parquet"));
   await page.waitForTimeout(300);
@@ -239,7 +239,7 @@ await withPage(async (page) => {
 await withPage(async (page) => {
   await page.goto("file://" + appPath);
   await page.setInputFiles("#picker", path.join(tmp, "orders.parquet"));
-  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  await page.waitForFunction(() => window.PARIS.state.table && document.getElementById("busy").hidden, null, { timeout: 30000 });    /* the file is open (the button is there before it is) */
   await page.click("#toggleJoin");
   await page.waitForTimeout(200);
 
@@ -326,7 +326,7 @@ await withPage(async (page) => {
 await withPage(async (page) => {
   await page.goto("file://" + appPath);
   await page.setInputFiles("#picker", path.join(tmp, "orders.parquet"));
-  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  await page.waitForFunction(() => window.PARIS.state.table && document.getElementById("busy").hidden, null, { timeout: 30000 });    /* the file is open (the button is there before it is) */
   await page.click("#toggleJoin");
   await page.setInputFiles("#jpicker", path.join(tmp, "regions.parquet"));
   await idle(page);
@@ -517,7 +517,7 @@ await withPage(async (page) => {
 await withPage(async (page) => {
   await page.goto("file://" + appPath);
   await page.setInputFiles("#picker", path.join(tmp, "orders.parquet"));
-  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  await page.waitForFunction(() => window.PARIS.state.table && document.getElementById("busy").hidden, null, { timeout: 30000 });    /* the file is open (the button is there before it is) */
   const plain = await page.evaluate(() => window.PARIS.querySql());
   if (/FROM orders/.test(plain)) ok("a plain file reads FROM <the file>");
   else bad("plain FROM: " + plain);
@@ -571,7 +571,7 @@ await withPage(async (page) => {
 /* --------------------------------------- the larger side is streamed, and the result's size is known first */
 async function joinOn(page, aFile, bFile, keyA, keyB) {
   await page.setInputFiles("#picker", path.join(tmp, aFile));
-  await page.waitForSelector("#toggleJoin:not([hidden])", { timeout: 15000 });
+  await page.waitForFunction(() => window.PARIS.state.table && document.getElementById("busy").hidden, null, { timeout: 30000 });    /* the file is open (the button is there before it is) */
   await page.click("#toggleJoin");
   await page.setInputFiles("#jpicker", path.join(tmp, bFile));
   await page.waitForTimeout(300);
