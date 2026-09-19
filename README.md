@@ -14,9 +14,9 @@ No parquet to hand? [`data/`](data/) is a 39 KB corpus — `customers`, `product
 
 ## Principles
 
-- **Decode only what's asked for.** Hidden columns, columns outside the query and rows past the read budget are never decoded.
+- **Decode only what's asked for.** Hidden columns, columns outside the query and rows past the memory budget are never decoded.
 - **Prove it before skipping it.** Pushdown skips a row group only when the file's own statistics prove it cannot match. Never guessed away.
-- **Refuse rather than half-apply.** Files that disagree on a column's type, SQL the builder can't represent, a diff of a table with no footer — each is named and refused.
+- **Refuse rather than half-apply.** Files that disagree on a column's type, SQL the builder can't represent, a diff of a table with no footer, a query that would not fit in memory — each is named and refused.
 
 ## Features
 
@@ -31,7 +31,9 @@ No parquet to hand? [`data/`](data/) is a 39 KB corpus — `customers`, `product
 - **flat / pivot / rollup / cube.** Pivot reshapes Excel-style; rollup and cube add SQL-standard subtotal rows.
 - The **SQL panel is bidirectional** — edit the text and the zones follow, drag a chip and the text follows. Checked live against the schema; anything the zones can't hold is named, not half-applied.
 
-**Scan file** (predicate pushdown) — off by default. On, it reads the footer's min/max statistics, bloom filters and page index to find which row groups and pages *could* match, reads only those, and reports what it skipped and why.
+**Run searches the whole file.** A `WHERE` is planned against the footer's min/max statistics, bloom filters and page index to find which row groups and pages *could* match; only those are read, and it reports what it skipped and why. An aggregate reads every row of the columns it needs. A line under the query bar always says what the answer on screen covers, so an answer about the first 2.5% of a file never reads like an answer about all of it.
+
+**Memory budget.** Decoded values take several times a file's size in memory, so the page keeps what it holds inside a budget (about 2 GB on a machine that reports 8 GB or more, less on smaller ones). A file that would not fit opens with fewer columns; Load more and Load all stop at the budget; a whole-file aggregate that cannot fit is refused with the numbers and an explicit, labelled way to run on the rows already read. Each says why. Anything that takes long enough to notice shows a progress popup with the steps it is on and a line on why, and Escape cancels it.
 
 **Columns picker** — search, hide, pin, reorder. A hidden column can still be filtered and grouped on without being decoded: `GROUP BY` on 2 of 60 columns reads 2.
 
@@ -41,7 +43,7 @@ No parquet to hand? [`data/`](data/) is a 39 KB corpus — `customers`, `product
 
 **Diff** — schema changes, shape and per-column statistics straight from the two footers, no data page touched; plus a row-level diff on a chosen key (only in A, only in B, `old → new`).
 
-**Also** — cell inspector (full string, hex/ASCII, indented JSON); draggable, remembered panel and column widths; `auto`/`light`/`dark` theme; 20,000 rows read up front, more on demand; decoding handed to spare cores via workers started from the page's own `<script>` text.
+**Also** — cell inspector (full string, hex/ASCII, indented JSON); draggable, remembered panel and column widths; `auto`/`light`/`dark` theme; the first row group (at least 20,000 rows) read up front, more on demand; decoding handed to spare cores via workers started from the page's own `<script>` text.
 
 ## Format support
 
@@ -53,7 +55,7 @@ No parquet to hand? [`data/`](data/) is a 39 KB corpus — `customers`, `product
 | **Types** | every physical type including int96, plus string, enum, json, uuid, decimal (exact — no float rounding), date, time, timestamp ms/us/ns, float16, unsigned ints, interval |
 | **Nesting** | structs, lists, maps and any nesting of them, from repetition/definition levels; one grid column per leaf |
 
-**Limits, on purpose:** a column chunk must live in the file that describes it; encrypted parquet is reported and refused; nanosecond timestamps display at microsecond resolution. A [memory budget with spill-to-disk](https://github.com/CynicDog/paris-parquet/issues/16) for large files and joins is still open.
+**Limits, on purpose:** a column chunk must live in the file that describes it; encrypted parquet is reported and refused; nanosecond timestamps display at microsecond resolution. Memory is bounded for what is decoded, not yet for a high-cardinality `GROUP BY`, a join, or an exact percentile over a very large column: [bounded-memory statistics](https://github.com/CynicDog/paris-parquet/issues/36) and [partitioning by re-reading, with spill as a last resort](https://github.com/CynicDog/paris-parquet/issues/16) are open. How it behaves on a 10-million-row, 200-column file is measured in [docs/stress-test.md](docs/stress-test.md).
 
 ## Developing
 
