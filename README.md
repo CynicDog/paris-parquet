@@ -64,6 +64,7 @@ No parquet to hand? [`data/`](data/) is a 39 KB corpus — `customers`, `product
 ```sh
 npm install     # once, for Biome
 npm run build   # src/*.js + src/index.template.html -> index.html
+npm run build:min   # optional: index.min.html, the same page with its script minified (about 40% smaller); generated, never committed
 npm run lint    # biome, clean
 npm test        # unit tests, plus the integration suite if fixtures exist
 ```

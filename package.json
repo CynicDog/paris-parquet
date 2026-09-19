@@ -7,9 +7,11 @@
     "build": "node scripts/compose.mjs",
     "lint": "biome check src/ tests/ tools/ scripts/",
     "lint:fix": "biome check --write src/ tests/ tools/ scripts/",
-    "test": "node tests/run.mjs"
+    "test": "node tests/run.mjs",
+    "build:min": "node scripts/minify.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.13"
+    "@biomejs/biome": "2.5.13",
+    "terser": "^5.51.2"
   }
 }

@@ -5,3 +5,5 @@
 *.expect.json
 node_modules/
 __pycache__/
+# generated on demand: npm run build:min
+index.min.html
