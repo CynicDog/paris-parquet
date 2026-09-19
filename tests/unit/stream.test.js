@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AGG_MORE, AGGS, aggregate, endValueSlice, feedAggBatch, finishAggStream, matchIndex, newAggStream, radixAdvanceStream, radixFeedBatch, radixOpenStream, radixPlanStream, streamable } from "../../src/query.js";
+import { AGG_MORE, AGGS, aggregate, buildComparator, endValueSlice, feedAggBatch, feedTopK, finishAggStream, matchIndex, newAggStream, newTopK, radixAdvanceStream, radixFeedBatch, radixOpenStream, radixPlanStream, streamable, topKPlan } from "../../src/query.js";
 import { RADIX } from "../../src/radix.js";
 
 const numSpec = { kind: "number", label: "double", physical: "DOUBLE", convert: (v) => v };
@@ -211,4 +211,29 @@ test("slicing is what makes the running estimate small: each slice keeps about 1
   const v1 = sliced(qv, [big, v], n, [n], 1, "V").peak, v8 = sliced(qv, [big, v], n, [n], 8, "V").peak;
   assert.ok(v8 < v1 / 5, `values: ${v8} vs ${v1}`);
   assert.equal(sliced(qv, [big, v], n, [n], 8, "V").out[0].rows[0], n);
+});
+
+test("a bounded ranking keeps exactly the rows a full sort would put first, with ties going to the earlier row", () => {
+  const sort = (specs) => query({ sort: specs.map(([ci, dir]) => ({ id: "s" + ci, ci, dir })) });
+  for (const [specs, k] of [[[[2, "DESC"]], 25], [[[0, "ASC"], [3, "DESC"]], 40], [[[3, "ASC"]], 3000], [[[2, "ASC"], [1, "DESC"]], 1]]) {
+    const q = sort(specs);
+    const all = Array.from({ length: N }, (_, i) => i).sort(buildComparator(q.sort, cols));
+    const t = newTopK(q, k);
+    let at = 0;
+    for (const size of [1, 7, 993, 1, 2998]) { feedTopK(t, slice(cols, at, at + size), size, 0, at, null); at += size; }
+    /* a batch's origin is (part 0, group = where it started); its row is the row inside it */
+    assert.equal(t.row.length, Math.min(k, N));
+    const got = t.row.map((r, i) => t.group[i] + r);
+    assert.deepEqual(got, all.slice(0, k), JSON.stringify(specs) + " top " + k);
+  }
+});
+
+test("the rows a ranking kept are turned into per-row-group ranges to fetch, merged where they touch", () => {
+  const q = query({ sort: [{ id: "s", ci: 3, dir: "ASC" }] });
+  const t = newTopK(q, 6);
+  t.part = [0, 0, 0, 1, 0, 0]; t.group = [2, 2, 2, 0, 1, 2]; t.row = [5, 4, 9, 7, 3, 6];
+  const plan = topKPlan(t);
+  assert.deepEqual([...plan.keys()], ["0:1", "0:2", "1:0"]);
+  assert.deepEqual(plan.get("0:2"), [[4, 7], [9, 10]]);
+  assert.deepEqual(plan.get("0:1"), [[3, 4]]);
 });

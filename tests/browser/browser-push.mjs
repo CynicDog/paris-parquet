@@ -134,6 +134,65 @@ const bstat = await page.$eval("#qstat", (el) => el.textContent.replace(/\s+/g, 
 if (/^1 rows/.test(bstat)) ok("and the one matching row is found: " + bstat);
 else bad("qstat: " + bstat);
 
+/* a sorted query is the top of the whole file, not of the rows that happen to be loaded: the first 20,000 rows of a
+   shuffled file hold neither the biggest nor the smallest ids */
+await page.evaluate(() => window.PARIS.setBudgetMB(1));           /* the ranking must not need the file, or even the columns, in memory */
+const view = (sel) => page.evaluate(() => {
+  const v = window.PARIS.state.view;
+  return v ? { count: v.count, cols: v.cols.map((c) => Array.from({ length: Math.min(8, v.count) }, (_, i) => c.rows[v.index ? v.index[i] : i])), names: v.cols.map((c) => c.name) } : null;
+});
+await typeSql("SELECT * FROM shuffled ORDER BY id DESC LIMIT 5");
+await page.click("#qrun");
+await idle();
+const top5 = await view();
+const ids = top5 && top5.cols[top5.names.indexOf("id")];
+const skus = top5 && top5.cols[top5.names.indexOf("sku")];
+if (ids && JSON.stringify(ids.slice(0, 5)) === JSON.stringify([199999, 199998, 199997, 199996, 199995])) ok("ORDER BY id DESC LIMIT 5 finds the top five of 200,000 rows under a 1 MB budget: " + ids.slice(0, 5));
+else bad("top 5: " + JSON.stringify(top5));
+if (skus && skus[0] === "sku-199999" && skus[4] === "sku-199995") ok("with every column of those rows fetched, not just the sort column: " + skus.slice(0, 2));
+else bad("top 5 skus: " + JSON.stringify(skus));
+const topScope = await page.$eval("#qplan", (el) => el.textContent.replace(/\s+/g, " ").trim());
+if (/^Whole file\. The 5 first rows by id descending of 200,000 that match, found by reading only the sort columns of \d+ row groups/.test(topScope)) ok("and the scope line says how: " + topScope);
+else bad("top scope: " + topScope);
+if (await page.$eval("#more", (b) => b.hidden)) ok("there is no Load more on a top-N: the answer is the five rows");
+else bad("Load more is offered on a top-N");
+const topStat = await page.$eval("#qstat", (el) => el.textContent.replace(/\s+/g, " ").trim());
+if (/^5 rows from the top of 200,000 matching rows/.test(topStat)) ok("qstat: " + topStat);
+else bad("qstat: " + topStat);
+
+await typeSql('SELECT * FROM shuffled WHERE "amt" >= 249 ORDER BY id LIMIT 3');
+await page.click("#qrun");
+await idle();
+const filtered = await view();
+const fids = filtered && filtered.cols[filtered.names.indexOf("id")];
+if (fids && fids.length === 3 && fids.every((v) => (v % 1000) * 0.25 >= 249)) ok("a WHERE is applied while ranking: the three smallest ids with amt >= 249 are " + fids.slice(0, 3));
+else bad("filtered top 3: " + JSON.stringify(filtered));
+if (fids && fids[0] === 996 && fids[1] === 997 && fids[2] === 998) ok("and they are the right ones");
+else bad("filtered top 3 ids: " + JSON.stringify(fids));
+
+/* no LIMIT: the first screenful of the whole-file order, and a header click sorts the whole file, not what is loaded */
+await page.evaluate(() => window.PARIS.setBudgetMB(null));
+await page.click("[data-act='qclear']").catch(() => {});
+await page.evaluate(() => window.PARIS.state.query && (window.PARIS.state.query.active = false));
+await typeSql("SELECT * FROM shuffled ORDER BY id");
+await page.click("#qrun");
+await idle();
+const unl = await view();
+const uids = unl && unl.cols[unl.names.indexOf("id")];
+if (uids && uids.slice(0, 4).join() === "0,1,2,3" && unl.count === 20000) ok("ORDER BY with no LIMIT gives the first 20,000 of the whole file's order, starting at the true minimum: " + uids.slice(0, 4));
+else bad("unlimited sort: " + JSON.stringify(unl && { count: unl.count, ids: uids }));
+await page.click("#qclear");
+await idle();
+await page.click("tr.r-name th:nth-child(2)");                       /* the id header */
+await idle();
+await page.waitForTimeout(600);                                       /* the popup lingers, non-modal, after it */
+await page.click("tr.r-name th:nth-child(2)");                       /* again: descending */
+await idle();
+const hdr = await view();
+const hids = hdr && hdr.cols[hdr.names.indexOf("id")];
+if (hids && hids[0] === 199999) ok("clicking a header twice sorts descending across the whole file, not just the loaded rows: " + hids.slice(0, 3));
+else bad("header sort: " + JSON.stringify(hids));
+
 /* the page index, narrowing inside a row group */
 await page.goto("file://" + appPath);
 await page.setInputFiles("#picker", path.join(dir, "pages.parquet"));

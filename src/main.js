@@ -11,7 +11,7 @@ import { cellEq, cellKey, colShape, columnStats, datasetShape, diff, initDiff, l
 import { assemble, intersectRanges, mergeRanges, rangeCount, readColumnChunk, readColumnIndex, readOffsetIndex, readPage, readRowsRanges, unionRanges } from "./encoding.js";
 import { initJoin, join, openJoinCompare } from "./join.js";
 import { initProgress, progressCancelled, progressFinish, progressSay, progressStart, progressStep } from "./progress.js";
-import { bloomBytes, bloomHas, chunkBounds, clauseCanMatch, clauseGroups, clauseRanges, planReport, planScan, readBloom, showPlan, xxh64 } from "./pushdown.js";
+import { bloomBytes, bloomHas, chunkBounds, clauseCanMatch, clauseGroups, clauseRanges, planReport, planScan, readBloom, runWhole, showPlan, xxh64 } from "./pushdown.js";
 import { AGG_NUMERIC, aggKept, aggregate, compileFilter, newQuery, parseSql, querySql, reorderColumns, runQuery, scopeToBar, sqlTokenize, toggleSort } from "./query.js";
 import { readFooter } from "./thrift.js";
 import { fmtValue, summarize, typeSpec } from "./types.js";
@@ -476,7 +476,7 @@ export function init() {
     if (th) {
       if (th.classList.contains("rownum")) return;
       const idx = Array.prototype.indexOf.call(th.parentNode.children, th) - 1;
-      if (idx >= 0) toggleSort(idx, e.shiftKey);
+      if (idx >= 0) toggleSort(idx, e.shiftKey, () => (state.view && !state.view.agg ? runWhole() : runQuery()));
       return;
     }
     const pager = e.target.closest("tr.r-sum .top .pager button");

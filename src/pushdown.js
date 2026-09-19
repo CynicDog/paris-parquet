@@ -10,11 +10,11 @@ import { newTable } from "./dataset.js";
 import { intersectRanges, mergeRanges, rangeCount, readColumnIndex, readOffsetIndex, unionRanges } from "./encoding.js";
 import { busy, FIRST_ROWS, showError, showMemNote, updateButtons } from "./main.js";
 import { progressStep } from "./progress.js";
-import { aggKept, aggSignature, compileFilter, endValueSlice, feedAggBatch, finishAggStream, hasSetMetrics, isQuantile, newAggStream, parseOperand, radixAdvanceStream, radixColumns, radixFeedBatch, radixOpenStream, radixPendingBytes, radixPlanStream, runQuery, sortKey, streamable, textOf } from "./query.js";
+import { aggKept, aggSignature, compileFilter, endValueSlice, feedAggBatch, feedTopK, finishAggStream, hasSetMetrics, isQuantile, newAggStream, newTopK, parseOperand, radixAdvanceStream, radixColumns, radixFeedBatch, radixOpenStream, radixPendingBytes, radixPlanStream, runQuery, sortKey, streamable, textOf, topKBytes, topKPlan } from "./query.js";
 import { thriftStruct } from "./thrift.js";
 import { rawStat, renderMeta } from "./ui-metadata.js";
 import { adoptSql } from "./ui-query-builder.js";
-import { baseView, bytesHuman, neededColumns, newDisplay, num, setView, state } from "./view.js";
+import { baseView, bytesHuman, esc, neededColumns, newDisplay, num, setView, state } from "./view.js";
 
 export const PAGE_NARROW_MIN = 4096;
 /* and narrowing that leaves most of the group behind is not narrowing */
@@ -427,6 +427,13 @@ const RUN_STEPS_PCT = RUN_STEPS.slice(0, 3).concat([
 ], RUN_STEPS.slice(3));
 /** The most hash slices a streamed aggregate is split into: each costs one more read of the file. */
 const MAX_SLICES = 64;
+/* a sorted query has different steps: rank every row group by its sort column alone, then fetch just the winners */
+const TOP_STEPS = [
+  RUN_STEPS[0],
+  RUN_STEPS[1],
+  { label: "Rank", why: "Reading only the ORDER BY and WHERE columns of each row group and keeping the best rows seen so far, so the memory held is the rows you asked for, not the file." },
+  { label: "Fetch", why: "Reading the other columns of just those rows, and only the pages that hold them." },
+];
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 /** Frees the decoded rows a table holds, so its replacement can be read without both in memory at once. */
@@ -467,13 +474,15 @@ export async function runWhole() {
      that would keep the columns of every earlier query in memory too, so what is held would grow with
      the history of queries instead of with what this one needs. It is rebuilt with just what is needed. */
   const complete = cur.rowsLoaded >= dataset.numRows && !cur.scan && !unfilled(cur, [...neededColumns(cur, true)]).length;
-  if ((!hasWhere && !agg) || complete) { runQuery(); return; }
+  /* a sorted list of rows is the top of the whole file, not of whichever rows happen to be loaded */
+  const top = !agg && q.mode !== "agg" && q.sort.length > 0 && q.limit !== 0 && !complete;
+  if (!top && ((!hasWhere && !agg) || complete)) { runQuery(); return; }
   const stop = { asked: false };
   let needRestore = false;
   const pct = !!agg && q.metrics.some((m) => isQuantile(m.agg));
-  const steps = pct ? RUN_STEPS_PCT : RUN_STEPS;
+  const steps = top ? TOP_STEPS : pct ? RUN_STEPS_PCT : RUN_STEPS;
   const computeStep = steps.length - 1;
-  busy(true, agg ? "Aggregating the whole file" : "Searching the whole file", steps, () => { stop.asked = true; });
+  busy(true, agg ? "Aggregating the whole file" : top ? "Sorting the whole file" : "Searching the whole file", steps, () => { stop.asked = true; });
   await tick();
   try {
     progressStep(0, 0.1, hasWhere ? "reading row group statistics for the WHERE clause" : "no WHERE clause, so every row group is needed");
@@ -486,6 +495,73 @@ export async function runWhole() {
     table.need = neededColumns(table, true);
 
     progressStep(1, 0.3, "estimating the size of the row groups that remain");
+    if (top) {
+      /* phase 1 ranks: only the sort and WHERE columns of each planned row group are read, one group at a time,
+         and the K best rows are kept as sort values plus where they came from */
+      const K = q.limit != null ? q.limit : FIRST_ROWS;
+      const rank = new Set([...q.sort.map((s) => s.ci), ...q.filters.map((f) => f.ci)].filter((ci) => cur.cols[ci]));
+      const rankCols = [...rank];
+      const probe = newTable(dataset);
+      probe.plan = table.plan;
+      probe.need = rank;
+      const budget = budgetBytes();
+      const all = groupsAhead(dataset, probe, Infinity);
+      const biggest = all.reduce((mx, g) => Math.max(mx, groupsBytes(dataset, probe, [g], rankCols)), 0);
+      const held = topKBytes(K, new Set(q.sort.map((s) => s.ci)).size);
+      const refuse = (why) => showMemNote("Not sorted over the whole file: " + why,
+        [{ label: "Sort the " + num(cur.rowsLoaded) + " rows already read", run: () => { showMemNote(null); runQuery(); } }]);
+      if (biggest + held > budget) {
+        refuse("one row group of the ORDER BY and WHERE columns takes about " + bytesText(biggest) + " once decoded, and ranking " + num(K) + " rows about " +
+          bytesText(held) + ", over this page's " + bytesText(budget) + " memory budget. Use a smaller LIMIT or sort by fewer columns.");
+        return;
+      }
+      if (heldBytes(dataset, cur) > 0) { releaseRows(cur); state.view = null; needRestore = true; }
+      const tk = newTopK(q, K);
+      const t0 = performance.now();
+      for (let i = 0; i < all.length; i++) {
+        if (stop.asked) break;
+        const g = all[i], of = all.length;
+        progressStep(2, i / of, "row group " + num(i + 1) + " of " + num(of) + ": reading the sort column" + (rankCols.length > 1 ? "s" : "") + " (" + num(tk.seen) + " rows ranked)");
+        const batch = newTable(dataset);
+        batch.plan = table.plan;
+        batch.need = rank;
+        batch.nextPart = g.pi;
+        batch.nextGroup = g.gi;
+        await loadMore(dataset, batch, 1);
+        if (stop.asked) break;
+        feedTopK(tk, batch.cols, batch.rowsLoaded, g.pi, g.gi, table.plan ? table.plan.get(g.pi + ":" + g.gi) : null);
+        await tick();
+      }
+      if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+      /* phase 2: read the winners' other columns, through the ranges they sit in */
+      const winners = newTable(dataset);
+      winners.plan = topKPlan(tk);
+      winners.need = neededColumns(winners, true);
+      const wgroups = groupsAhead(dataset, winners, Infinity);
+      const wcols = [...winners.need];
+      const wcost = groupsBytes(dataset, winners, wgroups, wcols);
+      if (wcost > budget) {
+        refuse("the " + num(tk.row.length) + " rows it needs to show, with " + num(wcols.length) + " column" + (wcols.length === 1 ? "" : "s") + ", would take about " +
+          bytesText(wcost) + " once decoded, over this page's " + bytesText(budget) + " memory budget. Use a smaller LIMIT or show fewer columns.");
+        return;
+      }
+      progressStep(3, 0, num(tk.row.length) + " rows in " + num(wgroups.length) + " row group" + (wgroups.length === 1 ? "" : "s"));
+      await loadMore(dataset, winners, Infinity, (_pi, _gi, ci, n) => {
+        progressStep(3, (winners.groupsLoaded + ci / n) / Math.max(1, wgroups.length), "row group " + num(Math.min(wgroups.length, winners.groupsLoaded + 1)) + " of " + num(wgroups.length));
+      });
+      if (stop.asked) { showMemNote("Cancelled: nothing was changed."); return; }
+      winners.topk = { k: K, seen: tk.seen, groups: all.length, ms: Math.round(performance.now() - t0) };
+      /* it stands in for a scan: leaving the query reads the file again the ordinary way */
+      winners.scan = plan || { total: dataset.numGroups, kept: all.length, rows: tk.seen, rowsTotal: dataset.numRows, bytesKept: 0, bytesTotal: 0, ms: 0, narrowed: 0 };
+      state.table = winners;
+      needRestore = false;
+      if (state.display.order.length !== winners.cols.length) state.display = newDisplay(winners.cols);
+      renderMeta();
+      updateButtons();
+      showMemNote(null);
+      runQuery();
+      return;
+    }
     const groups = groupsAhead(dataset, table, agg ? Infinity : FIRST_ROWS);
     const cols = [...table.need];
     const budget = budgetBytes();
@@ -690,6 +766,13 @@ export function describeScope() {
   const kept = aggKept();
   if (kept) {
     showPlan("<b>Whole file.</b> " + (kept.plan ? "Aggregated over " + planReport(kept.plan) + "." : "Searched all " + num(kept.rows) + " rows."));
+    return;
+  }
+  if (t.topk) {
+    const names = q.sort.map((s) => (t.cols[s.ci] ? t.cols[s.ci].name : "") + (s.dir === "DESC" ? " descending" : "")).filter(Boolean).join(", ");
+    showPlan("<b>Whole file.</b> The " + num(t.rowsLoaded) + " first rows by " + esc(names) + " of " + num(t.topk.seen) + " that match, found by reading only the sort" +
+      (q.filters.length ? " and WHERE" : "") + " columns of " + num(t.topk.groups) + " row group" + (t.topk.groups === 1 ? "" : "s") + " in " + num(t.topk.ms) + " ms" +
+      (t.scan && t.scan.total > t.scan.kept ? " (" + num(t.scan.total - t.scan.kept) + " more ruled out by the footer)" : "") + ".");
     return;
   }
   if (t.scan) {

@@ -838,7 +838,7 @@ export function runQuery() {
   const scan = kept ? kept.plan : table.scan;
   const partial = !kept && table.truncated;
   $("qstat").innerHTML = "<b>" + num(view.count) + "</b> " + (view.agg ? "groups" : "rows") +
-    " from " + (partial ? "the first " + num(n) + " of " + num(ofTotal) + " rows" : num(n)) + " &middot; " + (kept ? kept.ms : ms) + " ms" +
+    " from " + (table.topk ? "the top of " + num(table.topk.seen) + " matching rows" : partial ? "the first " + num(n) + " of " + num(ofTotal) + " rows" : num(n)) + " &middot; " + (kept ? kept.ms : ms) + " ms" +
     (skipped ? " &middot; <em class='qwarn'>" + skipped + " clause" + (skipped === 1 ? "" : "s") +
       " skipped</em>" : "") +
     (scan ? " &middot; over " + num(scan.kept) + " of " + num(scan.total) +
@@ -846,6 +846,76 @@ export function runQuery() {
   $("qclear").disabled = false;
   describeScope();
 }
+/* ---- the top rows of the whole file, without holding the file ---- */
+/**
+ * A bounded ranking: the K best rows seen so far by the query's ORDER BY, each kept as just its sort values and
+ * where it came from (part, row group, row number). Memory is K rows of the sort columns, however many rows go by.
+ */
+export function newTopK(q, k) {
+  const sortCis = [...new Set(q.sort.map((s) => s.ci))];
+  return { q, k, sortCis, best: sortCis.map(() => []), part: [], group: [], row: [], seen: 0 };
+}
+/** The row-group row number of each row of a batch that was read through `sel` ranges (null: the whole group, so the same). */
+function rowNumbers(sel, n) {
+  if (!sel) return null;
+  const out = new Int32Array(n);
+  let at = 0;
+  for (const [a, b] of sel) for (let r = a; r < b && at < n; r++) out[at++] = r;
+  return out;
+}
+/** Folds one row group's sort and WHERE columns into the ranking: rows that cannot beat the current K-th are never copied. */
+export function feedTopK(t, cols, n, pi, gi, sel) {
+  const q = t.q, index = matchIndex(q, cols, n);
+  const total = index ? index.length : n;
+  t.seen += total;
+  if (!total) return;
+  const nb = t.row.length, at = rowNumbers(sel, n);
+  const comb = cols.map(() => null);
+  t.sortCis.forEach((ci, s) => {
+    const src = cols[ci].rows, rows = t.best[s].slice();
+    for (let i = 0; i < total; i++) rows.push(src[index ? index[i] : i]);
+    comb[ci] = { spec: cols[ci].spec, rows };
+  });
+  const cmp = buildComparator(q.sort, comb);
+  const worst = nb >= t.k ? nb - 1 : -1;
+  const cand = [];
+  for (let i = 0; i < nb; i++) cand.push(i);
+  for (let i = nb; i < nb + total; i++) if (worst < 0 || cmp(worst, i) > 0) cand.push(i);
+  cand.sort(cmp);
+  const keep = cand.slice(0, t.k);
+  t.best = t.sortCis.map((ci) => keep.map((i) => comb[ci].rows[i]));
+  const part = [], group = [], row = [];
+  for (const i of keep) {
+    if (i < nb) { part.push(t.part[i]); group.push(t.group[i]); row.push(t.row[i]); continue; }
+    const r = index ? index[i - nb] : i - nb;
+    part.push(pi); group.push(gi); row.push(at ? at[r] : r);
+  }
+  t.part = part; t.group = group; t.row = row;
+}
+/** Where the kept rows live, as the per-row-group ranges a table can be read through. */
+export function topKPlan(t) {
+  const by = new Map();
+  for (let i = 0; i < t.row.length; i++) {
+    const key = t.part[i] + ":" + t.group[i];
+    const list = by.get(key) || [];
+    if (!list.length) by.set(key, list);
+    list.push(t.row[i]);
+  }
+  const plan = new Map();
+  for (const [key, rows] of [...by].sort((a, b) => { const [pa, ga] = a[0].split(":"), [pb, gb] = b[0].split(":"); return pa - pb || ga - gb; })) {
+    rows.sort((a, b) => a - b);
+    const ranges = [];
+    for (const r of rows) {
+      const last = ranges[ranges.length - 1];
+      if (last && last[1] === r) last[1] = r + 1; else ranges.push([r, r + 1]);
+    }
+    plan.set(key, ranges);
+  }
+  return plan;
+}
+/** What a ranking of K rows costs to hold, in bytes: its sort values and where each row came from. */
+export const topKBytes = (k, sortCols) => k * (sortCols * 16 + 40);
+
 /** Which output column a sort clause means in aggregate mode, or -1. */
 export function aggSortIndex(q, s) {
   if (q.groupMode === "PIVOT" && q.groupBy.length >= 1) {
@@ -878,7 +948,7 @@ export function aggSort(q, _cols, outCols) {
  * the ORDER BY zone and the SQL never disagree about how the rows are sorted.
  * Shift-click adds a key instead of replacing.
  */
-export function toggleSort(viewIdx, additive) {
+export function toggleSort(viewIdx, additive, rerun) {
   const view = state.view, q = state.query, table = state.table;
   if (!view || !table) return;
   const col = view.cols[viewIdx];
@@ -903,7 +973,7 @@ export function toggleSort(viewIdx, additive) {
   else if (q.sort[at].dir === "ASC") q.sort[at].dir = "DESC";
   else q.sort.splice(at, 1);
   renderQuery();
-  runQuery();
+  (rerun || runQuery)();
 }
 /**
  * Drags a header to a new position among the columns on screen. SELECT is

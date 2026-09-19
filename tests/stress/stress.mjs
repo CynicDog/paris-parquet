@@ -248,6 +248,20 @@ const SCENARIOS = {
     });
   },
 
+  /** The top rows of the whole file by a column: ranking reads that one column a row group at a time. */
+  async topn(s) {
+    const o = await open(s); if (!alive(o)) return;
+    await step(s, "Run: top 100 by metric_f_000 (whole file)", async () => {
+      await setSql(s, "SELECT id, metric_f_000, cat_s_000\nFROM t\nORDER BY metric_f_000 DESC, id\nLIMIT 100;");
+      await s.page.click("#qrun"); await idle(s);
+      const got = await s.page.evaluate(() => {
+        const v = window.PARIS.state.view;
+        return v ? { n: v.count, ids: Array.from({ length: Math.min(100, v.count) }, (_, i) => v.cols[0].rows[v.index ? v.index[i] : i]), first: v.cols[1].rows[v.index ? v.index[0] : 0] } : null;
+      });
+      return { note: `${got && got.n} rows, largest ${got && got.first} | ` + (await text(s, "#qplan")).replace(/\s+/g, " ").trim().slice(0, 160), ids: got && got.ids, largest: got && got.first };
+    });
+  },
+
   async "pct-all"(s) {
     const o = await open(s); if (!alive(o)) return;
     await step(s, "Run: P99 of one column (whole file)", async () => {
