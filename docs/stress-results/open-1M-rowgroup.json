@@ -1,0 +1,21 @@
+{
+ "file": "/private/tmp/claude-501/-Users-eunsang-Documents-Sources-paris-parquet/64a35111-9357-4c6e-817e-0953fde9a5d1/scratchpad/big/big_1M_rg1M.parquet",
+ "limitMB": 9000,
+ "when": "2026-09-19T15:20:15.345Z",
+ "results": [
+  {
+   "label": "open file",
+   "ms": 1029,
+   "peakRssMB": 484,
+   "rssMB": 484,
+   "heapMB": 29,
+   "outcome": "ok",
+   "note": "20,000 of 1,000,000 rows, 200 of 200 cols shown, 1 row groups",
+   "rows": 20000,
+   "fileRows": 1000000,
+   "cols": 200,
+   "shown": 200,
+   "groups": 1
+  }
+ ]
+}

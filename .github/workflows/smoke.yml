@@ -1,0 +1,70 @@
+# The browser tier and a reduced stress run, on every push and pull request.
+#
+# pages.yml runs lint and the unit tier; this runs what needs a real browser and real parquet files:
+# the integration corpus (pyarrow-written, checked against duckdb), the browser suites that exercise
+# the memory budget, the progress popup, whole-file Run, sorting, joins and cards, and a reduced stress
+# smoke that fails if a whole-file aggregate's memory starts following the row count. The stress smoke
+# also proves the Linux memory measure (tests/stress/memory.mjs) works on a machine other than the one
+# it was written on.
+name: Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: npm ci
+      - run: pip install pyarrow numpy pandas duckdb
+
+      # not a dependency of the repo (the tests only need it here); pinned so a browser update cannot move the numbers
+      - run: npm install --no-save playwright@1.63.0
+      - run: npx playwright install --with-deps chromium
+
+      - name: Build matches the committed page
+        run: |
+          npm run build
+          git diff --exit-code -- index.html
+
+      - name: Fixture corpus
+        run: python3 tests/support/fixtures.py /tmp/fx
+
+      - name: Integration tier
+        run: node tests/run.mjs /tmp/fx
+
+      - name: Browser tier
+        run: |
+          set -e
+          node tests/browser/browser-memory.mjs /tmp/fx/push
+          node tests/browser/browser-push.mjs /tmp/fx/push
+          node tests/browser/browser-partial.mjs /tmp/fx
+          node tests/browser/browser-cards.mjs /tmp/fx/push
+          node tests/browser/browser-join.mjs
+          node tests/browser/browser-lazy.mjs /tmp/fx/wide.parquet
+          node tests/browser/browser-metrics.mjs /tmp/fx/basic_snappy.parquet
+
+      - name: Reduced stress smoke (memory must not follow the row count)
+        run: node tests/stress/smoke.mjs

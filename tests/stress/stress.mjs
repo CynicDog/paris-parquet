@@ -28,11 +28,11 @@
  * cat_s_000), and playwright as the other browser tests do.
  */
 
-import { execSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { killTree, memoryProbe } from "./memory.mjs";
 
 const { chromium } = createRequire(import.meta.url)("playwright");
 const argv = process.argv.slice(2);
@@ -46,45 +46,10 @@ const appPath = opt("app", path.join(path.dirname(new URL(import.meta.url).pathn
 const results = [];
 const mb = (n) => Math.round(n);
 
-/**
- * Physical memory, in MB, of the browser process and every process under it, as
- * macOS's `footprint` reports it. That is deliberately not resident size: under memory
- * pressure the OS compresses and swaps a renderer's pages, its resident size drops, and
- * a limit based on it never fires while the machine is being pushed over. (An earlier
- * version of this script did exactly that: a renderer at 13 GB read as 2 GB.) Child
- * processes do not carry the profile path on their command line, so the tree is walked
- * from the one process that does. Falls back to resident size where `footprint` is missing.
- */
-function memoryMB(dir) {
-  let out = "";
-  try { out = execSync("ps -axo pid=,ppid=,rss=,command=", { maxBuffer: 1 << 26 }).toString(); } catch (_e) { return 0; }
-  const rows = [], kids = new Map();
-  for (const line of out.split("\n")) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-    if (!m) continue;
-    const r = { pid: +m[1], ppid: +m[2], rss: +m[3], cmd: m[4] };
-    rows.push(r);
-    if (!kids.has(r.ppid)) kids.set(r.ppid, []);
-    kids.get(r.ppid).push(r);
-  }
-  const tree = [], seen = new Set();
-  const walk = (r) => { if (seen.has(r.pid)) return; seen.add(r.pid); tree.push(r); for (const k of kids.get(r.pid) || []) walk(k); };
-  for (const r of rows.filter((x) => x.cmd.includes(dir) && !x.cmd.includes("--type="))) walk(r);
-  if (!tree.length) return 0;
-  try {
-    const fp = execSync("footprint " + tree.map((r) => "-p " + r.pid).join(" ") + " 2>/dev/null", { maxBuffer: 1 << 26 }).toString();
-    let mb = 0, hits = 0;
-    for (const line of fp.split("\n")) {
-      const m = /\[\d+\].*Footprint:\s*([\d.]+)\s*(KB|MB|GB)/.exec(line);
-      if (!m) continue;
-      hits++;
-      mb += +m[1] * (m[2] === "GB" ? 1024 : m[2] === "KB" ? 1 / 1024 : 1);
-    }
-    if (hits) return mb;
-  } catch (_e) { /* fall through */ }
-  return tree.reduce((n, r) => n + r.rss, 0) / 1024;
-}
-const rssMB = memoryMB;
+/* memory is measured per platform by tests/stress/memory.mjs, which stops rather than fall back to a measure that cannot see swapped memory */
+const probe = memoryProbe(argv.includes("--allow-rss"));
+const rssMB = (dir) => probe.mb(dir);
+console.log("memory measured as: " + probe.what);
 
 async function fresh() {
   const dir = mkdtempSync(path.join(os.tmpdir(), "paris-stress-"));
@@ -103,7 +68,7 @@ async function fresh() {
 }
 async function close(s) {
   try { await s.context.close(); } catch (_e) { /* killed */ }
-  try { execSync(`pkill -f ${JSON.stringify(s.dir)}`); } catch (_e) { /* none left */ }
+  killTree(s.dir, false);
   try { rmSync(s.dir, { recursive: true, force: true }); } catch (_e) { /* best effort */ }
 }
 async function heap(s) {
@@ -121,7 +86,7 @@ async function step(s, label, fn) {
   const iv = setInterval(() => {
     const r = rssMB(s.dir);
     if (r > peak) peak = r;
-    if (r > LIMIT_MB && !over) { over = true; try { execSync(`pkill -9 -f ${JSON.stringify(s.dir)}`); } catch (_e) { /* gone */ } }
+    if (r > LIMIT_MB && !over) { over = true; killTree(s.dir, true); }
   }, 150);
   const t0 = performance.now();
   let value, error = null;
@@ -220,6 +185,9 @@ const SCENARIOS = {
   /** Only metrics that fold into running totals: memory should not depend on how many rows there are. */
   async "agg-mergeable"(s) {
     const o = await open(s); if (!alive(o)) return;
+    /* --budget-mb N: the page's own memory budget for this run, after opening. Holding the columns the query names would
+       not fit under a small one, so a run that completes under it proves the aggregate folds one row group at a time. */
+    if (opt("budget-mb", null)) await s.page.evaluate((n) => window.PARIS.setBudgetMB(n), +opt("budget-mb", 0));
     await step(s, "Run: COUNT/AVG/STD/MIN/MAX by group", async () => {
       await setSql(s, "SELECT cat_s_000, COUNT(*), AVG(metric_f_000), STDDEV_SAMP(metric_f_001), MIN(metric_f_002), MAX(count_l_003), SUM(count_l_004)\nFROM t\nGROUP BY cat_s_000;");
       await s.page.click("#qrun"); await idle(s);

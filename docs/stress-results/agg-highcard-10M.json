@@ -1,0 +1,44 @@
+{
+ "file": "/private/tmp/claude-501/-Users-eunsang-Documents-Sources-paris-parquet/64a35111-9357-4c6e-817e-0953fde9a5d1/scratchpad/big/big_10000000.parquet",
+ "limitMB": 9000,
+ "when": "2026-09-19T15:06:44.735Z",
+ "results": [
+  {
+   "label": "open file",
+   "ms": 2834,
+   "peakRssMB": 1219,
+   "rssMB": 1219,
+   "heapMB": 120,
+   "outcome": "ok",
+   "note": "250,000 of 10,000,000 rows, 200 of 200 cols shown, 40 row groups",
+   "rows": 250000,
+   "fileRows": 10000000,
+   "cols": 200,
+   "shown": 200,
+   "groups": 40
+  },
+  {
+   "label": "Run: COUNT(DISTINCT hi_s_000) over the whole file",
+   "ms": 11162,
+   "peakRssMB": 3437,
+   "rssMB": 3437,
+   "heapMB": 502,
+   "outcome": "ok",
+   "note": "[9988311,10000000] | Whole file. Searched all 10,000,000 rows.",
+   "distinct": 9988311,
+   "count": 10000000
+  },
+  {
+   "label": "Run: SELECT id, COUNT(*), SUM(metric_f_000) GROUP BY id (one group per row)",
+   "ms": 23898,
+   "peakRssMB": 4902,
+   "rssMB": 4229,
+   "heapMB": 1045,
+   "outcome": "ok",
+   "note": "10,000,000 groups, counts add to 10,000,000 | ",
+   "groups": 10000000,
+   "countSum": 10000000,
+   "sum": 5000489153.249587
+  }
+ ]
+}

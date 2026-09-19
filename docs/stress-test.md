@@ -22,6 +22,14 @@ node tests/stress/stress.mjs /tmp/big.parquet --scenarios open,grow,scan-narrow,
 
 Not part of `npm test`: the files are gigabytes. Scenarios: `open`, `grow` (press Load more until the page stops), `filter`, `scan-narrow` (a `WHERE` on the clustered key), `scan-broad`, `agg` (a grouped percentile), `pct-all` (one column's P99), `cancel` (Escape mid-run), and `calibrate` (memory per column kind).
 
+## Platforms, the smoke, and recorded results
+
+`tests/stress/memory.mjs` measures each platform by what the process really holds, including memory the OS has compressed or swapped: macOS `footprint`, Linux `/proc/<pid>/smaps_rollup` (Pss plus Swap), Windows `PrivateMemorySize64`. On a platform with none of these it **refuses to run** unless `--allow-rss` is given, and then says the numbers cannot be trusted under pressure. The macOS and Linux paths have been run (Linux by CI, `.github/workflows/smoke.yml`); the Windows path is written from the commands' documented behaviour and **has not been run on Windows**.
+
+`node tests/stress/smoke.mjs` is the reduced run CI does on every push: it generates a 250,000-row and a 1,000,000-row file of the same shape, and fails if the whole-file aggregate over the larger one (a) does not cover every row, (b) is not answered under a 64 MB page budget that holding its columns would not fit (the invariant that does not depend on the garbage collector), or (c) peaks at more than 1.3x the smaller file's peak plus 80 MB. Run against the build from before streaming aggregation (`52e9470`), it fails (a) and (b). The rest of the workflow runs the integration corpus and the browser suites that exercise the budget, popup, sorting, joins and cards.
+
+Results of the large runs are kept in [`stress-results/`](stress-results/) as the harness's `--json` output, so a regression shows in a diff: `open-1M-rowgroup.json` (opening a 1 M-row row group), `agg-highcard-10M.json`, `topn-10M.json`, `cards-10M.json` (10 M rows, 200 columns) and `calibrate-extra-500k.json` (estimate against measurement per column kind). `--dim` and `--budget-mb` select the join and budgeted-aggregate scenarios.
+
 ## How memory is measured, and a mistake in it
 
 The harness sums the **physical footprint** (macOS `footprint`) of every process the browser started, every 150 ms, and kills the browser at a limit (default 3.5 GB). It does not use resident size. An earlier version did, and the first unguarded run showed why that is wrong: the renderer's resident size read about 2 GB while its physical footprint was **13 GB** (peak 14) on a 16 GB machine, because the OS had compressed and swapped the rest. The guard never fired, the machine was pushed into heavy compression for about ten minutes before the run was stopped by hand, and it recovered afterwards. Anything that watches memory by resident size under pressure is blind in exactly the case that matters.
